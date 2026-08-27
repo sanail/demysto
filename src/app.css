@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* The window follows the operating system's appearance; Demysto is a utility
+   that sits inside other people's work, not a place with its own theme. */
+html {
+  color-scheme: light dark;
+}

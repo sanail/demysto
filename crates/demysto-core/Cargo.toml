@@ -1,0 +1,10 @@
+[package]
+name = "demysto-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Demysto's product logic, independent of any user interface toolkit."
+
+[dependencies]
+serde.workspace = true
+dirs = "6"

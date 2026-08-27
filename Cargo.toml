@@ -1,0 +1,12 @@
+[workspace]
+members = ["crates/demysto-core", "src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+demysto-core = { path = "crates/demysto-core" }
+serde = { version = "1", features = ["derive"] }
