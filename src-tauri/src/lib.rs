@@ -80,6 +80,7 @@ pub fn run() {
             commands::last_capture,
             commands::run,
             commands::last_run,
+            commands::show_answers_on,
             commands::dismiss,
         ])
         .build(tauri::generate_context!())

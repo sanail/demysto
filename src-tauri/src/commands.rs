@@ -5,6 +5,7 @@
 //! worth testing belongs in `demysto-core`, behind the single test seam, not here.
 
 use demysto_core::{CaptureOutcome, Demysto, RunOutcome, Status};
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Runtime, State, WebviewWindow};
 
 #[tauri::command]
@@ -33,6 +34,12 @@ pub fn run<R: Runtime>(app: AppHandle<R>) {
 #[tauri::command]
 pub fn last_run(demysto: State<'_, Demysto>) -> Option<RunOutcome> {
     demysto.last_run()
+}
+
+/// Says where a result window wants an answer sent as it arrives.
+#[tauri::command]
+pub fn show_answers_on(channel: Channel<String>) {
+    crate::result::show_answers_on(channel);
 }
 
 /// Hides the window this was invoked from, which is what Escape asks for in

@@ -1,7 +1,67 @@
 @import "tailwindcss";
 
+/* Two themes rather than one that compromises: an answer is read beside the
+   application it was asked about, and code in it should look like code does
+   there. Conditional imports so the one that is not in use is not parsed. */
+@import "highlight.js/styles/github.css" screen and (prefers-color-scheme: light);
+@import "highlight.js/styles/github-dark.css" screen and (prefers-color-scheme: dark);
+
+@plugin "@tailwindcss/typography";
+
 /* The window follows the operating system's appearance; Demysto is a utility
    that sits inside other people's work, not a place with its own theme. */
 html {
   color-scheme: light dark;
+}
+
+/* The rendered answer.
+   
+   Plain CSS rather than utility classes because this styles markup the Markdown
+   renderer produced, where there is no class list to write on. It is the
+   typography plugin's defaults with the two things an answer needs on top: the
+   code block's own box, and a size that suits a window read at arm's length
+   rather than an article. */
+.answer {
+  @apply prose prose-sm dark:prose-invert max-w-none;
+}
+
+.answer :where(pre) {
+  @apply m-0 overflow-x-auto rounded-none bg-transparent p-3 text-xs;
+}
+
+.answer :where(code) {
+  @apply font-normal;
+}
+
+.answer :where(code)::before,
+.answer :where(code)::after {
+  content: none;
+}
+
+.md-code {
+  @apply my-4 overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-700;
+}
+
+/* Where the language and the copy button sit: above the code rather than
+   floating over it, so that neither can cover the first line of a block. */
+.md-code-bar {
+  @apply flex items-center justify-between gap-2 border-b border-neutral-200
+    bg-neutral-50 px-3 py-1 text-xs text-neutral-500
+    dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-400;
+}
+
+.md-code-bar button {
+  @apply cursor-pointer rounded px-1.5 py-0.5 hover:bg-neutral-200 dark:hover:bg-neutral-700;
+}
+
+/* The theme's own background belongs to the box, not to the `pre` inside it. */
+.md-code .hljs {
+  @apply bg-transparent;
+}
+
+/* Inline code, which loses the backticks the typography plugin puts around it:
+   a tinted box says the same thing without putting characters in the way of
+   copying what is inside. */
+.answer :where(:not(pre) > code) {
+  @apply rounded bg-neutral-100 px-1 py-0.5 dark:bg-neutral-800;
 }

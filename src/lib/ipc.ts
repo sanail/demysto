@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /** Mirrors `demysto_core::Status`. */
@@ -87,6 +87,32 @@ export function run(): Promise<void> {
 /** What the last Run produced, for a result window that mounted after it. */
 export function lastRun(): Promise<RunOutcome | null> {
   return invoke<RunOutcome | null>("last_run");
+}
+
+/**
+ * Every hand-over of an answer still arriving, carrying the whole of it so far
+ * rather than the piece that just landed — so a window that missed one is put
+ * right by the next. It is render-ready Markdown: see `demysto_core::stream`
+ * for why the assembling happens there and not here.
+ *
+ * A channel rather than an event, per the spec's *Shape*, because an answer
+ * crosses the bridge some hundreds of times and an event would wake the Palette
+ * for every one of them. It is opened here so that the window asking for the
+ * answer looks the same as the windows listening for everything else.
+ */
+export function onStreaming(
+  handle: (answer: string) => void,
+): Promise<UnlistenFn> {
+  const channel = new Channel<string>();
+  channel.onmessage = handle;
+
+  return invoke<void>("show_answers_on", { channel }).then(
+    () => () => {
+      // The backend holds the channel until another window claims it, so the
+      // only thing to stop is this window acting on what comes down it.
+      channel.onmessage = () => {};
+    },
+  );
 }
 
 /** Every Run from here on that has begun but not yet finished. */

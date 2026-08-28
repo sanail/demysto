@@ -5,9 +5,9 @@
 //! there is one adapter and no vendor branching (the spec's *Core modules*).
 //! This is the only module in the crate that performs network I/O, and the only
 //! one the test suite stands a server in front of rather than a fake: what is
-//! asserted is the request that actually went out. Ticket 04 adds the streaming
-//! half of the same contract.
+//! asserted is the request that actually went out.
 
+use std::io::Read;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Provider;
 use crate::run::RunError;
+use crate::sse;
 
 /// The contract's one endpoint, joined onto whatever base URL the user gave.
 const ENDPOINT: &str = "chat/completions";
@@ -28,9 +29,30 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// that is wrong is wrong immediately, and the user should hear so.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Asks a Provider one question and waits for the whole answer.
-pub(crate) fn answer(provider: &Provider, prompt: &str) -> Result<String, RunError> {
-    let response = client()?
+/// What a Provider sends when it has no more of the answer to send.
+const DONE: &str = "[DONE]";
+
+/// How large a read off the socket may be. A fragment of an answer is a few
+/// bytes; this is sized so that a fast Model's whole burst arrives in one read
+/// rather than a dozen.
+const READ_SIZE: usize = 8 * 1024;
+
+/// How much of a body that turns out not to be the contract's is held on to, so
+/// that the user can be shown what arrived instead. Generous in bytes because
+/// [`snippet`] counts in characters.
+const BODY_KEPT: usize = 4 * 300;
+
+/// Asks a Provider one question and delivers the answer as it arrives.
+///
+/// The fragments are handed over one at a time and not accumulated here: the
+/// caller is assembling them anyway, and two copies of the same answer would be
+/// two places for it to differ.
+pub(crate) fn answer(
+    provider: &Provider,
+    prompt: &str,
+    mut arriving: impl FnMut(&str),
+) -> Result<(), RunError> {
+    let mut response = client()?
         .post(endpoint(&provider.base_url))
         .bearer_auth(&provider.api_key)
         .json(&Request {
@@ -39,32 +61,90 @@ pub(crate) fn answer(provider: &Provider, prompt: &str) -> Result<String, RunErr
                 role: "user",
                 content: prompt,
             }],
-            stream: false,
+            stream: true,
         })
         .send()
         .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
 
-    // Read as text before it is parsed: an error carries a body worth showing
-    // the user, and so does a body that turns out not to be the contract's.
+    // A refusal is not a stream: it is one body, and one worth showing whole.
     let status = response.status();
-    let body = response
-        .text()
-        .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
-
     if !status.is_success() {
+        let body = response
+            .text()
+            .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+
         return Err(RunError::Provider(refused(status.as_u16(), &body)));
     }
 
-    let answer: Answer = serde_json::from_str(&body)
-        .map_err(|error| RunError::Malformed(malformed(&error.to_string(), &body)))?;
+    let mut events = sse::Events::new();
+    let mut buffer = [0; READ_SIZE];
+    let mut body_start = Vec::new();
+    let mut delivered = false;
 
-    answer
+    'reading: loop {
+        // A stream that breaks part-way through loses the fragments already
+        // delivered, because a failure is the whole of what a Run produced.
+        // Ticket 11 owns keeping them and offering to continue.
+        let read = response
+            .read(&mut buffer)
+            .map_err(|error| RunError::Unreachable(interrupted(provider, &error)))?;
+
+        let chunk = &buffer[..read];
+        keep(&mut body_start, chunk);
+
+        // Nothing read is the socket closed, which leaves whatever is still
+        // held as a last event the sender did not terminate.
+        let payloads = match read {
+            0 => events.finish(),
+            _ => events.feed(chunk),
+        };
+
+        for payload in payloads {
+            // The contract's full stop. What follows it, if anything does, is
+            // not part of the answer.
+            if payload.trim() == DONE {
+                break 'reading;
+            }
+
+            if let Some(fragment) = fragment(&payload)? {
+                delivered = true;
+                arriving(&fragment);
+            }
+        }
+
+        if read == 0 {
+            break;
+        }
+    }
+
+    match delivered {
+        true => Ok(()),
+        false => Err(RunError::Malformed(malformed(
+            "it holds no answer",
+            &String::from_utf8_lossy(&body_start),
+        ))),
+    }
+}
+
+/// The text one event carries, which is none when the Model sent a fragment
+/// with nothing in it — the first of a stream, carrying only the role, is one.
+fn fragment(payload: &str) -> Result<Option<String>, RunError> {
+    let chunk: Chunk = serde_json::from_str(payload)
+        .map_err(|error| RunError::Malformed(malformed(&error.to_string(), payload)))?;
+
+    Ok(chunk
         .choices
         .into_iter()
         .next()
-        .and_then(|choice| choice.message.content)
-        .filter(|answer| !answer.trim().is_empty())
-        .ok_or_else(|| RunError::Malformed(malformed("it holds no answer", &body)))
+        .and_then(|choice| choice.delta.content)
+        .filter(|fragment| !fragment.is_empty()))
+}
+
+/// Holds on to the start of the body, and only the start, so that a stream that
+/// turns out not to be one can be quoted back to the user.
+fn keep(body_start: &mut Vec<u8>, chunk: &[u8]) {
+    let room = BODY_KEPT.saturating_sub(body_start.len());
+    body_start.extend_from_slice(&chunk[..room.min(chunk.len())]);
 }
 
 /// The base URL and the endpoint, with exactly one slash between them: a base
@@ -99,6 +179,15 @@ fn unreachable(provider: &Provider, error: &reqwest::Error) -> String {
     format!("{} could not be reached: {error}", provider.base_url)
 }
 
+/// A stream that started and then stopped: a different thing from an endpoint
+/// that never answered, though there is nothing more to show for either.
+fn interrupted(provider: &Provider, error: &std::io::Error) -> String {
+    format!(
+        "{} stopped answering part-way through: {error}",
+        provider.base_url
+    )
+}
+
 /// What the Provider said when it refused, in its own words where it gave any.
 ///
 /// Its message is the one worth showing: it is the only party that knows
@@ -118,7 +207,10 @@ fn refused(status: u16, body: &str) -> String {
 }
 
 fn malformed(reason: &str, body: &str) -> String {
-    format!("The Provider's answer was not one Demysto could read ({reason}): {}", snippet(body))
+    format!(
+        "The Provider's answer was not one Demysto could read ({reason}): {}",
+        snippet(body)
+    )
 }
 
 /// Enough of a body to recognise it by, and no more: the whole of one is a page
@@ -138,7 +230,7 @@ struct Request<'a> {
     model: &'a str,
     messages: Vec<Message<'a>>,
     /// Stated rather than left out, so that a Provider defaulting the other way
-    /// cannot hand back a stream this ticket has no parser for.
+    /// cannot hand back one body where this is waiting for a stream.
     stream: bool,
 }
 
@@ -148,20 +240,23 @@ struct Message<'a> {
     content: &'a str,
 }
 
+/// One event of a stream.
 #[derive(Deserialize)]
-struct Answer {
+struct Chunk {
+    /// Required rather than defaulted: an event that carries no `choices` at
+    /// all is not this contract, and a Provider reporting an error mid-stream
+    /// sends exactly that. Better shown to the user than passed over.
     choices: Vec<Choice>,
 }
 
 #[derive(Deserialize)]
 struct Choice {
-    message: Reply,
+    delta: Delta,
 }
 
 #[derive(Deserialize)]
-struct Reply {
-    /// Absent when the Model produced no text at all, which the contract allows
-    /// and a Run cannot show.
+struct Delta {
+    /// Absent on the event that opens a stream, which carries only the role.
     content: Option<String>,
 }
 

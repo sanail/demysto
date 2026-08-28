@@ -1,9 +1,11 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
-/** The work a window shows the state of, in the three ways that state arrives. */
-export type Work<T> = {
+/** The work a window shows the state of, in the ways that state arrives. */
+export type Work<T, P> = {
   /** Every start from here on, each of which discards what came before it. */
   began: (handle: () => void) => Promise<UnlistenFn>;
+  /** How far along that work is, for work that says so as it goes. */
+  progressed?: (handle: (progress: P) => void) => Promise<UnlistenFn>;
   /** Everything that work produced, from here on. */
   completed: (handle: (value: T) => void) => Promise<UnlistenFn>;
   /** What it produced last, for a window that arrived after it. */
@@ -25,8 +27,9 @@ export type Work<T> = {
  * work being under way: it is what both the beginning of a Run and the
  * beginning of a Capture leave behind.
  */
-export function latest<T>(work: Work<T>) {
+export function latest<T, P = never>(work: Work<T, P>) {
   let value = $state<T | null>(null);
+  let progress = $state<P | null>(null);
   let heard = false;
 
   return {
@@ -34,11 +37,24 @@ export function latest<T>(work: Work<T>) {
       return value;
     },
 
+    /** How far the work under way has got, or `null` when it has not said. */
+    get progress() {
+      return progress;
+    },
+
     /** Starts listening, and answers with the function that stops. */
     watch() {
       const began = work.began(() => {
         heard = true;
         value = null;
+        progress = null;
+      });
+
+      // Progress counts as having heard from the backend: what the question
+      // below would answer with is older than what has just arrived.
+      const progressed = work.progressed?.((next) => {
+        heard = true;
+        progress = next;
       });
 
       const completed = work.completed((next) => {
@@ -53,8 +69,9 @@ export function latest<T>(work: Work<T>) {
       });
 
       return () => {
-        began.then((stop) => stop());
-        completed.then((stop) => stop());
+        for (const listening of [began, progressed, completed]) {
+          listening?.then((stop) => stop());
+        }
       };
     },
   };

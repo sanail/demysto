@@ -2,12 +2,13 @@
 //!
 //! An ordinary window rather than the Palette's panel — it is somewhere the
 //! user reads and copies from, not something that floats over their work. Ticket
-//! 06 turns it into the Conversation window, and ticket 04 fills it as the
-//! answer streams rather than when it is finished.
+//! 06 turns it into the Conversation window.
 
 use std::sync::atomic::AtomicBool;
+use std::sync::Mutex;
 
 use demysto_core::Demysto;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
 
 use crate::underway::Underway;
@@ -23,6 +24,28 @@ const ANSWERED_EVENT: &str = "result://answered";
 
 /// Whether a Run is under way. Held through [`Underway`]; see that module.
 static RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Where an answer still arriving is sent.
+///
+/// A channel rather than an event, per the spec's *Shape*: an answer crosses
+/// the bridge some hundreds of times, and an event is broadcast to every window
+/// — so the Palette would be woken by every hand-over of a stream it is not
+/// showing. The two events either side of a Run stay events, because a state
+/// changing twice is exactly what the event system is for.
+///
+/// A `static` rather than managed state for the reason [`RUNNING`] is one:
+/// single instance is enforced, so there is one result window to send to.
+static SHOWING: Mutex<Option<Channel<String>>> = Mutex::new(None);
+
+/// Takes the channel a result window wants its answers on, replacing whatever
+/// window said so before it.
+///
+/// The window says so as it mounts, which may be after the Run it is about to
+/// show has started. Nothing is replayed: every hand-over carries the whole
+/// answer so far, so the first one to arrive after this puts the window right.
+pub fn show_answers_on(channel: Channel<String>) {
+    *SHOWING.lock().unwrap() = Some(channel);
+}
 
 /// Runs the built-in explain Action over the last Capture and shows the answer.
 pub fn run<R: Runtime>(app: &AppHandle<R>) {
@@ -64,7 +87,14 @@ pub fn run<R: Runtime>(app: &AppHandle<R>) {
         let _ = window.emit(RUNNING_EVENT, ());
         reveal(&window);
 
-        let outcome = demysto.run();
+        // The whole answer so far crosses on every hand-over rather than the
+        // piece that just landed, so a window still loading when one goes past
+        // is put right by the next rather than left a fragment short.
+        let outcome = demysto.run(|answer| {
+            if let Some(showing) = SHOWING.lock().unwrap().as_ref() {
+                let _ = showing.send(answer.to_owned());
+            }
+        });
 
         // A window that has never loaded hears neither event and asks the core
         // for the last Run as it mounts, which is why the core keeps it.

@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Duration;
 
 mod capture;
 mod config;
@@ -15,6 +16,8 @@ mod paths;
 mod provider;
 mod run;
 mod selection;
+mod sse;
+mod stream;
 
 pub use capture::{Capture, CaptureError, CaptureOutcome, Captured};
 pub use paths::{config_dir, ConfigDirError, CONFIG_DIR_ENV};
@@ -22,6 +25,7 @@ pub use run::{RunError, RunOutcome};
 pub use selection::Selection;
 
 use config::{Config, ConfigError};
+use stream::Assembly;
 
 /// The facade every user interface talks to.
 pub struct Demysto {
@@ -37,6 +41,10 @@ pub struct Demysto {
     /// The last Run, for the same reason: the result window is shown while the
     /// request is still in flight, so it loads after the Run it is showing.
     last_run: Mutex<Option<RunOutcome>>,
+    /// How often a Run under way hands over what has arrived so far. A field
+    /// rather than a constant so that the suite can take the waiting out of it,
+    /// the way it takes it out of a Capture.
+    throttle: Duration,
 }
 
 /// What the application can report about itself before anything is configured.
@@ -77,7 +85,16 @@ impl Demysto {
             capture,
             last_capture: Mutex::new(None),
             last_run: Mutex::new(None),
+            throttle: stream::THROTTLE,
         }
+    }
+
+    /// The same facade with nothing held back, so that a test can see every
+    /// state a Run passed through rather than the few a clock let out.
+    #[cfg(test)]
+    fn unthrottled(mut self) -> Self {
+        self.throttle = Duration::ZERO;
+        self
     }
 
     pub fn config_dir(&self) -> &Path {
@@ -109,21 +126,24 @@ impl Demysto {
         *self.last_run.lock().unwrap() = None;
     }
 
-    /// Runs the built-in explain Action against the last Capture, and remembers
-    /// what it produced.
+    /// Runs the built-in explain Action against the last Capture, showing the
+    /// answer as it arrives, and remembers what it produced.
     ///
     /// The Selection comes from the Capture the core already holds rather than
     /// from the interface: what gets explained is what Demysto read, not what a
-    /// window says it read. Ticket 05 gives the caller an Action to choose, and
-    /// ticket 04 turns this into a stream rather than one long wait.
-    pub fn run(&self) -> RunOutcome {
+    /// window says it read. Ticket 05 gives the caller an Action to choose.
+    ///
+    /// `showing` is handed the whole answer so far, render-ready, every so
+    /// often — see [`stream`] for what "render-ready" and "so often" mean and
+    /// why they are decided here rather than in the window.
+    pub fn run(&self, showing: impl FnMut(&str)) -> RunOutcome {
         // Cleared before the request as well as written after it, so that the
         // window has nothing stale to find however it got here — the interface
         // forgets the last Run before it shows the window, and a caller that
         // did not still cannot leave one on screen.
         self.forget_last_run();
 
-        let outcome = RunOutcome::from(self.answer());
+        let outcome = RunOutcome::from(self.answer(showing));
         *self.last_run.lock().unwrap() = Some(outcome.clone());
 
         outcome
@@ -135,7 +155,7 @@ impl Demysto {
         self.last_run.lock().unwrap().clone()
     }
 
-    fn answer(&self) -> Result<String, RunError> {
+    fn answer(&self, mut showing: impl FnMut(&str)) -> Result<String, RunError> {
         let captured = self.last_capture();
         let selection = captured
             .as_ref()
@@ -147,7 +167,19 @@ impl Demysto {
             .as_ref()
             .map_err(|error| RunError::Configuration(error.to_string()))?;
 
-        provider::answer(&config.provider, &run::explain(selection.as_text()))
+        let mut assembly = Assembly::new(self.throttle);
+
+        provider::answer(
+            &config.provider,
+            &run::explain(selection.as_text()),
+            |fragment| {
+                if let Some(answer) = assembly.push(fragment) {
+                    showing(&answer);
+                }
+            },
+        )?;
+
+        Ok(assembly.text())
     }
 
     pub fn status(&self) -> Status {
@@ -191,6 +223,15 @@ mod tests {
         }
     }
 
+    impl Rooted {
+        /// The same Demysto with the throttle a Run really has, for the tests
+        /// that are about what the clock holds back rather than what arrives.
+        fn throttled(mut self) -> Self {
+            self.demysto.throttle = stream::THROTTLE;
+            self
+        }
+    }
+
     /// A Demysto with nothing configured to talk to.
     fn demysto(capture: Box<dyn Capture>) -> Rooted {
         rooted(capture, None)
@@ -219,14 +260,38 @@ mod tests {
         }
 
         Rooted {
-            demysto: Demysto::with_capture(dir.path(), "1.2.3", capture),
+            demysto: Demysto::with_capture(dir.path(), "1.2.3", capture).unthrottled(),
             _dir: dir,
         }
     }
 
-    /// The body an OpenAI-compatible Provider answers with.
+    /// The body an OpenAI-compatible Provider answers with, one event per
+    /// fragment, ending as the contract says a stream ends.
+    fn streaming(fragments: &[&str]) -> String {
+        fragments
+            .iter()
+            .map(|fragment| json!({ "choices": [{ "delta": { "content": fragment } }] }))
+            .map(|event| format!("data: {event}\n\n"))
+            .chain(std::iter::once("data: [DONE]\n\n".to_owned()))
+            .collect()
+    }
+
+    /// The same, for an answer that arrives in one piece.
     fn answering(answer: &str) -> String {
-        json!({ "choices": [{ "message": { "role": "assistant", "content": answer } }] }).to_string()
+        streaming(&[answer])
+    }
+
+    /// A Run whose intermediate states nobody is watching.
+    fn run(demysto: &Demysto) -> RunOutcome {
+        demysto.run(|_| {})
+    }
+
+    /// Every state a Run put on screen, and what it finally produced.
+    fn watching(demysto: &Demysto) -> (Vec<String>, RunOutcome) {
+        let mut shown = Vec::new();
+        let outcome = demysto.run(|answer| shown.push(answer.to_owned()));
+
+        (shown, outcome)
     }
 
     /// A Demysto that has captured `selection` and is pointed at `server`.
@@ -453,7 +518,7 @@ mod tests {
             .with_body(answering("A painting of a pipe is not a pipe."))
             .create();
 
-        let outcome = ready_to_run(&server, "Ceci n'est pas une pipe").run();
+        let outcome = run(&ready_to_run(&server, "Ceci n'est pas une pipe"));
 
         endpoint.assert();
         assert_eq!(
@@ -472,7 +537,7 @@ mod tests {
             .match_body(Matcher::AllOf(vec![
                 Matcher::PartialJson(json!({
                     "model": "a-model",
-                    "stream": false,
+                    "stream": true,
                     "messages": [{ "role": "user" }],
                 })),
                 // The Selection itself, wherever the prompt around it puts it.
@@ -481,7 +546,7 @@ mod tests {
             .with_body(answering("A painting of a pipe is not a pipe."))
             .create();
 
-        ready_to_run(&server, "Ceci n'est pas une pipe").run();
+        run(&ready_to_run(&server, "Ceci n'est pas une pipe"));
 
         endpoint.assert();
     }
@@ -497,7 +562,7 @@ mod tests {
         let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
         let demysto = demysto_asking(fake::over(&desktop), &format!("{}/v1/", server.url()));
         demysto.capture();
-        demysto.run();
+        run(&demysto);
 
         endpoint.assert();
     }
@@ -512,7 +577,7 @@ mod tests {
             .create();
 
         let RunOutcome::Failed(RunError::Provider(message)) =
-            ready_to_run(&server, "a paragraph").run()
+            run(&ready_to_run(&server, "a paragraph"))
         else {
             panic!("a refusal should be reported as one");
         };
@@ -531,7 +596,7 @@ mod tests {
             .create();
 
         let RunOutcome::Failed(RunError::Provider(message)) =
-            ready_to_run(&server, "a paragraph").run()
+            run(&ready_to_run(&server, "a paragraph"))
         else {
             panic!("a refusal should be reported as one");
         };
@@ -540,7 +605,156 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_that_is_not_the_contracts_shape_is_reported_as_such() {
+    fn the_answer_arrives_a_piece_at_a_time_rather_than_all_at_once() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(streaming(&["A painting ", "of a pipe ", "is not a pipe."]))
+            .create();
+
+        let (shown, outcome) = watching(&ready_to_run(&server, "Ceci n'est pas une pipe"));
+
+        // Each state carries the whole answer so far rather than the piece that
+        // just landed: a window that missed one is corrected by the next.
+        assert_eq!(
+            shown,
+            [
+                "A painting ",
+                "A painting of a pipe ",
+                "A painting of a pipe is not a pipe.",
+            ]
+        );
+        assert_eq!(
+            outcome,
+            RunOutcome::Answered("A painting of a pipe is not a pipe.".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_code_fence_is_closed_in_every_state_the_user_is_shown() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(streaming(&[
+                "Like so:\n\n```",
+                "rust\nfn main",
+                "() {}\n```",
+            ]))
+            .create();
+
+        let (shown, outcome) = watching(&ready_to_run(&server, "fn main"));
+
+        // The block is a block from the moment it opens, so a renderer shown
+        // these in turn never draws it as prose and then redraws it as code.
+        assert_eq!(
+            shown,
+            [
+                "Like so:\n\n```\n```",
+                "Like so:\n\n```rust\nfn main\n```",
+                "Like so:\n\n```rust\nfn main() {}\n```",
+            ]
+        );
+
+        // The answer itself is what arrived, with nothing added: the fence it
+        // ends on is the Model's own.
+        assert_eq!(
+            outcome,
+            RunOutcome::Answered("Like so:\n\n```rust\nfn main() {}\n```".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_answer_is_the_fragments_exactly_as_they_arrived() {
+        let fragments = ["  A pipe", "\n\n- one\n", "- two", "  "];
+
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(streaming(&fragments))
+            .create();
+
+        assert_eq!(
+            run(&ready_to_run(&server, "a paragraph")),
+            RunOutcome::Answered(fragments.concat())
+        );
+    }
+
+    #[test]
+    fn the_answer_is_the_whole_of_what_arrived_however_little_the_throttle_showed() {
+        let fragments = ["A painting ", "of a pipe ", "is not a pipe."];
+
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(streaming(&fragments))
+            .create();
+
+        let demysto = ready_to_run(&server, "Ceci n'est pas une pipe").throttled();
+        let (shown, outcome) = watching(&demysto);
+
+        // Every piece lands well inside one throttle window, so the user is
+        // shown fewer states than there were pieces — and the answer is still
+        // every piece, which is the whole point of throttling what is shown
+        // rather than what is kept.
+        assert!(shown.len() < fragments.len(), "{shown:?}");
+        assert_eq!(outcome, RunOutcome::Answered(fragments.concat()));
+    }
+
+    #[test]
+    fn the_event_that_opens_a_stream_is_not_a_state_worth_showing() {
+        // The contract's first event carries the role and no text at all.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(
+                "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n\
+                 data: {\"choices\":[{\"delta\":{\"content\":\"an answer\"}}]}\n\n\
+                 data: [DONE]\n\n",
+            )
+            .create();
+
+        let (shown, outcome) = watching(&ready_to_run(&server, "a paragraph"));
+
+        assert_eq!(shown, ["an answer"]);
+        assert_eq!(outcome, RunOutcome::Answered("an answer".to_owned()));
+    }
+
+    #[test]
+    fn a_keep_alive_between_the_fragments_is_not_one_of_them() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(
+                ": keep-alive\n\n\
+                 data: {\"choices\":[{\"delta\":{\"content\":\"an answer\"}}]}\n\n\
+                 data: [DONE]\n\n",
+            )
+            .create();
+
+        assert_eq!(
+            run(&ready_to_run(&server, "a paragraph")),
+            RunOutcome::Answered("an answer".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_event_that_is_not_the_contracts_shape_is_reported_as_such() {
+        // A Provider reporting an error mid-stream sends exactly this, and
+        // passing over what it says would leave the user with a blank window.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body("data: {\"error\":{\"message\":\"rate limited\"}}\n\n")
+            .create();
+
+        assert!(matches!(
+            run(&ready_to_run(&server, "a paragraph")),
+            RunOutcome::Failed(RunError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn a_stream_that_carries_no_answer_is_reported_as_such() {
         let mut server = Server::new();
         let _endpoint = server
             .mock("POST", "/v1/chat/completions")
@@ -548,7 +762,7 @@ mod tests {
             .create();
 
         assert!(matches!(
-            ready_to_run(&server, "a paragraph").run(),
+            run(&ready_to_run(&server, "a paragraph")),
             RunOutcome::Failed(RunError::Malformed(_))
         ));
     }
@@ -564,7 +778,7 @@ mod tests {
             .create();
 
         assert!(matches!(
-            ready_to_run(&server, "a paragraph").run(),
+            run(&ready_to_run(&server, "a paragraph")),
             RunOutcome::Failed(RunError::Malformed(_))
         ));
     }
@@ -575,7 +789,7 @@ mod tests {
         let demysto = demysto_asking(fake::over(&desktop), "http://127.0.0.1:1/v1");
         demysto.capture();
 
-        let RunOutcome::Failed(RunError::Unreachable(message)) = demysto.run() else {
+        let RunOutcome::Failed(RunError::Unreachable(message)) = run(&demysto) else {
             panic!("an endpoint that never answered should be reported as unreachable");
         };
 
@@ -591,7 +805,7 @@ mod tests {
         demysto.capture();
 
         assert!(matches!(
-            demysto.run(),
+            run(&demysto),
             RunOutcome::Failed(RunError::NothingToRun(_))
         ));
     }
@@ -602,7 +816,7 @@ mod tests {
         let demysto = demysto(fake::over(&desktop));
         demysto.capture();
 
-        let RunOutcome::Failed(RunError::Configuration(message)) = demysto.run() else {
+        let RunOutcome::Failed(RunError::Configuration(message)) = run(&demysto) else {
             panic!("a Run with nothing configured should say what to configure");
         };
 
@@ -618,7 +832,7 @@ mod tests {
             .create();
 
         let demysto = ready_to_run(&server, "a paragraph");
-        demysto.run();
+        run(&demysto);
 
         assert_eq!(
             demysto.last_run(),
