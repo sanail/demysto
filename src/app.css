@@ -25,21 +25,20 @@ html {
   @apply prose prose-sm dark:prose-invert max-w-none;
 }
 
-.answer :where(pre) {
-  @apply m-0 overflow-x-auto rounded-none bg-transparent p-3 text-xs;
-}
-
-.answer :where(code) {
-  @apply font-normal;
-}
-
-.answer :where(code)::before,
-.answer :where(code)::after {
-  content: none;
-}
-
+/* Inside a code block nothing is ours: highlight.js colours the tokens and
+   supplies the background its colours were chosen against, in each appearance.
+   The block carries `not-prose` so that the typography plugin keeps out — left
+   to itself it colours `pre` for the dark background it would have given it,
+   which over a light one is grey on white. */
 .md-code {
   @apply my-4 overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-700;
+}
+
+/* The theme already makes the `code` inside a `pre` a padded, scrolling block
+   carrying that background; all this adds is the size it is read at. Padding
+   here as well would be padding twice. */
+.md-code pre {
+  @apply m-0 text-xs;
 }
 
 /* Where the language and the copy button sit: above the code rather than
@@ -54,14 +53,14 @@ html {
   @apply cursor-pointer rounded px-1.5 py-0.5 hover:bg-neutral-200 dark:hover:bg-neutral-700;
 }
 
-/* The theme's own background belongs to the box, not to the `pre` inside it. */
-.md-code .hljs {
-  @apply bg-transparent;
-}
-
 /* Inline code, which loses the backticks the typography plugin puts around it:
    a tinted box says the same thing without putting characters in the way of
    copying what is inside. */
 .answer :where(:not(pre) > code) {
-  @apply rounded bg-neutral-100 px-1 py-0.5 dark:bg-neutral-800;
+  @apply rounded bg-neutral-100 px-1 py-0.5 font-normal dark:bg-neutral-800;
+}
+
+.answer :where(:not(pre) > code)::before,
+.answer :where(:not(pre) > code)::after {
+  content: none;
 }

@@ -63,7 +63,11 @@ for (const [name, language] of Object.entries(LANGUAGES)) {
 
 /** The class a rendered code block carries, and the marker its copy button
  * carries. Both are private to this module: what a click on one means is
- * [`copyable`]'s to answer, because this is where the markup was written. */
+ * [`copyable`]'s to answer, because this is where the markup was written.
+ *
+ * `not-prose` goes on beside it: the typography plugin colours a `pre` for the
+ * dark background it would have given it, and everything inside a block is
+ * highlight.js's to colour. See `app.css`. */
 const BLOCK = "md-code";
 const COPY = "data-copy";
 
@@ -96,7 +100,7 @@ md.renderer.rules.fence = (tokens, index) => {
   const code = highlighted(token.content, language);
   const label = language ? md.utils.escapeHtml(language) : "";
 
-  return `<div class="${BLOCK}"><div class="${BLOCK}-bar"><span>${label}</span>\
+  return `<div class="${BLOCK} not-prose"><div class="${BLOCK}-bar"><span>${label}</span>\
 <button type="button" ${COPY}>Copy</button></div>\
 <pre><code class="hljs">${code}</code></pre></div>\n`;
 };
