@@ -16,9 +16,16 @@ pub enum Selection {
 /// Separate from [`Selection`] itself because an Action declares what it accepts
 /// long before there is anything to run it on. Nothing outside the crate asks:
 /// the Palette is handed the Actions that already accept what was captured.
+///
+/// `Image` has no [`Selection`] to go with it in v1 — capturing one is v1.1's,
+/// per the spec's *Out of Scope*. It is here because Model resolution turns on
+/// it: the Default Vision Model exists to keep the cheap everyday Model from
+/// being asked to look at pictures, and that rule is worth having settled and
+/// tested before there is a picture to test it with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
     Text,
+    Image,
 }
 
 impl Selection {

@@ -16,6 +16,7 @@ mod config;
 mod conversation;
 mod desktop;
 mod language;
+mod model;
 mod paths;
 mod provider;
 mod run;
@@ -33,6 +34,7 @@ pub use selection::Selection;
 use config::{Config, ConfigError};
 use conversation::Store;
 use run::Stopping;
+use selection::Kind;
 use stream::Assembly;
 
 /// The facade every user interface talks to.
@@ -60,6 +62,21 @@ pub struct Demysto {
     /// rather than a constant so that the suite can take the waiting out of it,
     /// the way it takes it out of a Capture.
     throttle: Duration,
+}
+
+/// What one Turn asks, before anything has been put to a Provider: which Model
+/// it resolves through, and what it says.
+///
+/// Held together because they travel together — the Turn that opens a
+/// Conversation takes them from the Action, and every follow-up takes them from
+/// the Conversation it is asked in.
+struct Asking {
+    /// The Model the Action bound, `None` when it bound none.
+    binding: Option<String>,
+    /// What the Turn is about, which is what decides whether it needs a Model
+    /// that can see.
+    kind: Kind,
+    prompt: String,
 }
 
 /// What the application can report about itself before anything is configured.
@@ -233,11 +250,27 @@ impl Demysto {
     /// said about it so far travel as the Turns before this one, which is what
     /// makes a follow-up cost nothing but typing.
     pub fn follow_up(&self, question: &str, showing: impl FnMut(&str)) -> RunOutcome {
-        let Some(id) = self.store.lock().unwrap().follow_up(question) else {
-            return RunOutcome::Failed(run::no_conversation());
+        // A follow-up goes to the Model the Action that opened the Conversation
+        // resolves to, on the Selection that Conversation is about: switching
+        // Model mid-Conversation is ticket 11's, alongside the retry it belongs
+        // with.
+        let (id, asking) = {
+            let mut store = self.store.lock().unwrap();
+            let Some(conversation) = store.follow_up(question) else {
+                return RunOutcome::Failed(run::no_conversation());
+            };
+
+            (
+                conversation.id,
+                Asking {
+                    binding: conversation.binding().map(ToOwned::to_owned),
+                    kind: conversation.kind(),
+                    prompt: question.to_owned(),
+                },
+            )
         };
 
-        let outcome = self.ask(id, question.to_owned(), showing);
+        let outcome = self.ask(id, asking, showing);
         self.store.lock().unwrap().answered(id, outcome.clone());
 
         outcome
@@ -280,18 +313,34 @@ impl Demysto {
             return RunOutcome::Failed(run::no_such_action(action));
         };
 
-        self.ask(id, action.prompt(selection, parameters), showing)
+        self.ask(
+            id,
+            Asking {
+                binding: action.model.clone(),
+                kind: selection.kind(),
+                prompt: action.prompt(selection, parameters),
+            },
+            showing,
+        )
     }
 
-    /// Puts the Conversation to the Provider, with `prompt` as what the Turn
-    /// now being asked sends.
-    fn ask(&self, id: u64, prompt: String, mut showing: impl FnMut(&str)) -> RunOutcome {
+    /// Puts the Conversation to the Model `asking` resolves to, with its prompt
+    /// as what the Turn now being asked sends.
+    fn ask(&self, id: u64, asking: Asking, mut showing: impl FnMut(&str)) -> RunOutcome {
         let config = match self.config.as_ref() {
             Ok(config) => config,
             Err(error) => return RunOutcome::Failed(RunError::Configuration(error.to_string())),
         };
 
-        let Some(said) = self.store.lock().unwrap().asking(id, prompt) else {
+        // Resolved before the Turn is recorded as asked: a Run that has nowhere
+        // to go has not asked anything, and the settings are the only place the
+        // answer to that is.
+        let resolved = match model::resolve(config, asking.binding.as_deref(), asking.kind) {
+            Ok(resolved) => resolved,
+            Err(error) => return RunOutcome::Failed(error),
+        };
+
+        let Some(said) = self.store.lock().unwrap().asking(id, asking.prompt) else {
             return RunOutcome::Failed(run::no_conversation());
         };
 
@@ -303,7 +352,7 @@ impl Demysto {
         *self.stopping.lock().unwrap() = Some(stopping.clone());
 
         let mut assembly = Assembly::new(self.throttle);
-        let asked = provider::answer(&config.provider, &said, &stopping, |fragment| {
+        let asked = provider::answer(&resolved, &said, &stopping, |fragment| {
             if let Some(answer) = assembly.push(fragment) {
                 showing(&answer);
             }
@@ -316,6 +365,28 @@ impl Demysto {
             Ok(()) if stopping.stopped() => RunOutcome::Stopped(assembly.text()),
             Ok(()) => RunOutcome::Answered(assembly.text()),
         }
+    }
+
+    /// The Model identifiers a configured Provider says it offers, so that the
+    /// user picks one rather than typing it from memory.
+    ///
+    /// A live request, and the only method here that makes one outside a Run:
+    /// there is no other way to know what a Provider has, and a stale list
+    /// baked into the application would be wrong within the month.
+    pub fn models_offered_by(&self, provider: &str) -> Result<Vec<String>, RunError> {
+        let config = self
+            .config
+            .as_ref()
+            .map_err(|error| RunError::Configuration(error.to_string()))?;
+
+        let Some(provider) = config.provider(provider) else {
+            return Err(RunError::Configuration(format!(
+                "There is no Provider called \"{provider}\" in {}.",
+                config.path.display()
+            )));
+        };
+
+        provider::models(provider, model::key_for(provider)?)
     }
 
     pub fn status(&self) -> Status {
@@ -374,18 +445,15 @@ mod tests {
     }
 
     /// A Demysto configured with one Provider, at `base_url`.
-    ///
-    /// The Provider names no preset and no variable of its own, so that the
-    /// environment of whoever is running the suite cannot reach into it.
     fn demysto_asking(capture: Box<dyn Capture>, base_url: &str) -> Rooted {
-        rooted(capture, Some(base_url))
+        rooted(capture, Some(&one_provider(base_url)))
     }
 
-    fn rooted(capture: Box<dyn Capture>, base_url: Option<&str>) -> Rooted {
+    fn rooted(capture: Box<dyn Capture>, settings: Option<&str>) -> Rooted {
         let dir = TempDir::new().unwrap();
 
-        if let Some(base_url) = base_url {
-            configured(dir.path(), base_url);
+        if let Some(settings) = settings {
+            std::fs::write(dir.path().join(config::FILE_NAME), settings).unwrap();
         }
 
         Rooted {
@@ -394,16 +462,24 @@ mod tests {
         }
     }
 
-    /// Writes a settings file naming one Provider, at `base_url`.
-    fn configured(dir: &Path, base_url: &str) {
-        std::fs::write(
-            dir.join(config::FILE_NAME),
-            format!(
-                "version = 1\n\n[[providers]]\nname = \"a provider\"\n\
-                 base_url = \"{base_url}\"\nmodel = \"a-model\"\napi_key = \"a-key\"\n"
-            ),
+    /// A settings file naming one Provider, at `base_url`, offering one Model
+    /// and nominating it.
+    ///
+    /// The Provider names no preset and no variable of its own, so that the
+    /// environment of whoever is running the suite cannot reach into it.
+    fn one_provider(base_url: &str) -> String {
+        format!(
+            "default_model = \"a provider/a-model\"\n\n{}",
+            provider("a provider", base_url, "a-key", "a-model")
         )
-        .unwrap();
+    }
+
+    /// One Provider block, offering one Model.
+    fn provider(name: &str, base_url: &str, api_key: &str, model: &str) -> String {
+        format!(
+            "[[providers]]\nname = \"{name}\"\nbase_url = \"{base_url}\"\n\
+             api_key = \"{api_key}\"\nmodels = [{{ id = \"{model}\" }}]\n"
+        )
     }
 
     /// The body an OpenAI-compatible Provider answers with, one event per
@@ -472,8 +548,17 @@ mod tests {
 
     /// A Demysto that has captured `selection` and is pointed at `server`.
     fn ready_to_run(server: &ServerGuard, selection: &str) -> Rooted {
+        ready_with(&one_provider(&format!("{}/v1", server.url())), selection)
+    }
+
+    /// A Demysto whose settings file holds exactly `settings`, having captured
+    /// `selection`.
+    fn ready_with(settings: &str, selection: &str) -> Rooted {
         let desktop = Arc::new(FakeDesktop::new(None, Some(selection)));
-        let demysto = demysto_asking(fake::over(&desktop), &format!("{}/v1", server.url()));
+        let demysto = rooted(
+            fake::over(&desktop),
+            Some(&format!("version = 1\n\n{settings}")),
+        );
         demysto.capture();
 
         demysto
@@ -1502,6 +1587,149 @@ mod tests {
     }
 
     #[test]
+    fn a_run_goes_to_the_provider_that_offers_the_model_the_default_names() {
+        // Two Providers at two addresses with two keys, which is the whole
+        // point of configuring more than one: the Default Model says which.
+        let mut cheap = Server::new();
+        let mut dear = Server::new();
+
+        let asked = dear
+            .mock("POST", "/v1/chat/completions")
+            .match_header("authorization", "Bearer dear-key")
+            .match_body(Matcher::PartialJson(json!({ "model": "sharp" })))
+            .with_body(answering("an answer"))
+            .create();
+        let untouched = cheap
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("the wrong Model answered"))
+            .expect(0)
+            .create();
+
+        let settings = format!(
+            "default_model = \"dear/sharp\"\n\n{}\n{}",
+            provider(
+                "cheap",
+                &format!("{}/v1", cheap.url()),
+                "cheap-key",
+                "everyday"
+            ),
+            provider("dear", &format!("{}/v1", dear.url()), "dear-key", "sharp"),
+        );
+
+        assert_eq!(
+            run(&ready_with(&settings, "a paragraph")),
+            RunOutcome::Answered("an answer".to_owned())
+        );
+
+        asked.assert();
+        untouched.assert();
+    }
+
+    #[test]
+    fn a_provider_missing_its_key_costs_only_the_models_it_offers() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        // The first Provider names no key anywhere; the Default Model is the
+        // second's, and the Run should never learn of the first.
+        let settings = format!(
+            "default_model = \"working/a-model\"\n\n\
+             [[providers]]\nname = \"broken\"\nbase_url = \"http://127.0.0.1:1/v1\"\n\
+             models = [{{ id = \"a-model\" }}]\n\n{}",
+            provider(
+                "working",
+                &format!("{}/v1", server.url()),
+                "a-key",
+                "a-model"
+            ),
+        );
+
+        assert_eq!(
+            run(&ready_with(&settings, "a paragraph")),
+            RunOutcome::Answered("an answer".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_default_model_naming_nothing_sends_nothing_anywhere() {
+        let mut server = Server::new();
+        let untouched = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .expect(0)
+            .create();
+
+        let settings = format!(
+            "default_model = \"a provider/imagined\"\n\n{}",
+            provider(
+                "a provider",
+                &format!("{}/v1", server.url()),
+                "a-key",
+                "a-model"
+            )
+        );
+
+        let RunOutcome::Failed(RunError::Configuration(message)) =
+            run(&ready_with(&settings, "a paragraph"))
+        else {
+            panic!("a Default Model naming nothing should fail for want of a setting");
+        };
+
+        assert!(message.contains("default_model"), "{message}");
+        assert!(message.contains("a provider/a-model"), "{message}");
+        untouched.assert();
+    }
+
+    #[test]
+    fn a_provider_with_no_key_names_the_key_rather_than_being_asked() {
+        let settings = "default_model = \"mine/a-model\"\n\n\
+                        [[providers]]\nname = \"mine\"\nbase_url = \"http://127.0.0.1:1/v1\"\n\
+                        models = [{ id = \"a-model\" }]\n";
+
+        let RunOutcome::Failed(RunError::Configuration(message)) =
+            run(&ready_with(settings, "a paragraph"))
+        else {
+            panic!("a Provider with no key should fail for want of one");
+        };
+
+        assert!(message.contains("api_key"), "{message}");
+    }
+
+    #[test]
+    fn the_model_list_comes_from_the_provider_that_offers_them() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("GET", "/v1/models")
+            .match_header("authorization", "Bearer a-key")
+            .with_body(
+                json!({ "data": [{ "id": "a-model" }, { "id": "another-model" }] }).to_string(),
+            )
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+
+        assert_eq!(
+            demysto.models_offered_by("a provider").unwrap(),
+            ["a-model", "another-model"]
+        );
+    }
+
+    #[test]
+    fn the_model_list_of_a_provider_nobody_configured_names_it() {
+        let server = Server::new();
+        let demysto = ready_to_run(&server, "a paragraph");
+
+        let Err(RunError::Configuration(message)) = demysto.models_offered_by("imagined") else {
+            panic!("a Provider nobody configured should fail for want of a setting");
+        };
+
+        assert!(message.contains("imagined"), "{message}");
+    }
+
+    #[test]
     fn conversations_do_not_outlive_the_session_that_held_them() {
         let mut server = Server::new();
         let _endpoint = server
@@ -1510,7 +1738,14 @@ mod tests {
             .create();
 
         let dir = TempDir::new().unwrap();
-        configured(dir.path(), &format!("{}/v1", server.url()));
+        std::fs::write(
+            dir.path().join(config::FILE_NAME),
+            format!(
+                "version = 1\n\n{}",
+                one_provider(&format!("{}/v1", server.url()))
+            ),
+        )
+        .unwrap();
 
         let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
         let session = Demysto::with_capture(dir.path(), "1.2.3", fake::over(&desktop));

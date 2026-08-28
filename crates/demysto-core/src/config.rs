@@ -2,15 +2,14 @@
 //! Provider comes from.
 //!
 //! Read once, at startup, and nothing else in the crate reads the environment —
-//! per the spec's *Core modules*. Ticket 07 turns the single Provider below into
-//! several, with Models and a resolution chain; ticket 08 gives the file a
-//! window to be edited from.
+//! per the spec's *Core modules*. Which of the Models configured here a given
+//! Run uses is `model`'s; ticket 08 gives the file a window to be edited from.
 
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -22,43 +21,124 @@ pub(crate) const FILE_NAME: &str = "settings.toml";
 /// good way to send somebody's key to the wrong place.
 const VERSION: u32 = 1;
 
-/// What a fresh installation gets: a file that parses, says what goes in it,
-/// and configures nothing until the user uncomments a Provider.
-const TEMPLATE: &str = "\
-# Demysto's settings.
+/// What separates the Provider from the Model in the name a Model is nominated
+/// or bound by.
+///
+/// A Provider's own name may not hold one, so the first is always the divide —
+/// which matters because a Model's identifier routinely holds several
+/// (`anthropic/claude-sonnet-4.5` is one Model at one Provider).
+const SEPARATOR: char = '/';
+
+/// Where the preamble names every preset there is, filled in from the presets
+/// themselves so that adding one cannot leave the file describing the old set.
+const PRESETS: &str = "{presets}";
+
+/// The prose a fresh installation is met by: what the file is, and what each
+/// field in the example under it means.
+const PREAMBLE: &str = r#"# Demysto's settings.
 #
 # Read once, when Demysto starts, so restart it after an edit.
-
-version = 1
-
-# Uncomment one of these and fill it in. `preset` names the service so that
-# Demysto knows which environment variable it conventionally uses; `base_url`
-# and `model` are yours to state, whatever the service.
+#
+# Uncomment the example below and fill it in.
+#
+# `preset` names a service Demysto knows the conventions of: it fills in
+# `base_url`, and it says which environment variable that service's own
+# documentation tells people to export. The presets are {presets}. State
+# `base_url` yourself for a service that has none of its own, or to override
+# what a preset fills in.
 #
 # The key is looked for in the variable `api_key_env` names, then in the
 # preset's own variable, then in `api_key` here. Leaving `api_key` out and
 # exporting the variable instead keeps the secret out of this file.
 #
-# [[providers]]
-# name = \"deepseek\"
-# preset = \"deepseek\"
-# base_url = \"https://api.deepseek.com/v1\"
-# model = \"deepseek-chat\"
-# api_key = \"sk-...\"
-";
+# `models` lists the Models of a Provider you want to use. `vision` says
+# whether one accepts images, and is stated rather than guessed at from the
+# identifier, because a name is not a capability.
+#
+# A Model is named "<provider>/<model>" wherever one is nominated or bound.
+# `default_model` is what an Action binding no Model of its own resolves to, and
+# `default_vision_model` is what one resolves to for an image."#;
 
-/// The configuration Demysto is running on, with the key already resolved.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Config {
-    pub(crate) provider: Provider,
+/// What the user is asked to uncomment.
+///
+/// Held apart from the prose rather than written into it so that the suite can
+/// load the very text the instruction points at: a template whose example does
+/// not parse would make a liar of the one instruction a new user is given.
+const EXAMPLE: &str = r#"default_model = "deepseek/deepseek-chat"
+default_vision_model = "openai/gpt-4o"
+
+[[providers]]
+name = "deepseek"
+preset = "deepseek"
+api_key = "sk-..."
+models = [{ id = "deepseek-chat" }]
+
+[[providers]]
+name = "openai"
+preset = "openai"
+models = [{ id = "gpt-4o-mini" }, { id = "gpt-4o", vision = true }]
+"#;
+
+/// What a fresh installation gets: a file that parses, says what goes in it,
+/// and configures nothing until the user uncomments the example.
+fn template() -> String {
+    let example: String = EXAMPLE
+        .lines()
+        .map(|line| match line.is_empty() {
+            true => "#\n".to_owned(),
+            false => format!("# {line}\n"),
+        })
+        .collect();
+
+    let named = Preset::ALL.map(|preset| preset.spec().name);
+    let preamble = PREAMBLE.replace(PRESETS, &named.join(", "));
+
+    format!("{preamble}\n\nversion = {VERSION}\n\n{example}")
 }
 
-/// A configured LLM endpoint, ready to be asked something.
+/// The configuration Demysto is running on, with the keys already resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Config {
+    /// The file this was read from. Held because the errors composed later —
+    /// when a Run resolves to a Model that is not there, or to a Provider with
+    /// no key — still have to name the one place the fix can be made.
+    pub(crate) path: PathBuf,
+    pub(crate) providers: Vec<Provider>,
+    /// The Model an Action that binds none of its own resolves to.
+    pub(crate) default_model: Option<String>,
+    /// The Model an Action that binds none of its own resolves to when the
+    /// Selection is an image. Separate because the cheap everyday Model
+    /// usually cannot see.
+    pub(crate) default_vision_model: Option<String>,
+}
+
+/// A configured LLM endpoint, and the Models it offers.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Provider {
+    /// What the user calls this Provider, and the first half of every name one
+    /// of its Models is known by.
+    pub(crate) name: String,
     pub(crate) base_url: String,
-    pub(crate) model: String,
-    pub(crate) api_key: String,
+    /// The key, or the sentence telling the user where to put one.
+    ///
+    /// Composed at load, while the file's path and the Provider's own fields
+    /// are still at hand, and shown only when a Run resolves to this Provider:
+    /// one Provider missing its key is no reason for another Provider's Models
+    /// to stop working.
+    pub(crate) api_key: Result<String, String>,
+    pub(crate) models: Vec<Model>,
+}
+
+/// A specific Model offered by a Provider, with the capability Demysto needs to
+/// know about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Model {
+    /// What the Provider calls it, and what the request carries.
+    pub(crate) id: String,
+    /// Whether it accepts images. Stated by the user rather than inferred from
+    /// the identifier: names are marketing, and a wrong guess here is either a
+    /// refused request or a Model that could have seen and was never asked to.
+    pub(crate) vision: bool,
 }
 
 impl fmt::Debug for Provider {
@@ -68,11 +148,53 @@ impl fmt::Debug for Provider {
     /// the whole of what it leaves readable.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Provider")
+            .field("name", &self.name)
             .field("base_url", &self.base_url)
-            .field("model", &self.model)
-            .field("api_key", &"<not shown>")
+            .field("models", &self.models)
+            .field(
+                "api_key",
+                match &self.api_key {
+                    Ok(_) => &"<not shown>",
+                    Err(_) => &"<none>",
+                },
+            )
             .finish()
     }
+}
+
+impl Config {
+    /// The Model named `name`, and the Provider that offers it. `None` when
+    /// nothing configured here answers to that name.
+    pub(crate) fn model(&self, name: &str) -> Option<(&Provider, &Model)> {
+        let (provider, id) = name.split_once(SEPARATOR)?;
+        let provider = self.providers.iter().find(|it| it.name == provider)?;
+
+        provider
+            .models
+            .iter()
+            .find(|model| model.id == id)
+            .map(|model| (provider, model))
+    }
+
+    /// Every Model configured, across every Provider, in the order the file
+    /// states them.
+    pub(crate) fn models(&self) -> impl Iterator<Item = (&Provider, &Model)> {
+        self.providers
+            .iter()
+            .flat_map(|provider| provider.models.iter().map(move |model| (provider, model)))
+    }
+
+    /// The Provider called `name`. `None` when the file configures none.
+    pub(crate) fn provider(&self, name: &str) -> Option<&Provider> {
+        self.providers.iter().find(|provider| provider.name == name)
+    }
+}
+
+/// What a Model is nominated or bound by: the Provider that offers it and its
+/// own identifier, so that two Providers offering the same Model are still two
+/// Models with two keys and two bills.
+pub(crate) fn qualified(provider: &Provider, model: &Model) -> String {
+    format!("{}{SEPARATOR}{}", provider.name, model.id)
 }
 
 /// What went wrong between the settings file and a Provider Demysto can use.
@@ -88,17 +210,14 @@ pub(crate) enum ConfigError {
     Malformed(String),
     /// The file is valid and configures no Provider.
     NoProvider(String),
-    /// A Provider is configured and no key for it could be found.
-    NoKey(String),
 }
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::Unreadable(message)
-            | Self::Malformed(message)
-            | Self::NoProvider(message)
-            | Self::NoKey(message) => message,
+            Self::Unreadable(message) | Self::Malformed(message) | Self::NoProvider(message) => {
+                message
+            }
         })
     }
 }
@@ -122,7 +241,7 @@ impl Env for SystemEnv {
 }
 
 /// Reads the settings file, creating it when it is not there yet, and resolves
-/// the Provider it configures.
+/// the Providers it configures.
 pub(crate) fn load(config_dir: &Path, env: &dyn Env) -> Result<Config, ConfigError> {
     let path = config_dir.join(FILE_NAME);
     let text = read_or_create(&path)?;
@@ -138,24 +257,38 @@ pub(crate) fn load(config_dir: &Path, env: &dyn Env) -> Result<Config, ConfigErr
         )));
     }
 
-    // The first, rather than a named one: ticket 07 is where several Providers
-    // coexist and an Action resolves to one of them.
-    let entry = file.providers.into_iter().next().ok_or_else(|| {
-        ConfigError::NoProvider(format!(
+    if file.providers.is_empty() {
+        return Err(ConfigError::NoProvider(format!(
             "no Provider is configured; open {} and fill in the example it holds",
             path.display()
-        ))
-    })?;
+        )));
+    }
 
-    let api_key =
-        resolve_key(&entry, env).ok_or_else(|| ConfigError::NoKey(no_key(&entry, &path)))?;
+    let mut providers: Vec<Provider> = Vec::with_capacity(file.providers.len());
+
+    for entry in &file.providers {
+        nameable(entry, &providers, &path)?;
+
+        providers.push(Provider {
+            name: entry.name.clone(),
+            base_url: base_url(entry, &path)?,
+            api_key: resolve_key(entry, env).ok_or_else(|| no_key(entry, &path)),
+            models: entry
+                .models
+                .iter()
+                .map(|model| Model {
+                    id: model.id.clone(),
+                    vision: model.vision,
+                })
+                .collect(),
+        });
+    }
 
     Ok(Config {
-        provider: Provider {
-            base_url: entry.base_url,
-            model: entry.model,
-            api_key,
-        },
+        path,
+        providers,
+        default_model: file.default_model,
+        default_vision_model: file.default_vision_model,
     })
 }
 
@@ -168,6 +301,8 @@ struct File {
     version: u32,
     #[serde(default)]
     providers: Vec<ProviderEntry>,
+    default_model: Option<String>,
+    default_vision_model: Option<String>,
 }
 
 fn first_version() -> u32 {
@@ -177,22 +312,33 @@ fn first_version() -> u32 {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProviderEntry {
-    /// What the user calls this Provider. Unused until ticket 07 has more than
-    /// one to tell apart, but a Provider nobody can name is not a Provider.
-    #[allow(dead_code)]
+    /// What the user calls this Provider, and what the first half of a Model's
+    /// name refers to.
     name: String,
-    base_url: String,
-    model: String,
+    /// Absent when the preset supplies it.
+    base_url: Option<String>,
     preset: Option<Preset>,
     api_key: Option<String>,
     api_key_env: Option<String>,
+    /// The Models of this Provider the user wants to use — not everything it
+    /// offers, which is what the Model list is fetched for.
+    #[serde(default)]
+    models: Vec<ModelEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ModelEntry {
+    id: String,
+    #[serde(default)]
+    vision: bool,
 }
 
 /// A service Demysto knows the conventions of.
 ///
-/// The preset says which environment variable the service's own documentation
-/// tells people to export — nothing more in this ticket. Ticket 07 gives it the
-/// base URL as well, so that setup becomes picking a name.
+/// The three ADR-0002 fixes the key order for, and no more: a preset is a
+/// decision about where somebody's key goes, and inventing one here would be
+/// inventing a decision nothing recorded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Preset {
@@ -201,14 +347,110 @@ enum Preset {
     Openrouter,
 }
 
+/// What Demysto knows about a service: the word the file names it by, where it
+/// answers, and the environment variable its own documentation tells people to
+/// export.
+struct Spec {
+    name: &'static str,
+    base_url: &'static str,
+    key_env: &'static str,
+}
+
 impl Preset {
-    fn conventional_key_env(self) -> &'static str {
+    /// Every preset there is, so that the template can name them: a preset
+    /// nobody has heard of is a base URL somebody looks up anyway.
+    const ALL: [Self; 3] = [Self::Deepseek, Self::Openai, Self::Openrouter];
+
+    /// Everything known about one service, in one place: a preset added here is
+    /// a preset added once, and the match keeps the compiler asking.
+    fn spec(self) -> Spec {
         match self {
-            Self::Deepseek => "DEEPSEEK_API_KEY",
-            Self::Openai => "OPENAI_API_KEY",
-            Self::Openrouter => "OPENROUTER_API_KEY",
+            Self::Deepseek => Spec {
+                name: "deepseek",
+                base_url: "https://api.deepseek.com/v1",
+                key_env: "DEEPSEEK_API_KEY",
+            },
+            Self::Openai => Spec {
+                name: "openai",
+                base_url: "https://api.openai.com/v1",
+                key_env: "OPENAI_API_KEY",
+            },
+            Self::Openrouter => Spec {
+                name: "openrouter",
+                base_url: "https://openrouter.ai/api/v1",
+                key_env: "OPENROUTER_API_KEY",
+            },
         }
     }
+}
+
+/// What a Provider is reached at: what it states, else what its preset knows.
+///
+/// A stated base URL wins over the preset's, so that a proxy or a regional
+/// endpoint does not cost the user the preset's other half.
+fn base_url(entry: &ProviderEntry, path: &Path) -> Result<String, ConfigError> {
+    stated(entry.base_url.clone())
+        .or_else(|| entry.preset.map(|preset| preset.spec().base_url.to_owned()))
+        .ok_or_else(|| {
+            ConfigError::Malformed(format!(
+                "the Provider \"{}\" in {} states no base_url and no preset to take one from",
+                entry.name,
+                path.display()
+            ))
+        })
+}
+
+/// What has to hold before a Provider can be named in a Model's name at all.
+///
+/// A name that is empty, taken, or holds the separator would make some Model
+/// unreachable or ambiguous, and a Model nobody can name is a Model nobody can
+/// nominate — a failure that would otherwise surface as "no such Model" over a
+/// file that plainly holds it.
+fn nameable(entry: &ProviderEntry, taken: &[Provider], path: &Path) -> Result<(), ConfigError> {
+    let malformed = |reason: String| {
+        Err(ConfigError::Malformed(format!(
+            "{reason} in {}",
+            path.display()
+        )))
+    };
+
+    if entry.name.trim().is_empty() {
+        return malformed("a Provider is configured with no name".to_owned());
+    }
+
+    if entry.name.contains(SEPARATOR) {
+        return malformed(format!(
+            "the Provider \"{}\" has a \"{SEPARATOR}\" in its name, which is what separates a \
+             Provider from a Model",
+            entry.name
+        ));
+    }
+
+    if taken.iter().any(|provider| provider.name == entry.name) {
+        return malformed(format!(
+            "two Providers are called \"{}\", so a Model of either cannot be named",
+            entry.name
+        ));
+    }
+
+    if let Some(duplicate) = duplicate_model(entry) {
+        return malformed(format!(
+            "the Provider \"{}\" lists the Model \"{duplicate}\" twice",
+            entry.name
+        ));
+    }
+
+    Ok(())
+}
+
+fn duplicate_model(entry: &ProviderEntry) -> Option<&str> {
+    let mut seen = BTreeSet::new();
+
+    entry
+        .models
+        .iter()
+        .find(|model| !seen.insert(model.id.as_str()))
+        .map(|model| model.id.as_str())
 }
 
 /// The key for a Provider, in the order ADR-0002 fixes: the variable the
@@ -227,7 +469,7 @@ fn resolve_key(entry: &ProviderEntry, env: &dyn Env) -> Option<String> {
         .or_else(|| {
             entry
                 .preset
-                .and_then(|preset| from_env(preset.conventional_key_env()))
+                .and_then(|preset| from_env(preset.spec().key_env))
         })
         .or_else(|| stated(entry.api_key.clone()))
 }
@@ -253,16 +495,19 @@ fn no_key(entry: &ProviderEntry, path: &Path) -> String {
         .api_key_env
         .as_deref()
         .into_iter()
-        .chain(entry.preset.map(Preset::conventional_key_env))
+        .chain(entry.preset.map(|preset| preset.spec().key_env))
         .collect();
 
     match variables.is_empty() {
         true => format!(
-            "no API key is configured; set api_key in {}, or name an environment variable in api_key_env",
+            "The Provider \"{}\" has no API key: set api_key for it in {}, or name an \
+             environment variable in api_key_env.",
+            entry.name,
             path.display()
         ),
         false => format!(
-            "no API key is configured; export {}, or set api_key in {}",
+            "The Provider \"{}\" has no API key: export {}, or set api_key for it in {}.",
+            entry.name,
             variables.into_iter().collect::<Vec<_>>().join(" or "),
             path.display()
         ),
@@ -299,7 +544,7 @@ fn create(path: &Path) -> Result<(), ConfigError> {
         Err(error) => return Err(unreadable(path, &error)),
     };
 
-    file.write_all(TEMPLATE.as_bytes())
+    file.write_all(template().as_bytes())
         .map_err(|error| unreadable(path, &error))
 }
 
@@ -397,27 +642,35 @@ mod tests {
         }
     }
 
-    /// A settings file with the given Provider block, and the config it loads to.
-    fn load_with(providers: &str, env: &FakeEnv) -> (TempDir, Result<Config, ConfigError>) {
+    /// A settings file holding `body` under the version line, and the config it
+    /// loads to.
+    fn load_with(body: &str, env: &FakeEnv) -> (TempDir, Result<Config, ConfigError>) {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join(FILE_NAME),
-            format!("version = 1\n\n{providers}"),
-        )
-        .unwrap();
+        fs::write(dir.path().join(FILE_NAME), format!("version = 1\n\n{body}")).unwrap();
 
         let loaded = load(dir.path(), env);
         (dir, loaded)
     }
 
-    fn config(providers: &str, env: &FakeEnv) -> Config {
-        let (_dir, loaded) = load_with(providers, env);
+    fn config(body: &str, env: &FakeEnv) -> Config {
+        let (_dir, loaded) = load_with(body, env);
         loaded.expect("the settings should have loaded")
     }
 
-    fn error(providers: &str, env: &FakeEnv) -> ConfigError {
-        let (_dir, loaded) = load_with(providers, env);
+    fn error(body: &str, env: &FakeEnv) -> ConfigError {
+        let (_dir, loaded) = load_with(body, env);
         loaded.expect_err("the settings should not have loaded")
+    }
+
+    /// The key the first Provider resolved to, for the tests about where a key
+    /// comes from.
+    fn key(body: &str, env: &FakeEnv) -> Result<String, String> {
+        config(body, env).providers.remove(0).api_key
+    }
+
+    /// The sentence a Provider with no key carries.
+    fn no_key_message(body: &str, env: &FakeEnv) -> String {
+        key(body, env).expect_err("the Provider should have found no key")
     }
 
     /// A Provider naming its own variable, carrying a preset, and holding a key
@@ -427,9 +680,9 @@ mod tests {
 name = \"deepseek\"
 preset = \"deepseek\"
 base_url = \"https://api.deepseek.com/v1\"
-model = \"deepseek-chat\"
 api_key = \"from-the-file\"
 api_key_env = \"MY_OWN_KEY\"
+models = [{ id = \"deepseek-chat\" }]
 ";
 
     /// The same Provider with `api_key_env` taken off it.
@@ -447,8 +700,8 @@ api_key_env = \"MY_OWN_KEY\"
         let env = FakeEnv::holding(&[("MY_OWN_KEY", "from-my-own-variable")]);
 
         assert_eq!(
-            config(EVERY_SOURCE, &env).provider.api_key,
-            "from-my-own-variable"
+            key(EVERY_SOURCE, &env).as_deref(),
+            Ok("from-my-own-variable")
         );
     }
 
@@ -457,16 +710,16 @@ api_key_env = \"MY_OWN_KEY\"
         let env = FakeEnv::holding(&[("DEEPSEEK_API_KEY", "from-the-preset")]);
 
         assert_eq!(
-            config(&without_its_own_variable(), &env).provider.api_key,
-            "from-the-preset"
+            key(&without_its_own_variable(), &env).as_deref(),
+            Ok("from-the-preset")
         );
     }
 
     #[test]
     fn the_key_comes_from_the_file_when_the_environment_holds_none() {
         assert_eq!(
-            config(&file_only(), &FakeEnv::default()).provider.api_key,
-            "from-the-file"
+            key(&file_only(), &FakeEnv::default()).as_deref(),
+            Ok("from-the-file")
         );
     }
 
@@ -478,8 +731,8 @@ api_key_env = \"MY_OWN_KEY\"
         ]);
 
         assert_eq!(
-            config(EVERY_SOURCE, &env).provider.api_key,
-            "from-my-own-variable"
+            key(EVERY_SOURCE, &env).as_deref(),
+            Ok("from-my-own-variable")
         );
     }
 
@@ -487,10 +740,7 @@ api_key_env = \"MY_OWN_KEY\"
     fn the_presets_variable_wins_over_the_file() {
         let env = FakeEnv::holding(&[("DEEPSEEK_API_KEY", "from-the-preset")]);
 
-        assert_eq!(
-            config(EVERY_SOURCE, &env).provider.api_key,
-            "from-the-preset"
-        );
+        assert_eq!(key(EVERY_SOURCE, &env).as_deref(), Ok("from-the-preset"));
     }
 
     #[test]
@@ -499,7 +749,7 @@ api_key_env = \"MY_OWN_KEY\"
         // reading it as a key would turn a working configuration into a 401.
         let env = FakeEnv::holding(&[("MY_OWN_KEY", ""), ("DEEPSEEK_API_KEY", "   ")]);
 
-        assert_eq!(config(EVERY_SOURCE, &env).provider.api_key, "from-the-file");
+        assert_eq!(key(EVERY_SOURCE, &env).as_deref(), Ok("from-the-file"));
     }
 
     #[test]
@@ -507,19 +757,15 @@ api_key_env = \"MY_OWN_KEY\"
         let env = FakeEnv::holding(&[("MY_OWN_KEY", "  from-my-own-variable\n")]);
 
         assert_eq!(
-            config(EVERY_SOURCE, &env).provider.api_key,
-            "from-my-own-variable"
+            key(EVERY_SOURCE, &env).as_deref(),
+            Ok("from-my-own-variable")
         );
     }
 
     #[test]
     fn no_key_anywhere_names_every_variable_that_was_looked_at() {
-        let ConfigError::NoKey(message) = error(
-            &EVERY_SOURCE.replace("api_key = \"from-the-file\"\n", ""),
-            &FakeEnv::default(),
-        ) else {
-            panic!("a Provider with no key should fail for want of one");
-        };
+        let missing = EVERY_SOURCE.replace("api_key = \"from-the-file\"\n", "");
+        let message = no_key_message(&missing, &FakeEnv::default());
 
         assert!(message.contains("MY_OWN_KEY"), "{message}");
         assert!(message.contains("DEEPSEEK_API_KEY"), "{message}");
@@ -529,20 +775,200 @@ api_key_env = \"MY_OWN_KEY\"
     #[test]
     fn a_provider_with_no_variables_to_name_still_says_where_a_key_goes() {
         let missing = file_only().replace("api_key = \"from-the-file\"\n", "");
-        let ConfigError::NoKey(message) = error(&missing, &FakeEnv::default()) else {
-            panic!("a Provider with no key should fail for want of one");
-        };
+        let message = no_key_message(&missing, &FakeEnv::default());
 
         assert!(message.contains(FILE_NAME), "{message}");
         assert!(message.contains("api_key_env"), "{message}");
     }
 
     #[test]
-    fn the_provider_is_read_from_the_file() {
-        let provider = config(&file_only(), &FakeEnv::default()).provider;
+    fn a_provider_with_no_key_says_which_provider_it_is() {
+        // Several Providers may be configured, and only one of them is broken.
+        let missing = file_only().replace("api_key = \"from-the-file\"\n", "");
+        let message = no_key_message(&missing, &FakeEnv::default());
 
+        assert!(message.contains("deepseek"), "{message}");
+    }
+
+    #[test]
+    fn a_provider_missing_its_key_leaves_the_others_configured() {
+        let both = format!(
+            "{}\n[[providers]]\nname = \"openai\"\npreset = \"openai\"\n\
+             models = [{{ id = \"gpt-4o-mini\" }}]\n",
+            file_only().replace("api_key = \"from-the-file\"\n", "")
+        );
+
+        let config = config(&both, &FakeEnv::holding(&[("OPENAI_API_KEY", "a-key")]));
+
+        assert!(config.providers[0].api_key.is_err());
+        assert_eq!(config.providers[1].api_key.as_deref(), Ok("a-key"));
+    }
+
+    #[test]
+    fn the_provider_is_read_from_the_file() {
+        let provider = config(&file_only(), &FakeEnv::default())
+            .providers
+            .remove(0);
+
+        assert_eq!(provider.name, "deepseek");
         assert_eq!(provider.base_url, "https://api.deepseek.com/v1");
-        assert_eq!(provider.model, "deepseek-chat");
+        assert_eq!(
+            provider.models,
+            vec![Model {
+                id: "deepseek-chat".to_owned(),
+                vision: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn several_providers_are_all_configured() {
+        let both = format!(
+            "{EVERY_SOURCE}\n[[providers]]\nname = \"openai\"\npreset = \"openai\"\n\
+             api_key = \"another-key\"\nmodels = [{{ id = \"gpt-4o-mini\" }}]\n"
+        );
+
+        let names: Vec<String> = config(&both, &FakeEnv::default())
+            .providers
+            .into_iter()
+            .map(|provider| provider.name)
+            .collect();
+
+        assert_eq!(names, ["deepseek", "openai"]);
+    }
+
+    #[test]
+    fn a_preset_fills_in_the_base_url() {
+        let by_preset = "[[providers]]\nname = \"openai\"\npreset = \"openai\"\n\
+                         api_key = \"a-key\"\n";
+
+        assert_eq!(
+            config(by_preset, &FakeEnv::default()).providers[0].base_url,
+            "https://api.openai.com/v1"
+        );
+    }
+
+    #[test]
+    fn a_stated_base_url_wins_over_the_presets() {
+        // A proxy or a regional endpoint should not cost the user the preset's
+        // other half.
+        let proxied = EVERY_SOURCE.replace(
+            "base_url = \"https://api.deepseek.com/v1\"",
+            "base_url = \"https://proxy.internal/v1\"",
+        );
+
+        assert_eq!(
+            config(&proxied, &FakeEnv::default()).providers[0].base_url,
+            "https://proxy.internal/v1"
+        );
+    }
+
+    #[test]
+    fn a_provider_with_no_address_at_all_is_reported() {
+        let nowhere = "[[providers]]\nname = \"mine\"\napi_key = \"a-key\"\n";
+        let ConfigError::Malformed(message) = error(nowhere, &FakeEnv::default()) else {
+            panic!("a Provider with no address should be reported as malformed");
+        };
+
+        assert!(message.contains("base_url"), "{message}");
+        assert!(message.contains("preset"), "{message}");
+    }
+
+    #[test]
+    fn a_model_does_not_accept_images_unless_it_says_so() {
+        // The whole point of the flag: a name is not a capability.
+        let named_like_one = EVERY_SOURCE.replace("deepseek-chat", "gpt-4o-vision-preview");
+
+        assert!(!config(&named_like_one, &FakeEnv::default()).providers[0].models[0].vision);
+    }
+
+    #[test]
+    fn a_model_marked_vision_capable_carries_it() {
+        let seeing = EVERY_SOURCE.replace(
+            "{ id = \"deepseek-chat\" }",
+            "{ id = \"deepseek-chat\", vision = true }",
+        );
+
+        assert!(config(&seeing, &FakeEnv::default()).providers[0].models[0].vision);
+    }
+
+    #[test]
+    fn a_model_is_found_by_the_provider_that_offers_it_and_its_own_name() {
+        let config = config(EVERY_SOURCE, &FakeEnv::default());
+
+        let (provider, model) = config
+            .model("deepseek/deepseek-chat")
+            .expect("the Model should be found by its qualified name");
+
+        assert_eq!(provider.name, "deepseek");
+        assert_eq!(model.id, "deepseek-chat");
+    }
+
+    #[test]
+    fn a_model_whose_own_name_holds_a_slash_is_still_found() {
+        // Half of what an aggregating Provider offers is named this way.
+        let routed = "[[providers]]\nname = \"openrouter\"\npreset = \"openrouter\"\n\
+                      api_key = \"a-key\"\nmodels = [{ id = \"anthropic/claude-sonnet-4.5\" }]\n";
+        let config = config(routed, &FakeEnv::default());
+
+        let (_, model) = config
+            .model("openrouter/anthropic/claude-sonnet-4.5")
+            .expect("the Model should be found by its qualified name");
+
+        assert_eq!(model.id, "anthropic/claude-sonnet-4.5");
+    }
+
+    #[test]
+    fn a_provider_whose_name_holds_a_slash_is_reported() {
+        // It would make some Model's name ambiguous, and the user would be told
+        // there is no such Model over a file that plainly holds it.
+        let slashed = EVERY_SOURCE.replace("name = \"deepseek\"", "name = \"deep/seek\"");
+
+        assert!(matches!(
+            error(&slashed, &FakeEnv::default()),
+            ConfigError::Malformed(_)
+        ));
+    }
+
+    #[test]
+    fn two_providers_of_the_same_name_are_reported() {
+        let twice = format!("{EVERY_SOURCE}\n{EVERY_SOURCE}");
+        let ConfigError::Malformed(message) = error(&twice, &FakeEnv::default()) else {
+            panic!("two Providers of one name should be reported as malformed");
+        };
+
+        assert!(message.contains("deepseek"), "{message}");
+    }
+
+    #[test]
+    fn a_model_listed_twice_by_one_provider_is_reported() {
+        let twice = EVERY_SOURCE.replace(
+            "models = [{ id = \"deepseek-chat\" }]",
+            "models = [{ id = \"deepseek-chat\" }, { id = \"deepseek-chat\", vision = true }]",
+        );
+
+        assert!(matches!(
+            error(&twice, &FakeEnv::default()),
+            ConfigError::Malformed(_)
+        ));
+    }
+
+    #[test]
+    fn the_two_defaults_are_read_from_the_file() {
+        let nominated = format!(
+            "default_model = \"deepseek/deepseek-chat\"\n\
+             default_vision_model = \"openai/gpt-4o\"\n\n{EVERY_SOURCE}"
+        );
+        let config = config(&nominated, &FakeEnv::default());
+
+        assert_eq!(
+            config.default_model.as_deref(),
+            Some("deepseek/deepseek-chat")
+        );
+        assert_eq!(
+            config.default_vision_model.as_deref(),
+            Some("openai/gpt-4o")
+        );
     }
 
     #[test]
@@ -592,6 +1018,52 @@ api_key_env = \"MY_OWN_KEY\"
     }
 
     #[test]
+    fn the_example_the_template_offers_is_one_that_would_load() {
+        // Uncommenting it is the whole of what a new user is asked to do.
+        let config = config(EXAMPLE, &FakeEnv::default());
+
+        assert_eq!(
+            config.default_model.as_deref(),
+            Some("deepseek/deepseek-chat")
+        );
+        assert!(config
+            .model("openai/gpt-4o")
+            .is_some_and(|(_, model)| model.vision));
+    }
+
+    #[test]
+    fn every_preset_the_template_names_is_one_the_file_accepts_and_has_an_address_for() {
+        // The names are written out for the template, and read back by serde
+        // from the same word; a typo in either would be a preset the file names
+        // and rejects.
+        let written = template();
+
+        for preset in Preset::ALL {
+            let spec = preset.spec();
+            assert!(written.contains(spec.name), "{written}");
+
+            let by_preset = format!(
+                "[[providers]]\nname = \"mine\"\npreset = \"{}\"\napi_key = \"a-key\"\n",
+                spec.name
+            );
+
+            assert_eq!(
+                config(&by_preset, &FakeEnv::default()).providers[0].base_url,
+                spec.base_url
+            );
+        }
+    }
+
+    #[test]
+    fn the_template_holds_the_example_with_a_comment_marker_on_every_line() {
+        let written = template();
+
+        for line in EXAMPLE.lines().filter(|line| !line.is_empty()) {
+            assert!(written.contains(&format!("# {line}\n")), "{written}");
+        }
+    }
+
+    #[test]
     fn a_settings_file_that_is_already_there_is_left_alone() {
         let (dir, _) = load_with(&file_only(), &FakeEnv::default());
 
@@ -621,7 +1093,7 @@ api_key_env = \"MY_OWN_KEY\"
         };
 
         assert!(!message.contains("from-the-file"), "{message}");
-        assert!(message.contains("line 7"), "{message}");
+        assert!(message.contains("line 6"), "{message}");
     }
 
     #[test]
@@ -629,6 +1101,16 @@ api_key_env = \"MY_OWN_KEY\"
         // Silently ignoring `api_kye` would leave the user staring at a file
         // that plainly holds their key and a Demysto that cannot find it.
         let misspelled = file_only().replace("api_key =", "api_kye =");
+
+        assert!(matches!(
+            error(&misspelled, &FakeEnv::default()),
+            ConfigError::Malformed(_)
+        ));
+    }
+
+    #[test]
+    fn a_misspelled_field_on_a_model_is_reported_too() {
+        let misspelled = EVERY_SOURCE.replace("id = \"deepseek-chat\"", "idd = \"deepseek-chat\"");
 
         assert!(matches!(
             error(&misspelled, &FakeEnv::default()),

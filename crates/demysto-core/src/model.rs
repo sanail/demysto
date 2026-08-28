@@ -1,0 +1,369 @@
+//! Model resolution: from an Action and a Selection to exactly one Model, or to
+//! an error saying which setting is missing.
+//!
+//! The chain the spec's *Model resolution* fixes is the Action's own binding,
+//! then the Default Vision Model when the Selection is an image, then the
+//! Default Model. Nothing here reaches the disk or the network: it works on the
+//! settings as `config` read them, which is what lets the whole chain — the
+//! branches a Run reaches today and the one v1 has no Selection kind for yet —
+//! be tested without either.
+//!
+//! Every failure here is a [`RunError::Configuration`], because every one of
+//! them is fixed in the settings file rather than by trying again.
+
+use crate::config::{self, Config, Model, Provider};
+use crate::run::RunError;
+use crate::selection::Kind;
+
+/// What the settings call the Model an Action resolves to when it binds none.
+const MODEL_SETTING: &str = "default_model";
+/// And the one an image Selection resolves to first.
+const VISION_SETTING: &str = "default_vision_model";
+
+/// A Model, the Provider that offers it, and the key to reach it with:
+/// everything a Run needs in order to ask something.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Resolved<'a> {
+    pub(crate) provider: &'a Provider,
+    pub(crate) model: &'a Model,
+    pub(crate) api_key: &'a str,
+}
+
+/// The one Model a Run of this Action against a Selection of this kind uses.
+///
+/// `binding` is the Model the Action names. No built-in names one, and ticket
+/// 09 is where an Override gives an Action its own.
+pub(crate) fn resolve<'a>(
+    config: &'a Config,
+    binding: Option<&str>,
+    kind: Kind,
+) -> Result<Resolved<'a>, RunError> {
+    let (provider, model) = chosen(config, binding, kind)?;
+
+    Ok(Resolved {
+        provider,
+        model,
+        api_key: key_for(provider)?,
+    })
+}
+
+/// The key to reach a Provider with, or the sentence telling the user where to
+/// put one.
+///
+/// The one place a key is taken out of the settings, which is what ADR-0002
+/// asks for in exchange for keeping it on disk: "all key access goes through a
+/// single interface in the Rust layer". Asked at the moment a Provider is
+/// reached for rather than at load, so that one Provider missing its key costs
+/// the user only the Models that Provider offers.
+pub(crate) fn key_for(provider: &Provider) -> Result<&str, RunError> {
+    provider
+        .api_key
+        .as_deref()
+        .map_err(|missing| RunError::Configuration(missing.to_owned()))
+}
+
+/// Which Model the chain arrives at, before anything is asked about reaching it.
+fn chosen<'a>(
+    config: &'a Config,
+    binding: Option<&str>,
+    kind: Kind,
+) -> Result<(&'a Provider, &'a Model), RunError> {
+    // What the Action names wins outright, images included: a binding is the
+    // user saying which Model, and Demysto is in no position to know better.
+    if let Some(name) = binding {
+        return config
+            .model(name)
+            .ok_or_else(|| bound_to_nothing(config, name));
+    }
+
+    if kind == Kind::Image {
+        if let Some(name) = config.default_vision_model.as_deref() {
+            return config
+                .model(name)
+                .ok_or_else(|| nominates_nothing(config, VISION_SETTING, name));
+        }
+    }
+
+    // An image with no Default Vision Model nominated goes to the Default Model
+    // like anything else. Whether Demysto should refuse to send it to a Model
+    // that cannot see is a real question, and one for v1.1: it has no Selection
+    // to ask it of yet, and the answer is worth deciding against a picture
+    // rather than against a guess.
+    default(config)
+}
+
+/// The Model an Action that binds none resolves to.
+fn default(config: &Config) -> Result<(&Provider, &Model), RunError> {
+    let Some(name) = config.default_model.as_deref() else {
+        return Err(nothing_nominated(config));
+    };
+
+    config
+        .model(name)
+        .ok_or_else(|| nominates_nothing(config, MODEL_SETTING, name))
+}
+
+/// The Models there are to choose from, so that the user can fix a name without
+/// going to look one up.
+fn offered(config: &Config) -> String {
+    let names: Vec<String> = config
+        .models()
+        .map(|(provider, model)| config::qualified(provider, model))
+        .collect();
+
+    match names.is_empty() {
+        true => "No Model is configured at all; add one to a Provider there.".to_owned(),
+        false => format!("The Models configured there are: {}.", names.join(", ")),
+    }
+}
+
+fn bound_to_nothing(config: &Config, name: &str) -> RunError {
+    RunError::Configuration(format!(
+        "This Action is bound to the Model \"{name}\", and no Provider in {} offers one by that \
+         name. {}",
+        config.path.display(),
+        offered(config)
+    ))
+}
+
+fn nominates_nothing(config: &Config, setting: &str, name: &str) -> RunError {
+    RunError::Configuration(format!(
+        "{setting} in {} names the Model \"{name}\", and no Provider there offers one by that \
+         name. {}",
+        config.path.display(),
+        offered(config)
+    ))
+}
+
+fn nothing_nominated(config: &Config) -> RunError {
+    RunError::Configuration(format!(
+        "No {MODEL_SETTING} is nominated in {}. {}",
+        config.path.display(),
+        offered(config)
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    //! The chain the spec's *Testing Decisions* asks to see tested "down the
+    //! full chain, including the unresolvable case", tested here rather than at
+    //! the facade — because two of its three legs cannot be reached from there
+    //! in v1. No built-in Action binds a Model, and no Capture produces an
+    //! image, so a seam-level test could exercise only the Default Model. What
+    //! a Run does reach is asserted at the facade alongside everything else;
+    //! this is the rest of the chain, and it follows `config`'s own precedent
+    //! of testing key resolution beside the code that resolves.
+    //!
+    //! Settings are built here rather than parsed, so that these are about
+    //! which Model the chain arrives at and not about what TOML says.
+
+    use std::path::PathBuf;
+
+    use super::*;
+
+    const FILE: &str = "/somewhere/settings.toml";
+
+    /// A Provider with a key, offering the Models named — each with whether it
+    /// accepts images.
+    fn provider(name: &str, models: &[(&str, bool)]) -> Provider {
+        Provider {
+            name: name.to_owned(),
+            base_url: format!("https://{name}.example/v1"),
+            api_key: Ok(format!("{name}-key")),
+            models: models
+                .iter()
+                .map(|(id, vision)| Model {
+                    id: (*id).to_owned(),
+                    vision: *vision,
+                })
+                .collect(),
+        }
+    }
+
+    /// The same Provider with nowhere a key could be found.
+    fn keyless(name: &str, models: &[(&str, bool)]) -> Provider {
+        Provider {
+            api_key: Err(format!(
+                "The Provider \"{name}\" has no API key: export SOMETHING."
+            )),
+            ..provider(name, models)
+        }
+    }
+
+    fn settings(providers: Vec<Provider>, default: Option<&str>, vision: Option<&str>) -> Config {
+        Config {
+            path: PathBuf::from(FILE),
+            providers,
+            default_model: default.map(ToOwned::to_owned),
+            default_vision_model: vision.map(ToOwned::to_owned),
+        }
+    }
+
+    /// One Provider offering one blind Model, nominated as the Default Model —
+    /// the whole of what most users configure.
+    fn one_model() -> Config {
+        settings(
+            vec![provider("cheap", &[("everyday", false)])],
+            Some("cheap/everyday"),
+            None,
+        )
+    }
+
+    /// A cheap blind Model and an expensive seeing one, at two Providers.
+    fn both() -> Config {
+        settings(
+            vec![
+                provider("cheap", &[("everyday", false)]),
+                provider("dear", &[("sharp", true)]),
+            ],
+            Some("cheap/everyday"),
+            Some("dear/sharp"),
+        )
+    }
+
+    /// The Model the chain arrives at, by the name it is nominated by.
+    fn resolved(config: &Config, binding: Option<&str>, kind: Kind) -> String {
+        let resolved = resolve(config, binding, kind).expect("the chain should resolve");
+
+        config::qualified(resolved.provider, resolved.model)
+    }
+
+    /// What the user is told when it arrives at nothing.
+    fn failure(config: &Config, binding: Option<&str>, kind: Kind) -> String {
+        let error = resolve(config, binding, kind).expect_err("the chain should not resolve");
+
+        assert!(
+            matches!(error, RunError::Configuration(_)),
+            "a setting is what would fix it: {error:?}"
+        );
+
+        error.message().to_owned()
+    }
+
+    #[test]
+    fn an_action_that_binds_a_model_gets_that_model() {
+        assert_eq!(
+            resolved(&both(), Some("dear/sharp"), Kind::Text),
+            "dear/sharp"
+        );
+    }
+
+    #[test]
+    fn a_binding_wins_over_both_defaults() {
+        // Including for an image, where the Default Vision Model would
+        // otherwise have it: a binding is the user saying which Model.
+        assert_eq!(
+            resolved(&both(), Some("cheap/everyday"), Kind::Image),
+            "cheap/everyday"
+        );
+    }
+
+    #[test]
+    fn a_binding_to_a_model_nobody_offers_names_what_is_missing() {
+        let message = failure(&both(), Some("dear/imagined"), Kind::Text);
+
+        assert!(message.contains("dear/imagined"), "{message}");
+        assert!(message.contains(FILE), "{message}");
+        assert!(message.contains("cheap/everyday"), "{message}");
+    }
+
+    #[test]
+    fn an_action_that_binds_nothing_gets_the_default_model() {
+        assert_eq!(resolved(&both(), None, Kind::Text), "cheap/everyday");
+    }
+
+    #[test]
+    fn an_image_gets_the_default_vision_model() {
+        assert_eq!(resolved(&both(), None, Kind::Image), "dear/sharp");
+    }
+
+    #[test]
+    fn text_is_not_sent_to_the_vision_model_merely_because_there_is_one() {
+        assert_eq!(resolved(&both(), None, Kind::Text), "cheap/everyday");
+    }
+
+    #[test]
+    fn an_image_with_no_vision_model_nominated_falls_back_to_the_default_model() {
+        // The end of the chain is the Default Model, whatever the Selection is.
+        // Whether an image should be kept from a Model that cannot see is
+        // v1.1's to decide, against a picture rather than against a guess.
+        assert_eq!(resolved(&one_model(), None, Kind::Image), "cheap/everyday");
+    }
+
+    #[test]
+    fn a_default_vision_model_naming_nothing_names_the_setting_it_is() {
+        let config = settings(
+            vec![provider("cheap", &[("everyday", false)])],
+            Some("cheap/everyday"),
+            Some("dear/imagined"),
+        );
+        let message = failure(&config, None, Kind::Image);
+
+        assert!(message.contains("default_vision_model"), "{message}");
+        assert!(message.contains("dear/imagined"), "{message}");
+    }
+
+    #[test]
+    fn a_default_model_naming_nothing_names_the_setting_it_is() {
+        let config = settings(
+            vec![provider("cheap", &[("everyday", false)])],
+            Some("cheap/imagined"),
+            None,
+        );
+        let message = failure(&config, None, Kind::Text);
+
+        assert!(message.contains("default_model"), "{message}");
+        assert!(message.contains("cheap/imagined"), "{message}");
+        assert!(message.contains("cheap/everyday"), "{message}");
+    }
+
+    #[test]
+    fn nothing_nominated_asks_for_a_default_model_and_lists_what_there_is() {
+        let config = settings(
+            vec![
+                provider("cheap", &[("everyday", false)]),
+                provider("dear", &[("sharp", true)]),
+            ],
+            None,
+            None,
+        );
+        let message = failure(&config, None, Kind::Text);
+
+        assert!(message.contains("default_model"), "{message}");
+        assert!(message.contains("cheap/everyday"), "{message}");
+        assert!(message.contains("dear/sharp"), "{message}");
+    }
+
+    #[test]
+    fn a_provider_with_no_models_at_all_says_so() {
+        let config = settings(vec![provider("cheap", &[])], None, None);
+        let message = failure(&config, None, Kind::Text);
+
+        assert!(message.contains("No Model is configured"), "{message}");
+        assert!(message.contains(FILE), "{message}");
+    }
+
+    #[test]
+    fn a_model_whose_provider_has_no_key_says_where_a_key_goes() {
+        let config = settings(
+            vec![keyless("cheap", &[("everyday", false)])],
+            Some("cheap/everyday"),
+            None,
+        );
+        let message = failure(&config, None, Kind::Text);
+
+        assert!(message.contains("no API key"), "{message}");
+    }
+
+    #[test]
+    fn the_resolved_model_carries_the_provider_that_offers_it() {
+        // Two Providers, two keys, two addresses: resolving to the Model is
+        // only useful if it says which of them to ask.
+        let config = both();
+        let resolved = resolve(&config, None, Kind::Image).expect("the chain should resolve");
+
+        assert_eq!(resolved.provider.base_url, "https://dear.example/v1");
+        assert_eq!(resolved.api_key, "dear-key");
+        assert_eq!(resolved.model.id, "sharp");
+    }
+}

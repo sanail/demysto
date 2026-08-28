@@ -37,6 +37,13 @@ pub struct Action {
     pub name: String,
     /// What the Palette collects before the Run starts.
     pub parameters: Vec<Parameter>,
+    /// The Model this Action runs on whatever the defaults say, `None` when it
+    /// takes whichever Model resolution arrives at. No built-in binds
+    /// one — a built-in that insisted on somebody's expensive Model would be a
+    /// built-in most people could not run — and ticket 09 lets an Override give
+    /// one to any Action.
+    #[serde(skip)]
+    pub(crate) model: Option<String>,
     #[serde(skip)]
     accepts: Vec<Kind>,
     #[serde(skip)]
@@ -66,6 +73,7 @@ pub(crate) fn built_in() -> Vec<Action> {
             id: "explain".to_owned(),
             name: "Explain".to_owned(),
             parameters: Vec::new(),
+            model: None,
             accepts: vec![Kind::Text],
             template: EXPLAIN.to_owned(),
         },
@@ -81,6 +89,7 @@ pub(crate) fn built_in() -> Vec<Action> {
                 // at all. Typing over it is what the other cases are for.
                 default: Language::INTERFACE.name().to_owned(),
             }],
+            model: None,
             accepts: vec![Kind::Text],
             template: TRANSLATE.to_owned(),
         },
@@ -88,6 +97,7 @@ pub(crate) fn built_in() -> Vec<Action> {
             id: "summarize".to_owned(),
             name: "Summarize".to_owned(),
             parameters: Vec::new(),
+            model: None,
             accepts: vec![Kind::Text],
             template: SUMMARIZE.to_owned(),
         },

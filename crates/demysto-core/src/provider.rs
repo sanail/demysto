@@ -14,11 +14,13 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Provider;
+use crate::model::Resolved;
 use crate::run::{RunError, Stopping};
 use crate::sse;
 
-/// The contract's one endpoint, joined onto whatever base URL the user gave.
-const ENDPOINT: &str = "chat/completions";
+/// The contract's endpoints, joined onto whatever base URL the user gave.
+const ANSWERING: &str = "chat/completions";
+const MODELS: &str = "models";
 
 /// How long a Provider has to answer at all before Demysto stops waiting. Long,
 /// because a slow answer is still an answer, and the user has Stop for the
@@ -53,16 +55,17 @@ const BODY_KEPT: usize = 4 * 300;
 /// Answers as soon as `stopping` says the user has stopped waiting, which
 /// leaves the caller holding what had arrived by then.
 pub(crate) fn answer(
-    provider: &Provider,
+    resolved: &Resolved<'_>,
     said: &[(&str, String)],
     stopping: &Stopping,
     mut arriving: impl FnMut(&str),
 ) -> Result<(), RunError> {
+    let provider = resolved.provider;
     let mut response = client()?
-        .post(endpoint(&provider.base_url))
-        .bearer_auth(&provider.api_key)
+        .post(endpoint(&provider.base_url, ANSWERING))
+        .bearer_auth(resolved.api_key)
         .json(&Request {
-            model: &provider.model,
+            model: &resolved.model.id,
             messages: said
                 .iter()
                 .map(|(role, content)| Message { role, content })
@@ -148,6 +151,35 @@ pub(crate) fn answer(
     }
 }
 
+/// Every Model identifier this Provider says it offers, in the order it lists
+/// them.
+///
+/// What comes back is names and nothing else: whether a Model accepts images is
+/// not something the contract reports, and guessing it here is exactly what the
+/// `vision` flag exists to stop. The user picks from this list and says what
+/// each one can do.
+pub(crate) fn models(provider: &Provider, api_key: &str) -> Result<Vec<String>, RunError> {
+    let response = client()?
+        .get(endpoint(&provider.base_url, MODELS))
+        .bearer_auth(api_key)
+        .send()
+        .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+
+    if !status.is_success() {
+        return Err(RunError::Provider(refused(status.as_u16(), &body)));
+    }
+
+    let offered: Offered = serde_json::from_str(&body)
+        .map_err(|error| RunError::Malformed(malformed(&error.to_string(), &body)))?;
+
+    Ok(offered.data.into_iter().map(|model| model.id).collect())
+}
+
 /// The text one event carries, which is none when the Model sent a fragment
 /// with nothing in it — the first of a stream, carrying only the role, is one.
 fn fragment(payload: &str) -> Result<Option<String>, RunError> {
@@ -169,10 +201,10 @@ fn keep(body_start: &mut Vec<u8>, chunk: &[u8]) {
     body_start.extend_from_slice(&chunk[..room.min(chunk.len())]);
 }
 
-/// The base URL and the endpoint, with exactly one slash between them: a base
+/// The base URL and an endpoint, with exactly one slash between them: a base
 /// URL is copied out of documentation as often with a trailing slash as without.
-fn endpoint(base_url: &str) -> String {
-    format!("{}/{ENDPOINT}", base_url.trim_end_matches('/'))
+fn endpoint(base_url: &str, endpoint: &str) -> String {
+    format!("{}/{endpoint}", base_url.trim_end_matches('/'))
 }
 
 /// The one client the process uses.
@@ -280,6 +312,17 @@ struct Choice {
 struct Delta {
     /// Absent on the event that opens a stream, which carries only the role.
     content: Option<String>,
+}
+
+/// What the Model list endpoint answers with.
+#[derive(Deserialize)]
+struct Offered {
+    data: Vec<OfferedModel>,
+}
+
+#[derive(Deserialize)]
+struct OfferedModel {
+    id: String,
 }
 
 #[derive(Deserialize)]

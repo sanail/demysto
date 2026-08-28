@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 
 use crate::action::Action;
 use crate::run::RunOutcome;
-use crate::selection::Selection;
+use crate::selection::{Kind, Selection};
 
 /// How many Conversations a session holds before the oldest falls off.
 pub(crate) const CAP: usize = 50;
@@ -129,18 +129,19 @@ impl Store {
     }
 
     /// Adds the Turn a follow-up asks to the Conversation on screen, so that
-    /// the window can show the question before there is an answer to it.
+    /// the window can show the question before there is an answer to it, and
+    /// answers with the Conversation it was added to.
     ///
     /// `None` when there is no Conversation to add it to. Declared twice for
     /// the reason [`Self::open`] is, and added once for the same reason.
-    pub(crate) fn follow_up(&mut self, question: &str) -> Option<u64> {
+    pub(crate) fn follow_up(&mut self, question: &str) -> Option<&Conversation> {
         let showing = self.showing_mut()?;
 
         if !showing.turns.last().is_some_and(|last| last.asks(question)) {
             showing.turns.push(Turn::asking(question));
         }
 
-        Some(showing.id)
+        Some(showing)
     }
 
     /// Records what the Turn now being asked sends, and answers with everything
@@ -202,6 +203,26 @@ impl Store {
 }
 
 impl Conversation {
+    /// The Model the Action that opened this Conversation bound, which every
+    /// Turn in it goes to. `None` when it bound none, and the two defaults
+    /// decide.
+    pub(crate) fn binding(&self) -> Option<&str> {
+        self.action
+            .as_ref()
+            .and_then(|action| action.model.as_deref())
+    }
+
+    /// What every Turn in this Conversation is about, which is what decides
+    /// whether it needs a Model that can see.
+    ///
+    /// Text where there is no Selection at all: a Run without one fails before
+    /// it opens a Conversation, so the only way here is the empty Conversation
+    /// a declared Run leaves behind, and asking about nothing is asking in
+    /// words.
+    pub(crate) fn kind(&self) -> Kind {
+        self.selection.as_ref().map_or(Kind::Text, Selection::kind)
+    }
+
     /// Whether this is a Conversation whose one Turn is still waiting for its
     /// first answer, and so is the one a Run about to begin belongs to.
     fn unanswered(&self) -> bool {
