@@ -130,34 +130,62 @@ impl<D: Desktop> Capture for DesktopCapture<D> {
 
         self.desktop.send_copy()?;
 
+        let (outcome, disturbed) = self.settle_for_the_copy(&before);
+
+        // Whether the copy brought a Selection is a separate question from
+        // whether it overwrote the clipboard: one that lands an image, or a
+        // blank line, overwrites it just as thoroughly and gives Demysto
+        // nothing to show for it. The clipboard goes back on every path that
+        // disturbed it, this one included — and before the outcome is reported,
+        // so that a failed Capture still leaves the user what they had.
+        //
+        // Restored verbatim rather than from the meaningful reading of it:
+        // whitespace the user copied is still what they copied. A restore that
+        // fails is not allowed to take a Selection down with it — the text has
+        // been read, and losing it as well would only make things worse.
+        if disturbed {
+            let _ = self.desktop.set_clipboard_text(before.as_deref());
+        }
+
+        outcome
+    }
+}
+
+impl<D: Desktop> DesktopCapture<D> {
+    /// Waits for the copy to land and says what it brought, along with whether
+    /// the clipboard was left holding something other than what it started on.
+    fn settle_for_the_copy(
+        &self,
+        before: &Option<String>,
+    ) -> (Result<Captured, CaptureError>, bool) {
+        let mut disturbed = false;
+
         for _ in 0..self.settle.attempts {
             std::thread::sleep(self.settle.interval);
 
             let after = match self.desktop.clipboard_text() {
                 Ok(after) => after,
-                Err(error) => {
-                    // The copy may already have landed, so the clipboard goes
-                    // back before the failure is reported: a Capture that fails
-                    // still owes the user what they had.
-                    let _ = self.desktop.set_clipboard_text(before.as_deref());
-                    return Err(error);
-                }
+                // What the clipboard holds is now unknown, and unknown is
+                // reason enough to put back what the user had.
+                Err(error) => return (Err(error), true),
             };
 
-            if let Some(text) = changed(&before, &after) {
-                let selection = Selection::text(text);
-                // Restored verbatim rather than from the meaningful reading of
-                // it: whitespace the user copied is still what they copied.
-                self.desktop.set_clipboard_text(before.as_deref())?;
-                return Ok(Captured::Selection(selection));
+            // Tracked across the whole window rather than returned on: an
+            // application may leave the clipboard empty for a poll or two on
+            // its way to writing the text, and that is not the end of it.
+            disturbed |= &after != before;
+
+            if let Some(text) = changed(before, &after) {
+                return (Ok(Captured::Selection(Selection::text(text))), true);
             }
         }
 
-        // The clipboard never changed within the window, so nothing was
-        // selected. An application slower than the whole window still lands its
-        // copy afterwards, and that one Demysto cannot put back — the write
-        // happens after the last look at it.
-        Ok(fallback(&before))
+        // Nothing worth showing arrived within the window, so this is a
+        // Selection Demysto cannot read: either nothing was selected, or what
+        // the copy brought is not text. An application slower than the whole
+        // window still lands its copy afterwards, and that one Demysto cannot
+        // put back — the write happens after the last look at it.
+        (Ok(fallback(before)), disturbed)
     }
 }
 
@@ -217,6 +245,7 @@ pub(crate) mod fake {
         selection: Option<String>,
         lands_after: u32,
         reads_since_copy: Mutex<Option<u32>>,
+        refuses_writes: bool,
     }
 
     impl FakeDesktop {
@@ -230,6 +259,13 @@ pub(crate) mod fake {
 
         pub(crate) fn landing_after(mut self, reads: u32) -> Self {
             self.lands_after = reads;
+            self
+        }
+
+        /// A clipboard that can be read but not written, which is what an X11
+        /// session looks like when its owner changes under Demysto.
+        pub(crate) fn refusing_to_restore(mut self) -> Self {
+            self.refuses_writes = true;
             self
         }
 
@@ -253,6 +289,10 @@ pub(crate) mod fake {
         }
 
         fn set_clipboard_text(&self, text: Option<&str>) -> Result<(), CaptureError> {
+            if self.refuses_writes {
+                return Err(CaptureError::Clipboard("no owner".to_owned()));
+            }
+
             *self.clipboard.lock().unwrap() = text.map(str::to_owned);
             Ok(())
         }

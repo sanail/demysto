@@ -130,6 +130,32 @@ mod tests {
     }
 
     #[test]
+    fn a_copy_that_brings_nothing_worth_showing_still_puts_the_clipboard_back() {
+        // A blank line, or an image where only text can be read: the copy
+        // landed and overwrote the clipboard, and that it brought nothing this
+        // can show is no reason to leave the user without what they had.
+        let desktop = Arc::new(FakeDesktop::new(Some("a receipt"), Some("   ")));
+
+        demysto(fake::over(&desktop)).capture();
+
+        assert_eq!(desktop.clipboard_now(), Some("a receipt".to_owned()));
+    }
+
+    #[test]
+    fn a_clipboard_that_cannot_be_written_back_still_yields_the_selection() {
+        // The text has already been read. Failing to put the clipboard back is
+        // a worse outcome for the user, not a reason to throw the Capture away
+        // and make them press the Hotkey again.
+        let desktop =
+            Arc::new(FakeDesktop::new(None, Some("Ceci n'est pas une pipe")).refusing_to_restore());
+
+        assert_eq!(
+            captured(&demysto(fake::over(&desktop))),
+            Captured::Selection(Selection::text("Ceci n'est pas une pipe"))
+        );
+    }
+
+    #[test]
     fn empties_the_clipboard_again_when_it_was_empty_before() {
         let desktop = Arc::new(FakeDesktop::new(None, Some("Ceci n'est pas une pipe")));
 
