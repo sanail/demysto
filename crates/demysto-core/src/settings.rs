@@ -299,9 +299,15 @@ pub(crate) fn endpoint(
 /// break the Default Model that named it: the key follows a rename, and the
 /// nomination cannot, so this is where the user is asked to pick again.
 fn nominating(config: &Config, setting: &str, name: Option<&str>) -> Result<(), ConfigError> {
-    let Some(name) = name else {
+    // Blank is nothing, for the reason `stating` writes a blank field as an
+    // absent one: the window sends "None" as an empty string, and the two have
+    // to agree — otherwise the file that is about to be written, which states
+    // no default at all, is refused for naming a Model called "".
+    let Some(name) = config::stated(name.map(ToOwned::to_owned)) else {
         return Ok(());
     };
+
+    let name = name.as_str();
 
     if config.model(name).is_some() {
         return Ok(());
@@ -336,7 +342,12 @@ fn entry(draft: &ProviderEdit, stored: Option<String>) -> Result<ProviderEntry, 
             KeyEdit::Set { key } => Some(key.clone()),
             KeyEdit::Forget => None,
         },
-        api_key_env: draft.api_key_env.clone(),
+        // Through `config::stated` like everything else the window sends: it
+        // sends a field it has no value for as an empty string, and naming the
+        // variable "" would be `resolve_key` reading this Provider as one that
+        // is authenticated — which for a keyless preset is the difference
+        // between a Model list and a demand for a key that does not exist.
+        api_key_env: config::stated(draft.api_key_env.clone()),
         models: draft
             .models
             .iter()

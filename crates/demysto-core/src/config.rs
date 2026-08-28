@@ -625,6 +625,16 @@ fn nameable(entry: &ProviderEntry, taken: &[Provider], path: &Path) -> Result<()
         ));
     }
 
+    // A Model with no identifier is a Model nobody can name and a request with
+    // no model in it. It arrives from a window where "Add a Model" adds an
+    // empty row, so it is what saving without typing produces.
+    if entry.models.iter().any(|model| model.id.trim().is_empty()) {
+        return malformed(format!(
+            "the Provider \"{}\" lists a Model with no name",
+            entry.name
+        ));
+    }
+
     if let Some(duplicate) = duplicate_model(entry) {
         return malformed(format!(
             "the Provider \"{}\" lists the Model \"{duplicate}\" twice",
@@ -704,7 +714,7 @@ fn has_no_keys(entry: &ProviderEntry) -> bool {
 ///
 /// A key pasted out of a web page or read from a file arrives with a newline on
 /// it often enough that trimming is the kinder default.
-fn stated(value: Option<String>) -> Option<String> {
+pub(crate) fn stated(value: Option<String>) -> Option<String> {
     let value = value?;
     let trimmed = value.trim();
 

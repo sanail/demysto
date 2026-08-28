@@ -209,10 +209,15 @@
    */
   const nominable = $derived(
     drafts.flatMap((draft) =>
-      draft.models.map((model) => ({
-        name: `${draft.name}/${model.id}`,
-        vision: model.vision,
-      })),
+      draft.models
+        // A row added and not yet typed into is not a Model to nominate: the
+        // save refuses one with no name, and offering "a provider/" here would
+        // be inviting exactly that.
+        .filter((model) => model.id.trim() !== "")
+        .map((model) => ({
+          name: `${draft.name}/${model.id}`,
+          vision: model.vision,
+        })),
     ),
   );
 

@@ -265,8 +265,14 @@ impl Demysto {
     /// cannot be saved bound to a Model nothing offers. Empty where the
     /// settings could not be read at all — which is a state in which nothing
     /// offers any Model, and the window has none to choose from either.
+    ///
+    /// Read from the file rather than answered from what Demysto is running on,
+    /// for the reason [`Self::settings`] is: the window builds the list it
+    /// offers out of the file, and a Model added to that file by hand while
+    /// Demysto ran would otherwise be offered by the window and refused by the
+    /// save.
     fn models_configured(&self) -> Vec<String> {
-        match self.config.read().unwrap().as_ref() {
+        match config::load(&self.config_dir, &self.env) {
             Ok(config) => config
                 .models()
                 .map(|(provider, model)| config::qualified(provider, model))
@@ -3215,6 +3221,122 @@ mod tests {
         };
 
         assert!(message.contains("rewrite-plainly"), "{message}");
+    }
+
+    #[test]
+    fn settings_that_nominate_no_default_model_can_be_saved() {
+        // The window sends "None" as an empty string, and a fresh installation
+        // is exactly that: a Provider configured and no default nominated yet.
+        // Refusing it would leave somebody unable to save at all.
+        let demysto = unconfigured("a paragraph");
+
+        let written = saved(
+            &demysto,
+            &Edit {
+                providers: vec![ProviderEdit {
+                    base_url: Some("https://api.example.com/v1".to_owned()),
+                    models: vec![offering("a-model", false)],
+                    ..drafted("a provider")
+                }],
+                default_model: Some(String::new()),
+                default_vision_model: Some("   ".to_owned()),
+            },
+        );
+
+        assert_eq!(written.default_model, None);
+        assert_eq!(written.default_vision_model, None);
+
+        // Not stated at all rather than stated as nothing: `default_model = ""`
+        // is a file that names a Model called "", which is what the save was
+        // about to be refused for.
+        assert!(
+            !settings_file(&demysto)
+                .lines()
+                .any(|line| line.starts_with("default_")),
+            "{}",
+            settings_file(&demysto)
+        );
+    }
+
+    #[test]
+    fn a_provider_the_window_sends_a_blank_variable_for_is_one_that_named_none() {
+        // Every field the window has no value for arrives as an empty string.
+        // Read as a named variable, `api_key_env = ""` is the user saying this
+        // Provider is authenticated — which for a keyless preset turns a Model
+        // list into a demand for a key the service does not have.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("GET", "/v1/models")
+            .match_header("authorization", Matcher::Missing)
+            .with_body(json!({ "data": [{ "id": "a-model" }] }).to_string())
+            .create();
+
+        let demysto = ready_with(
+            &keyless_provider(&format!("{}/v1", server.url())),
+            "a paragraph",
+        );
+
+        let local = ProviderEdit {
+            was: Some("local".to_owned()),
+            preset: Some("lmstudio".to_owned()),
+            base_url: Some(format!("{}/v1", server.url())),
+            api_key_env: Some(String::new()),
+            ..drafted("local")
+        };
+
+        assert_eq!(demysto.models_offered_by(&local).unwrap(), ["a-model"]);
+    }
+
+    #[test]
+    fn a_model_with_no_name_is_refused_rather_than_written() {
+        // "Add a Model" adds an empty row, so this is what saving without
+        // typing into it produces — and it would otherwise reach a Provider as
+        // a request naming no Model at all.
+        let demysto = unconfigured("a paragraph");
+
+        let Err(ConfigError::Malformed(message)) = demysto.save_settings(&edited(
+            vec![ProviderEdit {
+                base_url: Some("https://api.example.com/v1".to_owned()),
+                models: vec![offering("a-model", false), offering("  ", false)],
+                ..drafted("a provider")
+            }],
+            None,
+        )) else {
+            panic!("a Model with no name should be refused");
+        };
+
+        assert!(message.contains("a provider"), "{message}");
+        assert!(!settings_file(&demysto).contains("a-model"));
+    }
+
+    #[test]
+    fn an_action_can_bind_a_model_the_file_gained_since_demysto_started() {
+        // The window builds the list it offers out of the file, which it reads
+        // afresh; the check that an Action's binding names something real has
+        // to read the same file, or the window offers what the save refuses.
+        let demysto = ready_with(&one_provider("http://127.0.0.1:1/v1"), "a paragraph");
+
+        std::fs::write(
+            demysto.config_dir().join(config::FILE_NAME),
+            settings_file(&demysto).replace(
+                "models = [{ id = \"a-model\" }]",
+                "models = [{ id = \"a-model\" }, { id = \"added-by-hand\" }]",
+            ),
+        )
+        .unwrap();
+
+        authored(
+            &demysto,
+            &ActionEdit {
+                model: Some("a provider/added-by-hand".to_owned()),
+                ..writing("Rewrite plainly", "Rewrite: {{selection}}")
+            },
+        );
+
+        assert_eq!(
+            defined(&demysto, "rewrite-plainly").model.as_deref(),
+            Some("a provider/added-by-hand")
+        );
     }
 
     #[test]
