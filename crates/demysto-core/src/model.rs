@@ -11,7 +11,9 @@
 //! Every failure here is a [`RunError::Configuration`], because every one of
 //! them is fixed in the settings file rather than by trying again.
 
-use crate::config::{self, Config, Model, Provider};
+use std::fmt;
+
+use crate::config::{self, Config, Key, Model, Provider};
 use crate::run::RunError;
 use crate::selection::Kind;
 
@@ -22,11 +24,26 @@ const VISION_SETTING: &str = "default_vision_model";
 
 /// A Model, the Provider that offers it, and the key to reach it with:
 /// everything a Run needs in order to ask something.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub(crate) struct Resolved<'a> {
     pub(crate) provider: &'a Provider,
     pub(crate) model: &'a Model,
-    pub(crate) api_key: &'a str,
+    /// `None` for a Provider that has no key to send — see [`key_for`].
+    pub(crate) api_key: Option<&'a str>,
+}
+
+impl fmt::Debug for Resolved<'_> {
+    /// Written out rather than derived, for the reason [`Provider`]'s own is:
+    /// this is the one place the key sits unwrapped, and a key that can be
+    /// printed is a key that reaches a panic message or, once ticket 11 has
+    /// them, a log.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Resolved")
+            .field("provider", self.provider)
+            .field("model", self.model)
+            .field("api_key", &self.api_key.map(|_| "<not shown>"))
+            .finish()
+    }
 }
 
 /// The one Model a Run of this Action against a Selection of this kind uses.
@@ -47,19 +64,20 @@ pub(crate) fn resolve<'a>(
     })
 }
 
-/// The key to reach a Provider with, or the sentence telling the user where to
-/// put one.
+/// The key to reach a Provider with: `None` where the service has none to send,
+/// and an error where it wants one and the user has not supplied it.
 ///
 /// The one place a key is taken out of the settings, which is what ADR-0002
 /// asks for in exchange for keeping it on disk: "all key access goes through a
 /// single interface in the Rust layer". Asked at the moment a Provider is
 /// reached for rather than at load, so that one Provider missing its key costs
 /// the user only the Models that Provider offers.
-pub(crate) fn key_for(provider: &Provider) -> Result<&str, RunError> {
-    provider
-        .api_key
-        .as_deref()
-        .map_err(|missing| RunError::Configuration(missing.to_owned()))
+pub(crate) fn key_for(provider: &Provider) -> Result<Option<&str>, RunError> {
+    match &provider.key {
+        Key::Found(key) => Ok(Some(key)),
+        Key::NotNeeded => Ok(None),
+        Key::Missing(missing) => Err(RunError::Configuration(missing.clone())),
+    }
 }
 
 /// Which Model the chain arrives at, before anything is asked about reaching it.
@@ -169,7 +187,7 @@ mod tests {
         Provider {
             name: name.to_owned(),
             base_url: format!("https://{name}.example/v1"),
-            api_key: Ok(format!("{name}-key")),
+            key: Key::Found(format!("{name}-key")),
             models: models
                 .iter()
                 .map(|(id, vision)| Model {
@@ -180,10 +198,18 @@ mod tests {
         }
     }
 
-    /// The same Provider with nowhere a key could be found.
-    fn keyless(name: &str, models: &[(&str, bool)]) -> Provider {
+    /// A Provider whose service has no keys at all — a server on this machine.
+    fn local(name: &str, models: &[(&str, bool)]) -> Provider {
         Provider {
-            api_key: Err(format!(
+            key: Key::NotNeeded,
+            ..provider(name, models)
+        }
+    }
+
+    /// A Provider whose service wants a key and where none was found.
+    fn wanting_a_key(name: &str, models: &[(&str, bool)]) -> Provider {
+        Provider {
+            key: Key::Missing(format!(
                 "The Provider \"{name}\" has no API key: export SOMETHING."
             )),
             ..provider(name, models)
@@ -346,13 +372,25 @@ mod tests {
     #[test]
     fn a_model_whose_provider_has_no_key_says_where_a_key_goes() {
         let config = settings(
-            vec![keyless("cheap", &[("everyday", false)])],
+            vec![wanting_a_key("cheap", &[("everyday", false)])],
             Some("cheap/everyday"),
             None,
         );
         let message = failure(&config, None, Kind::Text);
 
         assert!(message.contains("no API key"), "{message}");
+    }
+
+    #[test]
+    fn a_model_whose_service_has_no_key_resolves_with_none_to_send() {
+        let config = settings(
+            vec![local("local", &[("a-model", false)])],
+            Some("local/a-model"),
+            None,
+        );
+        let resolved = resolve(&config, None, Kind::Text).expect("the chain should resolve");
+
+        assert_eq!(resolved.api_key, None);
     }
 
     #[test]
@@ -363,7 +401,7 @@ mod tests {
         let resolved = resolve(&config, None, Kind::Image).expect("the chain should resolve");
 
         assert_eq!(resolved.provider.base_url, "https://dear.example/v1");
-        assert_eq!(resolved.api_key, "dear-key");
+        assert_eq!(resolved.api_key, Some("dear-key"));
         assert_eq!(resolved.model.id, "sharp");
     }
 }

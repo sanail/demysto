@@ -1698,6 +1698,54 @@ mod tests {
         assert!(message.contains("api_key"), "{message}");
     }
 
+    /// A settings file naming one local Provider, whose service has no keys.
+    ///
+    /// The preset is what says so; the stated base URL is what points it at the
+    /// suite's server instead of the port LM Studio really listens on, which is
+    /// the same override a user needs for a server on a port of their own.
+    fn keyless_provider(base_url: &str) -> String {
+        format!(
+            "default_model = \"local/a-model\"\n\n\
+             [[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
+             base_url = \"{base_url}\"\nmodels = [{{ id = \"a-model\" }}]\n"
+        )
+    }
+
+    #[test]
+    fn a_run_against_a_service_with_no_keys_sends_no_key() {
+        // Not a placeholder, and not an empty header: nothing at all.
+        let mut server = Server::new();
+        let asked = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("authorization", Matcher::Missing)
+            .with_body(answering("an answer"))
+            .create();
+
+        let settings = keyless_provider(&format!("{}/v1", server.url()));
+
+        assert_eq!(
+            run(&ready_with(&settings, "a paragraph")),
+            RunOutcome::Answered("an answer".to_owned())
+        );
+
+        asked.assert();
+    }
+
+    #[test]
+    fn the_model_list_of_a_service_with_no_keys_is_fetched_without_one() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("GET", "/v1/models")
+            .match_header("authorization", Matcher::Missing)
+            .with_body(json!({ "data": [{ "id": "a-model" }] }).to_string())
+            .create();
+
+        let settings = keyless_provider(&format!("{}/v1", server.url()));
+        let demysto = ready_with(&settings, "a paragraph");
+
+        assert_eq!(demysto.models_offered_by("local").unwrap(), ["a-model"]);
+    }
+
     #[test]
     fn the_model_list_comes_from_the_provider_that_offers_them() {
         let mut server = Server::new();

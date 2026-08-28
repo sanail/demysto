@@ -61,9 +61,12 @@ pub(crate) fn answer(
     mut arriving: impl FnMut(&str),
 ) -> Result<(), RunError> {
     let provider = resolved.provider;
-    let mut response = client()?
-        .post(endpoint(&provider.base_url, ANSWERING))
-        .bearer_auth(resolved.api_key)
+    let asking = authenticated(
+        client()?.post(endpoint(&provider.base_url, ANSWERING)),
+        resolved.api_key,
+    );
+
+    let mut response = asking
         .json(&Request {
             model: &resolved.model.id,
             messages: said
@@ -158,10 +161,8 @@ pub(crate) fn answer(
 /// not something the contract reports, and guessing it here is exactly what the
 /// `vision` flag exists to stop. The user picks from this list and says what
 /// each one can do.
-pub(crate) fn models(provider: &Provider, api_key: &str) -> Result<Vec<String>, RunError> {
-    let response = client()?
-        .get(endpoint(&provider.base_url, MODELS))
-        .bearer_auth(api_key)
+pub(crate) fn models(provider: &Provider, api_key: Option<&str>) -> Result<Vec<String>, RunError> {
+    let response = authenticated(client()?.get(endpoint(&provider.base_url, MODELS)), api_key)
         .send()
         .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
 
@@ -199,6 +200,21 @@ fn fragment(payload: &str) -> Result<Option<String>, RunError> {
 fn keep(body_start: &mut Vec<u8>, chunk: &[u8]) {
     let room = BODY_KEPT.saturating_sub(body_start.len());
     body_start.extend_from_slice(&chunk[..room.min(chunk.len())]);
+}
+
+/// The request, carrying the key where the Provider has one to carry.
+///
+/// A Provider with none is a local server that asks for nothing, and sending it
+/// an invented key would be sending something nobody chose (ADR-0006). The
+/// header is left off rather than filled with a placeholder.
+fn authenticated(
+    request: reqwest::blocking::RequestBuilder,
+    api_key: Option<&str>,
+) -> reqwest::blocking::RequestBuilder {
+    match api_key {
+        Some(key) => request.bearer_auth(key),
+        None => request,
+    }
 }
 
 /// The base URL and an endpoint, with exactly one slash between them: a base

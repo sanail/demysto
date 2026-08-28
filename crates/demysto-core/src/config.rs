@@ -43,9 +43,17 @@ const PREAMBLE: &str = r#"# Demysto's settings.
 #
 # `preset` names a service Demysto knows the conventions of: it fills in
 # `base_url`, and it says which environment variable that service's own
-# documentation tells people to export. The presets are {presets}. State
-# `base_url` yourself for a service that has none of its own, or to override
-# what a preset fills in.
+# documentation tells people to export. State `base_url` yourself for a service
+# that has no preset, or to override what a preset fills in — a local server
+# listening on a port of your own, say.
+#
+# The presets are:
+#
+{presets}
+#
+# A preset marked "no key" is a server running on this machine, which has no
+# keys at all: a Provider using one needs none, and none is sent. Every other
+# preset wants one.
 #
 # The key is looked for in the variable `api_key_env` names, then in the
 # preset's own variable, then in `api_key` here. Leaving `api_key` out and
@@ -77,6 +85,11 @@ models = [{ id = "deepseek-chat" }]
 name = "openai"
 preset = "openai"
 models = [{ id = "gpt-4o-mini" }, { id = "gpt-4o", vision = true }]
+
+[[providers]]
+name = "local"
+preset = "lmstudio"
+models = [{ id = "qwen/qwen3-8b" }]
 "#;
 
 /// What a fresh installation gets: a file that parses, says what goes in it,
@@ -90,8 +103,19 @@ fn template() -> String {
         })
         .collect();
 
-    let named = Preset::ALL.map(|preset| preset.spec().name);
-    let preamble = PREAMBLE.replace(PRESETS, &named.join(", "));
+    // Listed from the presets themselves rather than named in the prose, so
+    // that a preset added later cannot leave the file describing the old set.
+    // One to a line, so that neither can it push a line past the margin.
+    let named = Preset::ALL.map(|preset| match preset.spec() {
+        Spec {
+            name,
+            auth: Auth::Nothing,
+            ..
+        } => format!("#   {name} (no key)"),
+        Spec { name, .. } => format!("#   {name}"),
+    });
+
+    let preamble = PREAMBLE.replace(PRESETS, &named.join("\n"));
 
     format!("{preamble}\n\nversion = {VERSION}\n\n{example}")
 }
@@ -119,14 +143,32 @@ pub(crate) struct Provider {
     /// of its Models is known by.
     pub(crate) name: String,
     pub(crate) base_url: String,
-    /// The key, or the sentence telling the user where to put one.
+    /// What this Provider is authenticated with.
     ///
-    /// Composed at load, while the file's path and the Provider's own fields
-    /// are still at hand, and shown only when a Run resolves to this Provider:
+    /// Settled at load, while the file's path and the Provider's own fields are
+    /// still at hand, and acted on only when a Run resolves to this Provider:
     /// one Provider missing its key is no reason for another Provider's Models
     /// to stop working.
-    pub(crate) api_key: Result<String, String>,
+    pub(crate) key: Key,
     pub(crate) models: Vec<Model>,
+}
+
+/// What Demysto will authenticate a Provider with, once the settings have been
+/// read.
+///
+/// Deliberately without a derived `Debug`, for the reason [`Provider`] has a
+/// hand-written one: a key that can be printed is a key that ends up in a panic
+/// message or, once ticket 11 has them, a log.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) enum Key {
+    /// The key to send.
+    Found(String),
+    /// The service has none to send — a server answering on this machine. The
+    /// request goes out unauthenticated (ADR-0006).
+    NotNeeded,
+    /// The service wants one and none was found. The sentence says where to
+    /// put one.
+    Missing(String),
 }
 
 /// A specific Model offered by a Provider, with the capability Demysto needs to
@@ -152,10 +194,11 @@ impl fmt::Debug for Provider {
             .field("base_url", &self.base_url)
             .field("models", &self.models)
             .field(
-                "api_key",
-                match &self.api_key {
-                    Ok(_) => &"<not shown>",
-                    Err(_) => &"<none>",
+                "key",
+                match &self.key {
+                    Key::Found(_) => &"<not shown>",
+                    Key::NotNeeded => &"<not needed>",
+                    Key::Missing(_) => &"<none>",
                 },
             )
             .finish()
@@ -272,7 +315,7 @@ pub(crate) fn load(config_dir: &Path, env: &dyn Env) -> Result<Config, ConfigErr
         providers.push(Provider {
             name: entry.name.clone(),
             base_url: base_url(entry, &path)?,
-            api_key: resolve_key(entry, env).ok_or_else(|| no_key(entry, &path)),
+            key: resolve_key(entry, env, &path),
             models: entry
                 .models
                 .iter()
@@ -336,13 +379,16 @@ struct ModelEntry {
 
 /// A service Demysto knows the conventions of.
 ///
-/// The three ADR-0002 fixes the key order for, and no more: a preset is a
-/// decision about where somebody's key goes, and inventing one here would be
-/// inventing a decision nothing recorded.
+/// The three ADR-0002 fixes the key order for, and the two local servers
+/// ADR-0006 adds. A preset is a decision about where somebody's key goes — or
+/// that there is none — so one that no ADR records would be a decision nothing
+/// recorded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Preset {
     Deepseek,
+    Lmstudio,
+    Ollama,
     Openai,
     Openrouter,
 }
@@ -353,13 +399,33 @@ enum Preset {
 struct Spec {
     name: &'static str,
     base_url: &'static str,
-    key_env: &'static str,
+    auth: Auth,
+}
+
+/// What a service wants by way of authentication.
+///
+/// Stated rather than inferred from the absence of a variable name: "nobody
+/// documented a variable for this" and "this has no keys at all" are different
+/// facts, and only the second may turn authentication off. A service that
+/// wanted a key and named no variable for it would need a variant of its own.
+enum Auth {
+    /// A key, which the service's own documentation tells people to export as
+    /// this.
+    Variable(&'static str),
+    /// Nothing. A server answering on this machine has no keys to want.
+    Nothing,
 }
 
 impl Preset {
     /// Every preset there is, so that the template can name them: a preset
     /// nobody has heard of is a base URL somebody looks up anyway.
-    const ALL: [Self; 3] = [Self::Deepseek, Self::Openai, Self::Openrouter];
+    const ALL: [Self; 5] = [
+        Self::Deepseek,
+        Self::Lmstudio,
+        Self::Ollama,
+        Self::Openai,
+        Self::Openrouter,
+    ];
 
     /// Everything known about one service, in one place: a preset added here is
     /// a preset added once, and the match keeps the compiler asking.
@@ -368,17 +434,27 @@ impl Preset {
             Self::Deepseek => Spec {
                 name: "deepseek",
                 base_url: "https://api.deepseek.com/v1",
-                key_env: "DEEPSEEK_API_KEY",
+                auth: Auth::Variable("DEEPSEEK_API_KEY"),
+            },
+            Self::Lmstudio => Spec {
+                name: "lmstudio",
+                base_url: "http://localhost:1234/v1",
+                auth: Auth::Nothing,
+            },
+            Self::Ollama => Spec {
+                name: "ollama",
+                base_url: "http://localhost:11434/v1",
+                auth: Auth::Nothing,
             },
             Self::Openai => Spec {
                 name: "openai",
                 base_url: "https://api.openai.com/v1",
-                key_env: "OPENAI_API_KEY",
+                auth: Auth::Variable("OPENAI_API_KEY"),
             },
             Self::Openrouter => Spec {
                 name: "openrouter",
                 base_url: "https://openrouter.ai/api/v1",
-                key_env: "OPENROUTER_API_KEY",
+                auth: Auth::Variable("OPENROUTER_API_KEY"),
             },
         }
     }
@@ -459,19 +535,51 @@ fn duplicate_model(entry: &ProviderEntry) -> Option<&str> {
 /// A source that holds nothing but whitespace is not a source: an exported but
 /// empty variable is a common state of a shell, and reading it as "the key is
 /// the empty string" would turn a working configuration into a 401.
-fn resolve_key(entry: &ProviderEntry, env: &dyn Env) -> Option<String> {
+///
+/// Only what happens when all three come up empty depends on the preset. A key
+/// stated for a keyless service is still used, because the three sources are
+/// asked first: somebody may have put a local server behind something that
+/// wants one.
+fn resolve_key(entry: &ProviderEntry, env: &dyn Env, path: &Path) -> Key {
     let from_env = |name: &str| stated(env.get(name));
 
-    entry
+    let found = entry
         .api_key_env
         .as_deref()
         .and_then(from_env)
-        .or_else(|| {
-            entry
-                .preset
-                .and_then(|preset| from_env(preset.spec().key_env))
-        })
-        .or_else(|| stated(entry.api_key.clone()))
+        .or_else(|| conventional(entry).and_then(from_env))
+        .or_else(|| stated(entry.api_key.clone()));
+
+    match found {
+        Some(key) => Key::Found(key),
+        // Naming a variable in `api_key_env` is the user saying this Provider
+        // is authenticated, so a variable that turns out to hold nothing is a
+        // fault to report rather than a service to stop authenticating. It
+        // holds nothing routinely: an application launched from the Finder or a
+        // desktop entry never sees what a shell profile exported.
+        None if has_no_keys(entry) && entry.api_key_env.is_none() => Key::NotNeeded,
+        None => Key::Missing(no_key(entry, path)),
+    }
+}
+
+/// The variable this Provider's preset says the service documents, where it
+/// documents one.
+fn conventional(entry: &ProviderEntry) -> Option<&'static str> {
+    match entry.preset?.spec().auth {
+        Auth::Variable(name) => Some(name),
+        Auth::Nothing => None,
+    }
+}
+
+/// Whether this Provider's preset says the service has no keys at all.
+///
+/// Only a preset can say so — ADR-0006. A Provider written out by hand cannot
+/// declare itself keyless, so no typo in this file quietly turns authentication
+/// off for a service that wanted it.
+fn has_no_keys(entry: &ProviderEntry) -> bool {
+    entry
+        .preset
+        .is_some_and(|preset| matches!(preset.spec().auth, Auth::Nothing))
 }
 
 /// A value somebody actually stated: trimmed, and `None` when there was nothing
@@ -495,7 +603,7 @@ fn no_key(entry: &ProviderEntry, path: &Path) -> String {
         .api_key_env
         .as_deref()
         .into_iter()
-        .chain(entry.preset.map(|preset| preset.spec().key_env))
+        .chain(conventional(entry))
         .collect();
 
     match variables.is_empty() {
@@ -662,15 +770,40 @@ mod tests {
         loaded.expect_err("the settings should not have loaded")
     }
 
-    /// The key the first Provider resolved to, for the tests about where a key
+    /// What the first Provider resolved to, for the tests about where a key
     /// comes from.
-    fn key(body: &str, env: &FakeEnv) -> Result<String, String> {
-        config(body, env).providers.remove(0).api_key
+    fn key(body: &str, env: &FakeEnv) -> Key {
+        config(body, env).providers.remove(0).key
     }
 
-    /// The sentence a Provider with no key carries.
+    /// The key the first Provider found, and nothing else.
+    fn found(body: &str, env: &FakeEnv) -> String {
+        match key(body, env) {
+            Key::Found(key) => key,
+            other => panic!("the Provider should have found a key: {:?}", Named(&other)),
+        }
+    }
+
+    /// The sentence a Provider that wanted a key and found none carries.
     fn no_key_message(body: &str, env: &FakeEnv) -> String {
-        key(body, env).expect_err("the Provider should have found no key")
+        match key(body, env) {
+            Key::Missing(message) => message,
+            other => panic!("the Provider should have wanted a key: {:?}", Named(&other)),
+        }
+    }
+
+    /// A [`Key`] as a failing assertion can name it. `Key` has no `Debug` of
+    /// its own on purpose, and a test is not a reason to give it one.
+    struct Named<'a>(&'a Key);
+
+    impl std::fmt::Debug for Named<'_> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(match self.0 {
+                Key::Found(_) => "a key",
+                Key::NotNeeded => "no key needed",
+                Key::Missing(_) => "no key found",
+            })
+        }
     }
 
     /// A Provider naming its own variable, carrying a preset, and holding a key
@@ -699,28 +832,19 @@ models = [{ id = \"deepseek-chat\" }]
     fn the_key_comes_from_the_variable_the_provider_names() {
         let env = FakeEnv::holding(&[("MY_OWN_KEY", "from-my-own-variable")]);
 
-        assert_eq!(
-            key(EVERY_SOURCE, &env).as_deref(),
-            Ok("from-my-own-variable")
-        );
+        assert_eq!(found(EVERY_SOURCE, &env), "from-my-own-variable");
     }
 
     #[test]
     fn the_key_comes_from_the_presets_conventional_variable() {
         let env = FakeEnv::holding(&[("DEEPSEEK_API_KEY", "from-the-preset")]);
 
-        assert_eq!(
-            key(&without_its_own_variable(), &env).as_deref(),
-            Ok("from-the-preset")
-        );
+        assert_eq!(found(&without_its_own_variable(), &env), "from-the-preset");
     }
 
     #[test]
     fn the_key_comes_from_the_file_when_the_environment_holds_none() {
-        assert_eq!(
-            key(&file_only(), &FakeEnv::default()).as_deref(),
-            Ok("from-the-file")
-        );
+        assert_eq!(found(&file_only(), &FakeEnv::default()), "from-the-file");
     }
 
     #[test]
@@ -730,17 +854,14 @@ models = [{ id = \"deepseek-chat\" }]
             ("DEEPSEEK_API_KEY", "from-the-preset"),
         ]);
 
-        assert_eq!(
-            key(EVERY_SOURCE, &env).as_deref(),
-            Ok("from-my-own-variable")
-        );
+        assert_eq!(found(EVERY_SOURCE, &env), "from-my-own-variable");
     }
 
     #[test]
     fn the_presets_variable_wins_over_the_file() {
         let env = FakeEnv::holding(&[("DEEPSEEK_API_KEY", "from-the-preset")]);
 
-        assert_eq!(key(EVERY_SOURCE, &env).as_deref(), Ok("from-the-preset"));
+        assert_eq!(found(EVERY_SOURCE, &env), "from-the-preset");
     }
 
     #[test]
@@ -749,17 +870,14 @@ models = [{ id = \"deepseek-chat\" }]
         // reading it as a key would turn a working configuration into a 401.
         let env = FakeEnv::holding(&[("MY_OWN_KEY", ""), ("DEEPSEEK_API_KEY", "   ")]);
 
-        assert_eq!(key(EVERY_SOURCE, &env).as_deref(), Ok("from-the-file"));
+        assert_eq!(found(EVERY_SOURCE, &env), "from-the-file");
     }
 
     #[test]
     fn a_key_arrives_without_the_whitespace_around_it() {
         let env = FakeEnv::holding(&[("MY_OWN_KEY", "  from-my-own-variable\n")]);
 
-        assert_eq!(
-            key(EVERY_SOURCE, &env).as_deref(),
-            Ok("from-my-own-variable")
-        );
+        assert_eq!(found(EVERY_SOURCE, &env), "from-my-own-variable");
     }
 
     #[test]
@@ -800,8 +918,72 @@ models = [{ id = \"deepseek-chat\" }]
 
         let config = config(&both, &FakeEnv::holding(&[("OPENAI_API_KEY", "a-key")]));
 
-        assert!(config.providers[0].api_key.is_err());
-        assert_eq!(config.providers[1].api_key.as_deref(), Ok("a-key"));
+        assert!(matches!(config.providers[0].key, Key::Missing(_)));
+        assert!(matches!(&config.providers[1].key, Key::Found(key) if key == "a-key"));
+    }
+
+    #[test]
+    fn a_service_with_no_keys_needs_none_stated() {
+        let local = "[[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
+                     models = [{ id = \"qwen/qwen3-8b\" }]\n";
+
+        assert!(matches!(key(local, &FakeEnv::default()), Key::NotNeeded));
+    }
+
+    #[test]
+    fn a_key_stated_for_a_service_with_none_is_still_used() {
+        // A local server put behind something that does want one.
+        let local = "[[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
+                     api_key = \"from-the-file\"\nmodels = [{ id = \"a-model\" }]\n";
+
+        assert_eq!(found(local, &FakeEnv::default()), "from-the-file");
+    }
+
+    #[test]
+    fn a_keyless_preset_still_fills_in_the_address() {
+        let local = "[[providers]]\nname = \"local\"\npreset = \"ollama\"\n";
+
+        assert_eq!(
+            config(local, &FakeEnv::default()).providers[0].base_url,
+            "http://localhost:11434/v1"
+        );
+    }
+
+    #[test]
+    fn a_variable_named_for_a_keyless_service_is_still_a_key_that_must_be_found() {
+        // The dangerous case: naming api_key_env is the user saying this
+        // Provider is authenticated, and an application launched from the
+        // Finder never sees what a shell profile exported. Falling through to
+        // "this service needs no key" would send the request unauthenticated —
+        // and with base_url overridden, send it to a remote host.
+        let named = "[[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
+                     api_key_env = \"MY_LOCAL_KEY\"\nmodels = [{ id = \"a-model\" }]\n";
+
+        let Key::Missing(message) = key(named, &FakeEnv::default()) else {
+            panic!("a variable that holds nothing should be reported, not passed over");
+        };
+
+        assert!(message.contains("MY_LOCAL_KEY"), "{message}");
+    }
+
+    #[test]
+    fn a_variable_named_for_a_keyless_service_is_used_when_it_holds_one() {
+        let named = "[[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
+                     api_key_env = \"MY_LOCAL_KEY\"\nmodels = [{ id = \"a-model\" }]\n";
+        let env = FakeEnv::holding(&[("MY_LOCAL_KEY", "from-my-own-variable")]);
+
+        assert_eq!(found(named, &env), "from-my-own-variable");
+    }
+
+    #[test]
+    fn only_a_preset_can_say_a_service_has_no_key() {
+        // ADR-0006: a Provider written out by hand still wants one, so no typo
+        // in this file can quietly turn authentication off for a service that
+        // wanted it.
+        let by_hand = "[[providers]]\nname = \"local\"\n\
+                       base_url = \"http://localhost:1234/v1\"\nmodels = [{ id = \"a-model\" }]\n";
+
+        assert!(matches!(key(by_hand, &FakeEnv::default()), Key::Missing(_)));
     }
 
     #[test]
@@ -1029,6 +1211,14 @@ models = [{ id = \"deepseek-chat\" }]
         assert!(config
             .model("openai/gpt-4o")
             .is_some_and(|(_, model)| model.vision));
+
+        // The local Provider the example offers is the one that asks for
+        // nothing: uncommenting it is the whole of what it takes.
+        let (local, _) = config
+            .model("local/qwen/qwen3-8b")
+            .expect("the example should offer a local Model");
+
+        assert!(matches!(local.key, Key::NotNeeded));
     }
 
     #[test]
@@ -1042,15 +1232,30 @@ models = [{ id = \"deepseek-chat\" }]
             let spec = preset.spec();
             assert!(written.contains(spec.name), "{written}");
 
+            // Stating nothing, so that a preset which names no variable is
+            // asked for no key and one that names a variable still is.
             let by_preset = format!(
-                "[[providers]]\nname = \"mine\"\npreset = \"{}\"\napi_key = \"a-key\"\n",
+                "[[providers]]\nname = \"mine\"\npreset = \"{}\"\n",
                 spec.name
             );
+            let provider = config(&by_preset, &FakeEnv::default()).providers.remove(0);
 
-            assert_eq!(
-                config(&by_preset, &FakeEnv::default()).providers[0].base_url,
-                spec.base_url
-            );
+            assert_eq!(provider.base_url, spec.base_url);
+
+            match spec.auth {
+                Auth::Variable(variable) => {
+                    let Key::Missing(message) = provider.key else {
+                        panic!("{} wants a key and should have asked for one", spec.name);
+                    };
+
+                    assert!(message.contains(variable), "{message}");
+                }
+                Auth::Nothing => assert!(
+                    matches!(provider.key, Key::NotNeeded),
+                    "{} has no keys and should have asked for none",
+                    spec.name
+                ),
+            }
         }
     }
 
