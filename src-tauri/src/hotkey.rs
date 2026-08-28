@@ -7,7 +7,7 @@ use tauri::plugin::TauriPlugin;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-/// The Hotkey that opens the Palette, until Settings can change it.
+/// The Hotkey that opens the Palette.
 ///
 /// `Cmd+Shift+Space` on macOS and `Ctrl+Shift+Space` elsewhere: a key away from
 /// the one Spotlight and its equivalents already own, and taken by nothing on a
@@ -44,7 +44,10 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
 ///
 /// Another application may already own it, and that is a reason to say so
 /// rather than to refuse to start: the tray reaches everything the Hotkey does.
-/// Ticket 11 owns making this visible, and ticket 08 owns changing the Hotkey.
+/// Ticket 11 owns making this visible. Changing it belongs with ticket 10,
+/// which gives Actions Hotkeys of their own: the machinery for reading a key
+/// combination out of the settings and claiming it is the same machinery, and
+/// building half of it here would be building it twice.
 pub fn register<R: Runtime>(app: &AppHandle<R>) {
     if let Err(error) = app.global_shortcut().register(for_palette()) {
         eprintln!("Demysto could not claim its Hotkey: {error}");

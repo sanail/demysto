@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time::Duration;
 
 mod action;
@@ -21,17 +21,22 @@ mod paths;
 mod provider;
 mod run;
 mod selection;
+mod settings;
 mod sse;
 mod stream;
 
 pub use action::{Action, Parameter};
 pub use capture::{Capture, CaptureError, CaptureOutcome, Captured};
+pub use config::ConfigError;
 pub use conversation::{Conversation, Summary, Turn};
 pub use paths::{config_dir, ConfigDirError, CONFIG_DIR_ENV};
 pub use run::{RunError, RunOutcome};
 pub use selection::Selection;
+pub use settings::{
+    ConfiguredModel, ConfiguredProvider, Edit, KeyEdit, KeyStanding, Preset, ProviderEdit, Settings,
+};
 
-use config::{Config, ConfigError};
+use config::{Config, Environment};
 use conversation::Store;
 use run::Stopping;
 use selection::Kind;
@@ -42,10 +47,20 @@ pub struct Demysto {
     config_dir: PathBuf,
     version: String,
     capture: Box<dyn Capture>,
-    /// The settings as they were at startup, however that went. A file that
-    /// cannot be used is no reason to refuse to start: the Palette still opens,
-    /// and the Run is where the user is told what to fix.
-    config: Result<Config, ConfigError>,
+    /// The environment as it was when Demysto started, which is where a key
+    /// may come from. Held rather than looked at again, so that the settings
+    /// can be read a second time — which every save does — and arrive at the
+    /// same keys the first read did.
+    env: Environment,
+    /// The settings Demysto is running on, however reading them went. A file
+    /// that cannot be used is no reason to refuse to start: the Palette still
+    /// opens, and the Run is where the user is told what to fix.
+    ///
+    /// Behind a lock because the settings window writes them: a Run reads them
+    /// through it and takes out everything it needs before letting go, so that
+    /// saving never waits on a Provider and a Run never asks half of one set of
+    /// settings and half of another.
+    config: RwLock<Result<Config, ConfigError>>,
     /// The last Capture, so that a Palette which loads after one still finds it.
     last_capture: Mutex<Option<CaptureOutcome>>,
     /// This session's Conversations, and which of them the result window is
@@ -107,11 +122,14 @@ impl Demysto {
     ) -> Self {
         let config_dir = config_dir.into();
 
+        // Taken once, here, and nowhere else in the crate: the environment
+        // holds the key, and a key that can change under a running Demysto is a
+        // key nobody can reason about (the spec's *Core modules*).
+        let env = Environment::snapshot();
+
         Self {
-            // Read once, here, and nowhere else in the crate: the environment
-            // holds the key, and a key that can change under a running Demysto
-            // is a key nobody can reason about (the spec's *Core modules*).
-            config: config::load(&config_dir, &config::SystemEnv),
+            config: RwLock::new(config::load(&config_dir, &env)),
+            env,
             config_dir,
             version: version.into(),
             capture,
@@ -327,15 +345,12 @@ impl Demysto {
     /// Puts the Conversation to the Model `asking` resolves to, with its prompt
     /// as what the Turn now being asked sends.
     fn ask(&self, id: u64, asking: Asking, mut showing: impl FnMut(&str)) -> RunOutcome {
-        let config = match self.config.as_ref() {
-            Ok(config) => config,
-            Err(error) => return RunOutcome::Failed(RunError::Configuration(error.to_string())),
-        };
-
         // Resolved before the Turn is recorded as asked: a Run that has nowhere
         // to go has not asked anything, and the settings are the only place the
-        // answer to that is.
-        let resolved = match model::resolve(config, asking.binding.as_deref(), asking.kind) {
+        // answer to that is. Everything the request needs comes out of them
+        // here, and the lock goes with it: a Provider has two minutes to answer,
+        // and saving the settings must not be two minutes of a frozen window.
+        let resolved = match self.resolving(&asking) {
             Ok(resolved) => resolved,
             Err(error) => return RunOutcome::Failed(error),
         };
@@ -367,26 +382,102 @@ impl Demysto {
         }
     }
 
-    /// The Model identifiers a configured Provider says it offers, so that the
-    /// user picks one rather than typing it from memory.
+    /// Which Model this Turn goes to, and how to reach it — taken out of the
+    /// settings so that the request can be made without holding them.
+    fn resolving(&self, asking: &Asking) -> Result<model::Resolved, RunError> {
+        match self.config.read().unwrap().as_ref() {
+            Err(error) => Err(RunError::Configuration(error.to_string())),
+            Ok(config) => model::resolve(config, asking.binding.as_deref(), asking.kind),
+        }
+    }
+
+    /// The settings as the file now holds them, for the window that edits it.
     ///
-    /// A live request, and the only method here that makes one outside a Run:
-    /// there is no other way to know what a Provider has, and a stale list
-    /// baked into the application would be wrong within the month.
-    pub fn models_offered_by(&self, provider: &str) -> Result<Vec<String>, RunError> {
-        let config = self
-            .config
-            .as_ref()
-            .map_err(|error| RunError::Configuration(error.to_string()))?;
+    /// Read from the file rather than answered from what startup made of it:
+    /// the window edits the file, and the file may have been edited by hand
+    /// since Demysto started. Keys are not in what comes back — see `settings`.
+    pub fn settings(&self) -> Result<Settings, ConfigError> {
+        settings::read(&self.config_dir, &self.env)
+    }
 
-        let Some(provider) = config.provider(provider) else {
-            return Err(RunError::Configuration(format!(
-                "There is no Provider called \"{provider}\" in {}.",
-                config.path.display()
-            )));
-        };
+    /// Writes what the window edited, and runs on it from here on.
+    ///
+    /// Answers with the settings as the file then holds them, which is what the
+    /// window shows next: a save is only finished when it can be read back.
+    pub fn save_settings(&self, edit: &Edit) -> Result<Settings, ConfigError> {
+        self.verifying(edit)?;
 
-        provider::models(provider, model::key_for(provider)?)
+        let saved = settings::write(&self.config_dir, &self.env, edit)?;
+
+        // Read again from the file just written rather than composed from the
+        // edit, so that what Demysto runs on is exactly what its next start
+        // would read — including the failure a saved file can still be, which
+        // the Run is where the user is told about.
+        *self.config.write().unwrap() = config::load(&self.config_dir, &self.env);
+
+        Ok(saved)
+    }
+
+    /// Puts every key typed into the window to its Provider before any of it
+    /// is written — ticket 08's "A key entered here is verified against the
+    /// Provider before it is saved", and user story 42's "immediately rather
+    /// than at the first Run".
+    ///
+    /// Only a key typed now: one the file already holds was put to its Provider
+    /// when it was typed, and asking again would put a request behind every
+    /// save, per Provider. Only against a Model the Provider is configured
+    /// with, because with none there is nothing to ask.
+    ///
+    /// A refusal stops the save: that is the Provider saying the key is wrong,
+    /// and writing it would be storing something already known not to work.
+    /// Nothing else does — an endpoint that is down, or a laptop off the
+    /// network, is no evidence about a key, and refusing there would leave
+    /// somebody unable to configure Demysto until their server came back.
+    fn verifying(&self, edit: &Edit) -> Result<(), ConfigError> {
+        for provider in &edit.providers {
+            let (KeyEdit::Set { .. }, Some(model)) = (&provider.api_key, provider.models.first())
+            else {
+                continue;
+            };
+
+            if let Err(RunError::Provider(message)) = self.verify(provider, &model.id) {
+                return Err(ConfigError::Refused(format!(
+                    "The Provider \"{}\" did not accept this key, so nothing was saved. \
+                     {message}",
+                    provider.name
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Every preset there is, so that the window can offer them.
+    pub fn presets(&self) -> Vec<Preset> {
+        settings::presets()
+    }
+
+    /// The Model identifiers a Provider says it offers, so that the user picks
+    /// one rather than typing it from memory (user story 34).
+    ///
+    /// Asked of the Provider as the window has it now — a key just typed
+    /// included — rather than as the file holds it, because the commonest
+    /// moment to want the list is while configuring a Provider that has not
+    /// been saved yet.
+    pub fn models_offered_by(&self, provider: &ProviderEdit) -> Result<Vec<String>, RunError> {
+        provider::models(&settings::endpoint(&self.config_dir, &self.env, provider)?)
+    }
+
+    /// Whether a Provider accepts a key, asked of the Provider itself (user
+    /// story 42).
+    ///
+    /// Against a Model, because that is the request a Run makes and the only
+    /// one that proves the key rather than the endpoint — ADR-0008.
+    pub fn verify(&self, provider: &ProviderEdit, model: &str) -> Result<(), RunError> {
+        provider::verify(
+            &settings::endpoint(&self.config_dir, &self.env, provider)?,
+            model,
+        )
     }
 
     pub fn status(&self) -> Status {
@@ -404,7 +495,7 @@ mod tests {
 
     use std::sync::Arc;
 
-    use mockito::{Matcher, Server, ServerGuard};
+    use mockito::{Matcher, Mock, Server, ServerGuard};
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -1743,7 +1834,14 @@ mod tests {
         let settings = keyless_provider(&format!("{}/v1", server.url()));
         let demysto = ready_with(&settings, "a paragraph");
 
-        assert_eq!(demysto.models_offered_by("local").unwrap(), ["a-model"]);
+        let local = ProviderEdit {
+            was: Some("local".to_owned()),
+            preset: Some("lmstudio".to_owned()),
+            base_url: Some(format!("{}/v1", server.url())),
+            ..drafted("local")
+        };
+
+        assert_eq!(demysto.models_offered_by(&local).unwrap(), ["a-model"]);
     }
 
     #[test]
@@ -1759,22 +1857,637 @@ mod tests {
 
         let demysto = ready_to_run(&server, "a paragraph");
 
+        // The key is the one the file already holds for this Provider: the
+        // window is never shown it, so asking for the list cannot resend it.
+        let saved = ProviderEdit {
+            was: Some("a provider".to_owned()),
+            base_url: Some(format!("{}/v1", server.url())),
+            ..drafted("a provider")
+        };
+
         assert_eq!(
-            demysto.models_offered_by("a provider").unwrap(),
+            demysto.models_offered_by(&saved).unwrap(),
             ["a-model", "another-model"]
         );
     }
 
     #[test]
-    fn the_model_list_of_a_provider_nobody_configured_names_it() {
+    fn the_model_list_of_a_provider_that_answers_nowhere_says_which_setting_is_missing() {
         let server = Server::new();
         let demysto = ready_to_run(&server, "a paragraph");
 
-        let Err(RunError::Configuration(message)) = demysto.models_offered_by("imagined") else {
-            panic!("a Provider nobody configured should fail for want of a setting");
+        // Neither a base URL nor a preset to take one from: nothing to ask.
+        let Err(RunError::Configuration(message)) = demysto.models_offered_by(&drafted("imagined"))
+        else {
+            panic!("a Provider that answers nowhere should fail for want of a setting");
         };
 
         assert!(message.contains("imagined"), "{message}");
+    }
+
+    /// A Provider as the settings window hands one back: named, and otherwise
+    /// stating nothing. Every test below says only what it is about.
+    fn drafted(name: &str) -> ProviderEdit {
+        ProviderEdit {
+            was: None,
+            name: name.to_owned(),
+            base_url: None,
+            preset: None,
+            api_key_env: None,
+            api_key: KeyEdit::Keep,
+            models: Vec::new(),
+        }
+    }
+
+    /// One Model of a Provider, as the window states it.
+    fn offering(id: &str, vision: bool) -> ConfiguredModel {
+        ConfiguredModel {
+            id: id.to_owned(),
+            vision,
+        }
+    }
+
+    /// What the window saves: these Providers, and this Default Model.
+    fn edited(providers: Vec<ProviderEdit>, default: Option<&str>) -> Edit {
+        Edit {
+            providers,
+            default_model: default.map(ToOwned::to_owned),
+            default_vision_model: None,
+        }
+    }
+
+    /// One Provider, at `base_url`, with a key typed into the window and one
+    /// Model — the whole of what somebody configures on a first run.
+    fn configuring(base_url: &str) -> Edit {
+        edited(
+            vec![ProviderEdit {
+                base_url: Some(base_url.to_owned()),
+                api_key: KeyEdit::Set {
+                    key: "a-key".to_owned(),
+                },
+                models: vec![offering("a-model", false)],
+                ..drafted("a provider")
+            }],
+            Some("a provider/a-model"),
+        )
+    }
+
+    /// Somewhere a key typed into the window can be put to its Provider.
+    ///
+    /// Every save of a typed key does that before it writes anything, so a test
+    /// that saves one needs a Provider to accept it — even when what the test
+    /// is about is what ends up in the file. The Mock comes back with the
+    /// address because dropping it would take it off the server again.
+    fn accepting(server: &mut ServerGuard) -> (Mock, String) {
+        let accepted = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("hello"))
+            .create();
+
+        (accepted, format!("{}/v1", server.url()))
+    }
+
+    /// A Demysto with nothing configured, having captured `selection` — the
+    /// state a fresh installation is in when Settings is first opened.
+    fn unconfigured(selection: &str) -> Rooted {
+        let desktop = Arc::new(FakeDesktop::new(None, Some(selection)));
+        let demysto = rooted(fake::over(&desktop), None);
+        demysto.capture();
+
+        demysto
+    }
+
+    /// What the settings file holds, as text.
+    fn settings_file(demysto: &Demysto) -> String {
+        std::fs::read_to_string(demysto.config_dir().join(config::FILE_NAME)).unwrap()
+    }
+
+    /// The lines of a settings file that configure something, as against the
+    /// ones that explain what configuring something looks like.
+    fn stated_in(file: &str) -> String {
+        file.lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn saved(demysto: &Demysto, edit: &Edit) -> Settings {
+        demysto
+            .save_settings(edit)
+            .expect("the settings should have saved")
+    }
+
+    #[test]
+    fn a_provider_configured_in_the_interface_is_what_the_next_run_asks() {
+        // The whole of ticket 08 in one Run: a Provider, a key and a Model
+        // entered in the window, and an Action running against them with
+        // nothing restarted and nothing edited by hand.
+        let mut server = Server::new();
+        let asked = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("authorization", "Bearer a-key")
+            .match_body(Matcher::PartialJson(json!({ "model": "a-model" })))
+            .with_body(answering("an answer"))
+            // Twice, and the same request both times: the save puts the key
+            // typed into the window to this Provider before writing it, and
+            // that is the request a Run makes — which is the point of it.
+            .expect(2)
+            .create();
+
+        let demysto = unconfigured("a paragraph");
+        saved(&demysto, &configuring(&format!("{}/v1", server.url())));
+
+        assert_eq!(run(&demysto), RunOutcome::Answered("an answer".to_owned()));
+
+        asked.assert();
+    }
+
+    #[test]
+    fn the_settings_the_interface_writes_are_the_settings_it_reads_back() {
+        let demysto = unconfigured("a paragraph");
+
+        let edit = Edit {
+            providers: vec![
+                ProviderEdit {
+                    preset: Some("openai".to_owned()),
+                    api_key_env: Some("MY_OWN_KEY".to_owned()),
+                    models: vec![offering("gpt-4o-mini", false), offering("gpt-4o", true)],
+                    ..drafted("openai")
+                },
+                ProviderEdit {
+                    base_url: Some("http://localhost:9999/v1".to_owned()),
+                    preset: Some("ollama".to_owned()),
+                    models: vec![offering("qwen3", false)],
+                    ..drafted("local")
+                },
+            ],
+            default_model: Some("openai/gpt-4o-mini".to_owned()),
+            default_vision_model: Some("openai/gpt-4o".to_owned()),
+        };
+
+        let written = saved(&demysto, &edit);
+
+        // What the save answered with came from reading the file back, and
+        // asking again reads it again: two round trips through the same file.
+        assert_eq!(demysto.settings().unwrap(), written);
+
+        assert_eq!(
+            written
+                .providers
+                .iter()
+                .map(|it| it.name.as_str())
+                .collect::<Vec<_>>(),
+            ["openai", "local"]
+        );
+        assert_eq!(written.providers[0].preset.as_deref(), Some("openai"));
+        assert_eq!(written.providers[0].base_url, None);
+        assert_eq!(
+            written.providers[0].api_key_env.as_deref(),
+            Some("MY_OWN_KEY")
+        );
+        assert_eq!(written.providers[0].models, edit.providers[0].models);
+        assert_eq!(
+            written.providers[1].base_url.as_deref(),
+            Some("http://localhost:9999/v1")
+        );
+        assert_eq!(written.default_model.as_deref(), Some("openai/gpt-4o-mini"));
+        assert_eq!(
+            written.default_vision_model.as_deref(),
+            Some("openai/gpt-4o")
+        );
+    }
+
+    #[test]
+    fn a_model_marked_vision_capable_is_still_marked_when_it_is_read_back() {
+        // Stated by the user and nowhere inferred, so the one place it can be
+        // lost is between the window and the file.
+        let demysto = unconfigured("a paragraph");
+
+        let edit = edited(
+            vec![ProviderEdit {
+                preset: Some("openai".to_owned()),
+                models: vec![offering("gpt-4o-mini", false), offering("gpt-4o", true)],
+                ..drafted("openai")
+            }],
+            None,
+        );
+
+        let written = saved(&demysto, &edit);
+
+        assert_eq!(
+            written.providers[0]
+                .models
+                .iter()
+                .map(|model| model.vision)
+                .collect::<Vec<_>>(),
+            [false, true]
+        );
+    }
+
+    #[test]
+    fn a_provider_removed_in_the_interface_is_gone_from_the_settings() {
+        let demysto = unconfigured("a paragraph");
+
+        let both = edited(
+            vec![
+                ProviderEdit {
+                    preset: Some("openai".to_owned()),
+                    ..drafted("openai")
+                },
+                ProviderEdit {
+                    preset: Some("ollama".to_owned()),
+                    ..drafted("local")
+                },
+            ],
+            None,
+        );
+        saved(&demysto, &both);
+
+        let kept = edited(
+            vec![ProviderEdit {
+                was: Some("local".to_owned()),
+                preset: Some("ollama".to_owned()),
+                ..drafted("local")
+            }],
+            None,
+        );
+        let written = saved(&demysto, &kept);
+
+        assert_eq!(
+            written
+                .providers
+                .iter()
+                .map(|it| it.name.as_str())
+                .collect::<Vec<_>>(),
+            ["local"]
+        );
+        // The preamble names every preset, "openai" among them, so what has to
+        // have gone is the Provider rather than the word.
+        // What the file states, rather than what it says: the preamble's own
+        // commented example names an "openai" Provider and always will.
+        assert!(!stated_in(&settings_file(&demysto)).contains("name = \"openai\""));
+    }
+
+    #[test]
+    fn a_provider_renamed_in_the_interface_keeps_the_key_it_was_configured_with() {
+        // The window is never shown the key, so it cannot hand it back with the
+        // new name: what the file holds has to follow the rename by itself.
+        let mut server = Server::new();
+        let asked = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("authorization", "Bearer a-key")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+
+        let renamed = edited(
+            vec![ProviderEdit {
+                was: Some("a provider".to_owned()),
+                base_url: Some(format!("{}/v1", server.url())),
+                models: vec![offering("a-model", false)],
+                ..drafted("the same provider")
+            }],
+            Some("the same provider/a-model"),
+        );
+        let written = saved(&demysto, &renamed);
+
+        assert_eq!(written.providers[0].key, KeyStanding::InFile);
+        assert_eq!(run(&demysto), RunOutcome::Answered("an answer".to_owned()));
+
+        asked.assert();
+    }
+
+    #[test]
+    fn the_key_is_not_in_what_the_interface_is_shown() {
+        let mut server = Server::new();
+        let (_accepted, at) = accepting(&mut server);
+        // ADR-0002 pays for the key being on disk with exactly one promise, and
+        // this is it: the shape the window is handed has nowhere to put a key,
+        // and this is the assertion that says so of the values as well.
+        let demysto = unconfigured("a paragraph");
+        saved(&demysto, &configuring(&at));
+
+        let shown = serde_json::to_string(&demysto.settings().unwrap()).unwrap();
+
+        assert!(settings_file(&demysto).contains("a-key"));
+        assert!(!shown.contains("a-key"), "{shown}");
+    }
+
+    #[test]
+    fn a_key_taken_out_in_the_interface_is_gone_from_the_file() {
+        let mut server = Server::new();
+        let (_accepted, at) = accepting(&mut server);
+        let demysto = unconfigured("a paragraph");
+        saved(&demysto, &configuring(&at));
+
+        let forgotten = edited(
+            vec![ProviderEdit {
+                was: Some("a provider".to_owned()),
+                base_url: Some(at.clone()),
+                api_key: KeyEdit::Forget,
+                ..drafted("a provider")
+            }],
+            None,
+        );
+        let written = saved(&demysto, &forgotten);
+
+        assert_eq!(written.providers[0].key, KeyStanding::Missing);
+        assert!(!settings_file(&demysto).contains("a-key"));
+    }
+
+    #[test]
+    fn the_interface_says_where_a_key_is_without_saying_what_it_is() {
+        let demysto = unconfigured("a paragraph");
+
+        let stated = edited(
+            vec![
+                ProviderEdit {
+                    preset: Some("openai".to_owned()),
+                    api_key: KeyEdit::Set {
+                        key: "in-the-file".to_owned(),
+                    },
+                    ..drafted("openai")
+                },
+                ProviderEdit {
+                    preset: Some("ollama".to_owned()),
+                    ..drafted("local")
+                },
+                ProviderEdit {
+                    base_url: Some("https://elsewhere.example/v1".to_owned()),
+                    ..drafted("elsewhere")
+                },
+            ],
+            None,
+        );
+        let written = saved(&demysto, &stated);
+
+        assert_eq!(written.providers[0].key, KeyStanding::InFile);
+        // A local server has no keys at all, so there is none to go looking for.
+        assert_eq!(written.providers[1].key, KeyStanding::NotNeeded);
+        assert_eq!(written.providers[2].key, KeyStanding::Missing);
+    }
+
+    #[test]
+    fn what_the_settings_file_says_about_itself_survives_the_interface_writing_it() {
+        let mut server = Server::new();
+        let (_accepted, at) = accepting(&mut server);
+        // The file is the user's, and it is also where Demysto explains itself
+        // to somebody who opened it. A save is a guest in it.
+        let demysto = unconfigured("a paragraph");
+        let before = settings_file(&demysto);
+
+        saved(&demysto, &configuring(&at));
+        let after = settings_file(&demysto);
+
+        let prose: Vec<&str> = before
+            .lines()
+            .filter(|line| line.starts_with('#'))
+            .collect();
+
+        assert!(!prose.is_empty(), "the template should explain itself");
+        for line in prose {
+            assert!(after.contains(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn settings_the_interface_could_not_read_back_are_not_written() {
+        let mut server = Server::new();
+        let (_accepted, at) = accepting(&mut server);
+        let demysto = unconfigured("a paragraph");
+        saved(&demysto, &configuring(&at));
+        let before = settings_file(&demysto);
+
+        // Two Providers of one name: a Model of either could not be named, so
+        // this is a file Demysto could not act on.
+        let clashing = edited(
+            vec![
+                ProviderEdit {
+                    preset: Some("openai".to_owned()),
+                    ..drafted("twice")
+                },
+                ProviderEdit {
+                    preset: Some("deepseek".to_owned()),
+                    ..drafted("twice")
+                },
+            ],
+            None,
+        );
+
+        let Err(ConfigError::Malformed(message)) = demysto.save_settings(&clashing) else {
+            panic!("two Providers of one name should not have saved");
+        };
+
+        assert!(message.contains("twice"), "{message}");
+        assert_eq!(settings_file(&demysto), before);
+    }
+
+    #[test]
+    fn the_last_provider_can_be_removed_in_the_interface() {
+        let mut server = Server::new();
+        let (_accepted, at) = accepting(&mut server);
+        // Where somebody starting over passes through. Demysto has nothing to
+        // run against afterwards, and says so at the Run rather than by
+        // refusing to save.
+        let demysto = unconfigured("a paragraph");
+        saved(&demysto, &configuring(&at));
+
+        let emptied = saved(&demysto, &edited(Vec::new(), None));
+
+        assert!(emptied.providers.is_empty());
+        assert!(matches!(run(&demysto), RunOutcome::Failed(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_settings_file_is_still_owner_only_after_the_interface_writes_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut server = Server::new();
+        let (_accepted, at) = accepting(&mut server);
+        let demysto = unconfigured("a paragraph");
+        saved(&demysto, &configuring(&at));
+
+        let file = demysto.config_dir().join(config::FILE_NAME);
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+
+    #[test]
+    fn a_key_is_verified_against_the_provider_before_it_is_saved() {
+        let mut server = Server::new();
+        let tried = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("authorization", "Bearer a-key")
+            .match_body(Matcher::PartialJson(json!({ "model": "a-model" })))
+            .with_body(answering("hello"))
+            .create();
+
+        let demysto = unconfigured("a paragraph");
+
+        // Nothing saved: the Provider being verified is the one on screen.
+        let typed = ProviderEdit {
+            base_url: Some(format!("{}/v1", server.url())),
+            api_key: KeyEdit::Set {
+                key: "a-key".to_owned(),
+            },
+            ..drafted("a provider")
+        };
+
+        assert_eq!(demysto.verify(&typed, "a-model"), Ok(()));
+        assert!(demysto.settings().unwrap().providers.is_empty());
+
+        tried.assert();
+    }
+
+    #[test]
+    fn a_key_the_provider_refuses_is_not_saved() {
+        // The ticket asks for a key to be "verified against the Provider before
+        // it is saved", which is a stronger thing than a button somewhere that
+        // would have said so.
+        let mut server = Server::new();
+        let _refusing = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(401)
+            .with_body(json!({ "error": { "message": "Incorrect API key provided" } }).to_string())
+            .create();
+
+        let demysto = unconfigured("a paragraph");
+        let before = settings_file(&demysto);
+
+        let Err(ConfigError::Refused(message)) =
+            demysto.save_settings(&configuring(&format!("{}/v1", server.url())))
+        else {
+            panic!("a key the Provider refused should not have been saved");
+        };
+
+        assert!(message.contains("Incorrect API key provided"), "{message}");
+        assert!(message.contains("a provider"), "{message}");
+        assert_eq!(settings_file(&demysto), before);
+    }
+
+    #[test]
+    fn a_provider_that_cannot_be_reached_does_not_stop_a_key_being_saved() {
+        // A server that is not running yet, or a laptop off the network, is no
+        // evidence about a key — and somebody who could not save until their
+        // Provider came back would be somebody who could not configure Demysto.
+        let demysto = unconfigured("a paragraph");
+
+        // Nothing listens on port 1, and nothing is meant to: the connection is
+        // refused at once rather than waited on.
+        let written = saved(&demysto, &configuring("http://127.0.0.1:1/v1"));
+
+        assert_eq!(written.providers[0].key, KeyStanding::InFile);
+    }
+
+    #[test]
+    fn a_key_saved_without_a_model_to_try_it_against_is_saved_unverified() {
+        // There is no request to make: verification is a request to a Model,
+        // and this Provider has none yet. Ticket 08's own order — fetch the
+        // Models, then verify — is what puts one there.
+        let demysto = unconfigured("a paragraph");
+
+        let alone = edited(
+            vec![ProviderEdit {
+                base_url: Some("http://127.0.0.1:1/v1".to_owned()),
+                api_key: KeyEdit::Set {
+                    key: "a-key".to_owned(),
+                },
+                ..drafted("a provider")
+            }],
+            None,
+        );
+        let written = saved(&demysto, &alone);
+
+        assert_eq!(written.providers[0].key, KeyStanding::InFile);
+        assert!(written.providers[0].models.is_empty());
+    }
+
+    #[test]
+    fn a_default_naming_a_model_no_provider_offers_is_not_saved() {
+        // What renaming a Provider does to the Default Model that named it. The
+        // key follows a rename and a nomination cannot, so the window is told
+        // to pick again rather than left to write settings whose next Run fails.
+        let mut server = Server::new();
+        let (_accepted, at) = accepting(&mut server);
+        let demysto = unconfigured("a paragraph");
+        saved(&demysto, &configuring(&at));
+
+        let renamed = edited(
+            vec![ProviderEdit {
+                was: Some("a provider".to_owned()),
+                base_url: Some(at.clone()),
+                models: vec![offering("a-model", false)],
+                ..drafted("renamed")
+            }],
+            // Still naming the Provider by the name it no longer has.
+            Some("a provider/a-model"),
+        );
+
+        let Err(ConfigError::Malformed(message)) = demysto.save_settings(&renamed) else {
+            panic!("a Default Model naming nothing should not have saved");
+        };
+
+        assert!(message.contains("default_model"), "{message}");
+        assert!(message.contains("renamed/a-model"), "{message}");
+    }
+
+    #[test]
+    fn a_key_the_provider_refuses_is_reported_in_the_providers_own_words() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(401)
+            .with_body(json!({ "error": { "message": "Incorrect API key provided" } }).to_string())
+            .create();
+
+        let demysto = unconfigured("a paragraph");
+
+        let typed = ProviderEdit {
+            base_url: Some(format!("{}/v1", server.url())),
+            api_key: KeyEdit::Set {
+                key: "the-wrong-key".to_owned(),
+            },
+            ..drafted("a provider")
+        };
+
+        let Err(RunError::Provider(message)) = demysto.verify(&typed, "a-model") else {
+            panic!("a key the Provider refused should be reported as its refusal");
+        };
+
+        assert!(message.contains("Incorrect API key provided"), "{message}");
+    }
+
+    #[test]
+    fn every_preset_the_settings_file_understands_is_offered_by_the_interface() {
+        // The window offers what the file accepts, from the same one place: a
+        // preset it offered and the file refused would be a dead end.
+        let demysto = unconfigured("a paragraph");
+
+        for preset in demysto.presets() {
+            let using = edited(
+                vec![ProviderEdit {
+                    preset: Some(preset.name.clone()),
+                    models: vec![offering("a-model", false)],
+                    ..drafted("a provider")
+                }],
+                None,
+            );
+            let written = saved(&demysto, &using);
+
+            assert_eq!(
+                written.providers[0].preset.as_deref(),
+                Some(preset.name.as_str())
+            );
+            assert_eq!(
+                written.providers[0].key == KeyStanding::NotNeeded,
+                !preset.needs_key,
+                "{}",
+                preset.name
+            );
+        }
     }
 
     #[test]

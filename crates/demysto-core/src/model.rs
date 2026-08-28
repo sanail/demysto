@@ -13,35 +13,51 @@
 
 use std::fmt;
 
-use crate::config::{self, Config, Key, Model, Provider};
+use crate::config::{self, Config, Key, Model, Provider, MODEL_SETTING, VISION_SETTING};
 use crate::run::RunError;
 use crate::selection::Kind;
 
-/// What the settings call the Model an Action resolves to when it binds none.
-const MODEL_SETTING: &str = "default_model";
-/// And the one an image Selection resolves to first.
-const VISION_SETTING: &str = "default_vision_model";
-
-/// A Model, the Provider that offers it, and the key to reach it with:
-/// everything a Run needs in order to ask something.
-#[derive(Clone, Copy)]
-pub(crate) struct Resolved<'a> {
-    pub(crate) provider: &'a Provider,
-    pub(crate) model: &'a Model,
-    /// `None` for a Provider that has no key to send — see [`key_for`].
-    pub(crate) api_key: Option<&'a str>,
+/// A Provider as a request reaches it: where it answers, and what to
+/// authenticate with.
+///
+/// Owned rather than borrowed out of the settings, because the settings are no
+/// longer read once and left alone: the window writes them while Demysto runs,
+/// and nothing may hold them locked for the two minutes a Provider is allowed
+/// to take over an answer.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Endpoint {
+    pub(crate) base_url: String,
+    /// `None` for a service that has no key to send — see [`key_for`].
+    pub(crate) api_key: Option<String>,
 }
 
-impl fmt::Debug for Resolved<'_> {
+/// An Endpoint and the Model on it: everything a Run needs in order to ask
+/// something.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Resolved {
+    pub(crate) endpoint: Endpoint,
+    /// What the Provider calls the Model, which is what the request carries.
+    pub(crate) model: String,
+}
+
+impl fmt::Debug for Endpoint {
     /// Written out rather than derived, for the reason [`Provider`]'s own is:
     /// this is the one place the key sits unwrapped, and a key that can be
     /// printed is a key that reaches a panic message or, once ticket 11 has
     /// them, a log.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Endpoint")
+            .field("base_url", &self.base_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<not shown>"))
+            .finish()
+    }
+}
+
+impl fmt::Debug for Resolved {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Resolved")
-            .field("provider", self.provider)
-            .field("model", self.model)
-            .field("api_key", &self.api_key.map(|_| "<not shown>"))
+            .field("endpoint", &self.endpoint)
+            .field("model", &self.model)
             .finish()
     }
 }
@@ -50,17 +66,29 @@ impl fmt::Debug for Resolved<'_> {
 ///
 /// `binding` is the Model the Action names. No built-in names one, and ticket
 /// 09 is where an Override gives an Action its own.
-pub(crate) fn resolve<'a>(
-    config: &'a Config,
+pub(crate) fn resolve(
+    config: &Config,
     binding: Option<&str>,
     kind: Kind,
-) -> Result<Resolved<'a>, RunError> {
+) -> Result<Resolved, RunError> {
     let (provider, model) = chosen(config, binding, kind)?;
 
     Ok(Resolved {
-        provider,
-        model,
-        api_key: key_for(provider)?,
+        endpoint: endpoint_for(&provider.base_url, &provider.key)?,
+        model: model.id.clone(),
+    })
+}
+
+/// Where a Provider answers and what to authenticate with, taken out of the
+/// settings so that the request can be made without them.
+///
+/// Takes the two fields it reaches a Provider by rather than the Provider, so
+/// that the settings window can ask this of a Provider that is still being
+/// typed — one that has no Models yet, and is in no file.
+pub(crate) fn endpoint_for(base_url: &str, key: &Key) -> Result<Endpoint, RunError> {
+    Ok(Endpoint {
+        base_url: base_url.to_owned(),
+        api_key: key_for(key)?.map(ToOwned::to_owned),
     })
 }
 
@@ -72,9 +100,9 @@ pub(crate) fn resolve<'a>(
 /// single interface in the Rust layer". Asked at the moment a Provider is
 /// reached for rather than at load, so that one Provider missing its key costs
 /// the user only the Models that Provider offers.
-pub(crate) fn key_for(provider: &Provider) -> Result<Option<&str>, RunError> {
-    match &provider.key {
-        Key::Found(key) => Ok(Some(key)),
+pub(crate) fn key_for(key: &Key) -> Result<Option<&str>, RunError> {
+    match key {
+        Key::Found { key, .. } => Ok(Some(key)),
         Key::NotNeeded => Ok(None),
         Key::Missing(missing) => Err(RunError::Configuration(missing.clone())),
     }
@@ -187,7 +215,10 @@ mod tests {
         Provider {
             name: name.to_owned(),
             base_url: format!("https://{name}.example/v1"),
-            key: Key::Found(format!("{name}-key")),
+            key: Key::Found {
+                key: format!("{name}-key"),
+                from: config::Origin::File,
+            },
             models: models
                 .iter()
                 .map(|(id, vision)| Model {
@@ -251,7 +282,15 @@ mod tests {
     fn resolved(config: &Config, binding: Option<&str>, kind: Kind) -> String {
         let resolved = resolve(config, binding, kind).expect("the chain should resolve");
 
-        config::qualified(resolved.provider, resolved.model)
+        // The Provider is named from the endpoint it answers at, which is what
+        // resolving to a Model at one Provider rather than another comes to.
+        let provider = config
+            .providers
+            .iter()
+            .find(|provider| provider.base_url == resolved.endpoint.base_url)
+            .expect("the endpoint should be one of the Providers configured");
+
+        format!("{}/{}", provider.name, resolved.model)
     }
 
     /// What the user is told when it arrives at nothing.
@@ -390,7 +429,7 @@ mod tests {
         );
         let resolved = resolve(&config, None, Kind::Text).expect("the chain should resolve");
 
-        assert_eq!(resolved.api_key, None);
+        assert_eq!(resolved.endpoint.api_key, None);
     }
 
     #[test]
@@ -400,8 +439,8 @@ mod tests {
         let config = both();
         let resolved = resolve(&config, None, Kind::Image).expect("the chain should resolve");
 
-        assert_eq!(resolved.provider.base_url, "https://dear.example/v1");
-        assert_eq!(resolved.api_key, Some("dear-key"));
-        assert_eq!(resolved.model.id, "sharp");
+        assert_eq!(resolved.endpoint.base_url, "https://dear.example/v1");
+        assert_eq!(resolved.endpoint.api_key.as_deref(), Some("dear-key"));
+        assert_eq!(resolved.model, "sharp");
     }
 }

@@ -6,9 +6,12 @@
 
 use std::collections::BTreeMap;
 
-use demysto_core::{Action, CaptureOutcome, Conversation, Demysto, Status, Summary};
+use demysto_core::{
+    Action, CaptureOutcome, ConfigError, Conversation, Demysto, Edit, Preset, ProviderEdit,
+    RunError, Settings, Status, Summary,
+};
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Runtime, State, WebviewWindow};
+use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 
 #[tauri::command]
 pub fn status(demysto: State<'_, Demysto>) -> Status {
@@ -79,8 +82,62 @@ pub fn show_answers_on(channel: Channel<String>) {
     crate::result::show_answers_on(channel);
 }
 
+/// The settings as the file now holds them, for the window that edits it.
+#[tauri::command]
+pub fn settings(demysto: State<'_, Demysto>) -> Result<Settings, ConfigError> {
+    demysto.settings()
+}
+
+/// Writes what the window edited, and answers with the settings as the file
+/// then holds them.
+///
+/// Off the drawing thread like the two below it: a save puts every key typed
+/// into the window to its Provider before writing anything.
+#[tauri::command]
+pub async fn save_settings<R: Runtime>(
+    app: AppHandle<R>,
+    edit: Edit,
+) -> Result<Settings, ConfigError> {
+    waiting(move || app.state::<Demysto>().save_settings(&edit)).await
+}
+
+/// The services Demysto knows the conventions of, for the window to offer.
+#[tauri::command]
+pub fn presets(demysto: State<'_, Demysto>) -> Vec<Preset> {
+    demysto.presets()
+}
+
+/// The Models a Provider says it offers, asked of the Provider as the window
+/// has it now rather than as the file holds it.
+#[tauri::command]
+pub async fn provider_models<R: Runtime>(
+    app: AppHandle<R>,
+    provider: ProviderEdit,
+) -> Result<Vec<String>, RunError> {
+    waiting(move || app.state::<Demysto>().models_offered_by(&provider)).await
+}
+
+/// Whether a Provider accepts a key, asked of the Provider itself.
+#[tauri::command]
+pub async fn verify_provider<R: Runtime>(
+    app: AppHandle<R>,
+    provider: ProviderEdit,
+    model: String,
+) -> Result<(), RunError> {
+    waiting(move || app.state::<Demysto>().verify(&provider, &model)).await
+}
+
+/// Runs something that waits on a Provider away from the thread that draws
+/// every window Demysto has — which is the same reason a Run is spawned rather
+/// than awaited, and the same distance across the network.
+async fn waiting<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .expect("asking a Provider should not have panicked")
+}
+
 /// Hides the window this was invoked from, which is what Escape asks for in
-/// both of them.
+/// all of them.
 #[tauri::command]
 pub fn dismiss<R: Runtime>(window: WebviewWindow<R>) {
     let _ = window.hide();

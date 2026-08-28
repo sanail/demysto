@@ -1,11 +1,13 @@
 //! The settings file: what Demysto is configured with, and where the key for a
 //! Provider comes from.
 //!
-//! Read once, at startup, and nothing else in the crate reads the environment —
-//! per the spec's *Core modules*. Which of the Models configured here a given
-//! Run uses is `model`'s; ticket 08 gives the file a window to be edited from.
+//! Read at startup, and again whenever the settings window writes it. Nothing
+//! else in the crate reads the environment, which is snapshotted here — per the
+//! spec's *Core modules*. Which of the Models configured here a given Run uses
+//! is `model`'s; how the window edits this file without flattening it is
+//! `settings`'.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -19,7 +21,7 @@ pub(crate) const FILE_NAME: &str = "settings.toml";
 /// The shape of the file this build understands. A file claiming a higher one
 /// was written by a newer Demysto, and guessing at what it means would be a
 /// good way to send somebody's key to the wrong place.
-const VERSION: u32 = 1;
+pub(crate) const VERSION: u32 = 1;
 
 /// What separates the Provider from the Model in the name a Model is nominated
 /// or bound by.
@@ -29,6 +31,11 @@ const VERSION: u32 = 1;
 /// (`anthropic/claude-sonnet-4.5` is one Model at one Provider).
 const SEPARATOR: char = '/';
 
+/// What the settings call the Model an Action resolves to when it binds none.
+pub(crate) const MODEL_SETTING: &str = "default_model";
+/// And the one an image Selection resolves to first.
+pub(crate) const VISION_SETTING: &str = "default_vision_model";
+
 /// Where the preamble names every preset there is, filled in from the presets
 /// themselves so that adding one cannot leave the file describing the old set.
 const PRESETS: &str = "{presets}";
@@ -37,7 +44,8 @@ const PRESETS: &str = "{presets}";
 /// field in the example under it means.
 const PREAMBLE: &str = r#"# Demysto's settings.
 #
-# Read once, when Demysto starts, so restart it after an edit.
+# Read when Demysto starts, and again whenever Settings writes it — so restart
+# Demysto after editing this file by hand.
 #
 # Uncomment the example below and fill it in.
 #
@@ -161,14 +169,27 @@ pub(crate) struct Provider {
 /// message or, once ticket 11 has them, a log.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Key {
-    /// The key to send.
-    Found(String),
+    /// The key to send, and which of the three sources it came out of.
+    Found { key: String, from: Origin },
     /// The service has none to send — a server answering on this machine. The
     /// request goes out unauthenticated (ADR-0006).
     NotNeeded,
     /// The service wants one and none was found. The sentence says where to
     /// put one.
     Missing(String),
+}
+
+/// Which of ADR-0002's three sources a key was found in.
+///
+/// Carried so that the settings window can tell the user where their key is
+/// without being handed the key: a field it must not overwrite with a blank,
+/// and a variable it should name rather than invite them to paste over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Origin {
+    /// The `api_key` field of the settings file.
+    File,
+    /// An environment variable, which is named.
+    Variable(String),
 }
 
 /// A specific Model offered by a Provider, with the capability Demysto needs to
@@ -181,6 +202,22 @@ pub(crate) struct Model {
     /// the identifier: names are marketing, and a wrong guess here is either a
     /// refused request or a Model that could have seen and was never asked to.
     pub(crate) vision: bool,
+}
+
+impl fmt::Debug for ProviderEntry {
+    /// Written out rather than derived, for the reason [`Provider`]'s own is.
+    /// This one holds the key as the file states it — and, once the settings
+    /// window builds one out of what somebody typed, as they typed it.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProviderEntry")
+            .field("name", &self.name)
+            .field("base_url", &self.base_url)
+            .field("preset", &self.preset)
+            .field("api_key_env", &self.api_key_env)
+            .field("models", &self.models)
+            .field("api_key", &self.api_key.as_ref().map(|_| "<not shown>"))
+            .finish()
+    }
 }
 
 impl fmt::Debug for Provider {
@@ -196,7 +233,7 @@ impl fmt::Debug for Provider {
             .field(
                 "key",
                 match &self.key {
-                    Key::Found(_) => &"<not shown>",
+                    Key::Found { .. } => &"<not shown>",
                     Key::NotNeeded => &"<not needed>",
                     Key::Missing(_) => &"<none>",
                 },
@@ -226,11 +263,6 @@ impl Config {
             .iter()
             .flat_map(|provider| provider.models.iter().map(move |model| (provider, model)))
     }
-
-    /// The Provider called `name`. `None` when the file configures none.
-    pub(crate) fn provider(&self, name: &str) -> Option<&Provider> {
-        self.providers.iter().find(|provider| provider.name == name)
-    }
 }
 
 /// What a Model is nominated or bound by: the Provider that offers it and its
@@ -245,50 +277,125 @@ pub(crate) fn qualified(provider: &Provider, model: &Model) -> String {
 /// Every variant carries the whole sentence the user is shown: the file is the
 /// only place the fix can be made, so an error that does not name it is an
 /// error the user cannot act on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ConfigError {
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", content = "message", rename_all = "snake_case")]
+pub enum ConfigError {
     /// The file could not be read, or could not be created.
     Unreadable(String),
+    /// A Provider refused a key entered in the settings window, so nothing was
+    /// saved. Not a fault of the file — a fault the file was about to acquire.
+    Refused(String),
+    /// The file could not be written. Held apart from [`Self::Unreadable`]
+    /// because they are opposite news: one is settings Demysto never had, the
+    /// other is settings the user has just lost.
+    Unwritable(String),
     /// The file was read but is not something Demysto can act on.
     Malformed(String),
     /// The file is valid and configures no Provider.
     NoProvider(String),
 }
 
+impl ConfigError {
+    /// The sentence the user is shown.
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Unreadable(message)
+            | Self::Refused(message)
+            | Self::Unwritable(message)
+            | Self::Malformed(message)
+            | Self::NoProvider(message) => message,
+        }
+    }
+}
+
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Unreadable(message) | Self::Malformed(message) | Self::NoProvider(message) => {
-                message
-            }
-        })
+        f.write_str(self.message())
     }
 }
 
 impl std::error::Error for ConfigError {}
 
-/// The environment, behind a trait so that key resolution can be tested without
-/// mutating the environment of the whole test binary — the same reason
-/// [`crate::paths::config_dir`] takes its inputs rather than reading them.
-pub(crate) trait Env {
-    fn get(&self, name: &str) -> Option<String>;
+/// The environment as it was when Demysto started.
+///
+/// A copy rather than a look at the live one, because the settings are no
+/// longer read once: the window writes them and Demysto reads them again, and a
+/// key that changed under it between those two reads is a key nobody can reason
+/// about (the spec's *Core modules*). Taking it as a value also lets key
+/// resolution be tested without mutating the environment of the whole test
+/// binary — the same reason [`crate::paths::config_dir`] takes its inputs
+/// rather than reading them.
+#[derive(Clone, Default)]
+pub(crate) struct Environment(BTreeMap<String, String>);
+
+impl Environment {
+    /// Everything exported to this process, as it stands now.
+    pub(crate) fn snapshot() -> Self {
+        Self(std::env::vars().collect())
+    }
+
+    fn get(&self, name: &str) -> Option<String> {
+        self.0.get(name).cloned()
+    }
+
+    /// An environment holding exactly what a caller put in it.
+    #[cfg(test)]
+    pub(crate) fn holding(variables: &[(&str, &str)]) -> Self {
+        Self(
+            variables
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+                .collect(),
+        )
+    }
 }
 
-/// The environment of the running process.
-pub(crate) struct SystemEnv;
-
-impl Env for SystemEnv {
-    fn get(&self, name: &str) -> Option<String> {
-        std::env::var(name).ok()
+impl fmt::Debug for Environment {
+    /// Written out rather than derived, for the reason [`Provider`]'s own is:
+    /// this holds every variable the shell exported, which on the machine of
+    /// anybody who uses more than one such tool is several other people's keys.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Environment").field(&"<not shown>").finish()
     }
 }
 
 /// Reads the settings file, creating it when it is not there yet, and resolves
 /// the Providers it configures.
-pub(crate) fn load(config_dir: &Path, env: &dyn Env) -> Result<Config, ConfigError> {
+pub(crate) fn load(config_dir: &Path, env: &Environment) -> Result<Config, ConfigError> {
+    let (path, text) = read(config_dir)?;
+    let config = resolve(&path, parse(&path, &text)?, env)?;
+
+    // Asked here rather than in [`resolve`], which the settings window also
+    // goes through: a file configuring nothing is Demysto having nothing to run
+    // against, and it is also what starting over passes through. Refusing to
+    // save it would leave somebody unable to remove their last Provider.
+    if config.providers.is_empty() {
+        return Err(ConfigError::NoProvider(format!(
+            "no Provider is configured; open {} and fill in the example it holds",
+            path.display()
+        )));
+    }
+
+    Ok(config)
+}
+
+/// Where the settings file is and what is written in it, the file being created
+/// from the template when it is not there yet.
+///
+/// Held apart from [`load`] because the settings window edits the text rather
+/// than the [`Config`] it loads to: the preamble, the user's own comments, and
+/// anything a later Demysto wrote there all survive a round trip through the
+/// text and none of them survives one through [`File`].
+pub(crate) fn read(config_dir: &Path) -> Result<(PathBuf, String), ConfigError> {
     let path = config_dir.join(FILE_NAME);
     let text = read_or_create(&path)?;
-    let file: File = toml::from_str(&text).map_err(|error| unparseable(&path, &text, &error))?;
+
+    Ok((path, text))
+}
+
+/// The file as it is written, checked only for being a shape this build knows.
+pub(crate) fn parse(path: &Path, text: &str) -> Result<File, ConfigError> {
+    let file: File = toml::from_str(text).map_err(|error| unparseable(path, text, &error))?;
 
     if file.version > VERSION {
         return Err(ConfigError::Malformed(format!(
@@ -300,22 +407,21 @@ pub(crate) fn load(config_dir: &Path, env: &dyn Env) -> Result<Config, ConfigErr
         )));
     }
 
-    if file.providers.is_empty() {
-        return Err(ConfigError::NoProvider(format!(
-            "no Provider is configured; open {} and fill in the example it holds",
-            path.display()
-        )));
-    }
+    Ok(file)
+}
 
+/// The Providers a parsed file configures, with their keys resolved. Every
+/// error here is the file saying something nobody can act on.
+pub(crate) fn resolve(path: &Path, file: File, env: &Environment) -> Result<Config, ConfigError> {
     let mut providers: Vec<Provider> = Vec::with_capacity(file.providers.len());
 
     for entry in &file.providers {
-        nameable(entry, &providers, &path)?;
+        nameable(entry, &providers, path)?;
 
         providers.push(Provider {
             name: entry.name.clone(),
-            base_url: base_url(entry, &path)?,
-            key: resolve_key(entry, env, &path),
+            base_url: base_url(entry, path)?,
+            key: resolve_key(entry, env, path),
             models: entry
                 .models
                 .iter()
@@ -328,7 +434,7 @@ pub(crate) fn load(config_dir: &Path, env: &dyn Env) -> Result<Config, ConfigErr
     }
 
     Ok(Config {
-        path,
+        path: path.to_owned(),
         providers,
         default_model: file.default_model,
         default_vision_model: file.default_vision_model,
@@ -338,43 +444,43 @@ pub(crate) fn load(config_dir: &Path, env: &dyn Env) -> Result<Config, ConfigErr
 /// The settings file as it is written, before anything is resolved.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct File {
+pub(crate) struct File {
     /// Absent in a file written by hand, which is the same as the first version.
     #[serde(default = "first_version")]
     version: u32,
     #[serde(default)]
-    providers: Vec<ProviderEntry>,
-    default_model: Option<String>,
-    default_vision_model: Option<String>,
+    pub(crate) providers: Vec<ProviderEntry>,
+    pub(crate) default_model: Option<String>,
+    pub(crate) default_vision_model: Option<String>,
 }
 
 fn first_version() -> u32 {
     VERSION
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ProviderEntry {
+pub(crate) struct ProviderEntry {
     /// What the user calls this Provider, and what the first half of a Model's
     /// name refers to.
-    name: String,
+    pub(crate) name: String,
     /// Absent when the preset supplies it.
-    base_url: Option<String>,
-    preset: Option<Preset>,
-    api_key: Option<String>,
-    api_key_env: Option<String>,
+    pub(crate) base_url: Option<String>,
+    pub(crate) preset: Option<Preset>,
+    pub(crate) api_key: Option<String>,
+    pub(crate) api_key_env: Option<String>,
     /// The Models of this Provider the user wants to use — not everything it
     /// offers, which is what the Model list is fetched for.
     #[serde(default)]
-    models: Vec<ModelEntry>,
+    pub(crate) models: Vec<ModelEntry>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ModelEntry {
-    id: String,
+pub(crate) struct ModelEntry {
+    pub(crate) id: String,
     #[serde(default)]
-    vision: bool,
+    pub(crate) vision: bool,
 }
 
 /// A service Demysto knows the conventions of.
@@ -385,7 +491,7 @@ struct ModelEntry {
 /// recorded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Preset {
+pub(crate) enum Preset {
     Deepseek,
     Lmstudio,
     Ollama,
@@ -396,10 +502,10 @@ enum Preset {
 /// What Demysto knows about a service: the word the file names it by, where it
 /// answers, and the environment variable its own documentation tells people to
 /// export.
-struct Spec {
-    name: &'static str,
-    base_url: &'static str,
-    auth: Auth,
+pub(crate) struct Spec {
+    pub(crate) name: &'static str,
+    pub(crate) base_url: &'static str,
+    pub(crate) auth: Auth,
 }
 
 /// What a service wants by way of authentication.
@@ -408,7 +514,7 @@ struct Spec {
 /// documented a variable for this" and "this has no keys at all" are different
 /// facts, and only the second may turn authentication off. A service that
 /// wanted a key and named no variable for it would need a variant of its own.
-enum Auth {
+pub(crate) enum Auth {
     /// A key, which the service's own documentation tells people to export as
     /// this.
     Variable(&'static str),
@@ -419,7 +525,7 @@ enum Auth {
 impl Preset {
     /// Every preset there is, so that the template can name them: a preset
     /// nobody has heard of is a base URL somebody looks up anyway.
-    const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; 5] = [
         Self::Deepseek,
         Self::Lmstudio,
         Self::Ollama,
@@ -427,9 +533,17 @@ impl Preset {
         Self::Openrouter,
     ];
 
+    /// The preset the settings file — or the settings window, which writes the
+    /// same word into it — calls `name`. `None` when nothing here is called that.
+    pub(crate) fn named(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|preset| preset.spec().name == name)
+    }
+
     /// Everything known about one service, in one place: a preset added here is
     /// a preset added once, and the match keeps the compiler asking.
-    fn spec(self) -> Spec {
+    pub(crate) fn spec(self) -> Spec {
         match self {
             Self::Deepseek => Spec {
                 name: "deepseek",
@@ -464,7 +578,7 @@ impl Preset {
 ///
 /// A stated base URL wins over the preset's, so that a proxy or a regional
 /// endpoint does not cost the user the preset's other half.
-fn base_url(entry: &ProviderEntry, path: &Path) -> Result<String, ConfigError> {
+pub(crate) fn base_url(entry: &ProviderEntry, path: &Path) -> Result<String, ConfigError> {
     stated(entry.base_url.clone())
         .or_else(|| entry.preset.map(|preset| preset.spec().base_url.to_owned()))
         .ok_or_else(|| {
@@ -540,18 +654,19 @@ fn duplicate_model(entry: &ProviderEntry) -> Option<&str> {
 /// stated for a keyless service is still used, because the three sources are
 /// asked first: somebody may have put a local server behind something that
 /// wants one.
-fn resolve_key(entry: &ProviderEntry, env: &dyn Env, path: &Path) -> Key {
-    let from_env = |name: &str| stated(env.get(name));
+pub(crate) fn resolve_key(entry: &ProviderEntry, env: &Environment, path: &Path) -> Key {
+    let from_env =
+        |name: &str| stated(env.get(name)).map(|key| (key, Origin::Variable(name.to_owned())));
 
     let found = entry
         .api_key_env
         .as_deref()
         .and_then(from_env)
         .or_else(|| conventional(entry).and_then(from_env))
-        .or_else(|| stated(entry.api_key.clone()));
+        .or_else(|| stated(entry.api_key.clone()).map(|key| (key, Origin::File)));
 
     match found {
-        Some(key) => Key::Found(key),
+        Some((key, from)) => Key::Found { key, from },
         // Naming a variable in `api_key_env` is the user saying this Provider
         // is authenticated, so a variable that turns out to hold nothing is a
         // fault to report rather than a service to stop authenticating. It
@@ -656,6 +771,53 @@ fn create(path: &Path) -> Result<(), ConfigError> {
         .map_err(|error| unreadable(path, &error))
 }
 
+/// Replaces the settings file with `text`, owner-only, without ever leaving a
+/// half-written one behind.
+///
+/// Written beside the file and renamed over it rather than truncated and filled
+/// in: the file holds a key, and a crash between the truncation and the last
+/// byte would be a user whose credentials are simply gone. The rename is one
+/// step as far as anybody reading the file is concerned, and the new file
+/// carries the mode rather than inheriting whatever the old one had — ADR-0002
+/// asks for owner-only, and a file the window wrote is no less bound by it than
+/// one Demysto created.
+pub(crate) fn write(path: &Path, text: &str) -> Result<(), ConfigError> {
+    use std::io::Write;
+
+    if let Some(parent) = path.parent() {
+        create_dir(parent)?;
+    }
+
+    // Beside the file, so that the rename stays within one filesystem: a
+    // temporary directory elsewhere would make it a copy, which is exactly the
+    // half-written state this is here to avoid.
+    let beside = path.with_extension("toml.writing");
+
+    // Whatever a crashed write left there is not a file to append to, and
+    // `create_new` below would refuse it. Its mode is not to be trusted either.
+    let _ = fs::remove_file(&beside);
+
+    let mut file = options()
+        .create_new(true)
+        .write(true)
+        .open(&beside)
+        .map_err(|error| unwritable(&beside, &error))?;
+
+    file.write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|error| unwritable(&beside, &error))?;
+
+    drop(file);
+
+    fs::rename(&beside, path).map_err(|error| {
+        // The half-written file is not left lying next to the real one, where
+        // the next write would have to distrust it and the user would have to
+        // wonder what it is.
+        let _ = fs::remove_file(&beside);
+        unwritable(path, &error)
+    })
+}
+
 /// The file carries a key, so it is created readable by nobody else — the whole
 /// of what ADR-0002 asks in exchange for keeping the key out of the keychain.
 #[cfg(unix)]
@@ -693,6 +855,10 @@ fn unreadable(path: &Path, error: &io::Error) -> ConfigError {
     ConfigError::Unreadable(format!("{} could not be read: {error}", path.display()))
 }
 
+fn unwritable(path: &Path, error: &io::Error) -> ConfigError {
+    ConfigError::Unwritable(format!("{} could not be written: {error}", path.display()))
+}
+
 /// What a parse failure says, and where — but never the line it happened on.
 ///
 /// `toml`'s own `Display` quotes the offending source line back, and in a file
@@ -723,36 +889,13 @@ mod tests {
     //! environment beside it — the two substitutions the spec's *Testing
     //! Decisions* names for this module.
 
-    use std::collections::HashMap;
-
     use tempfile::TempDir;
 
     use super::*;
 
-    /// An environment holding exactly what a test put in it.
-    #[derive(Default)]
-    struct FakeEnv(HashMap<String, String>);
-
-    impl FakeEnv {
-        fn holding(variables: &[(&str, &str)]) -> Self {
-            Self(
-                variables
-                    .iter()
-                    .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
-                    .collect(),
-            )
-        }
-    }
-
-    impl Env for FakeEnv {
-        fn get(&self, name: &str) -> Option<String> {
-            self.0.get(name).cloned()
-        }
-    }
-
     /// A settings file holding `body` under the version line, and the config it
     /// loads to.
-    fn load_with(body: &str, env: &FakeEnv) -> (TempDir, Result<Config, ConfigError>) {
+    fn load_with(body: &str, env: &Environment) -> (TempDir, Result<Config, ConfigError>) {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(FILE_NAME), format!("version = 1\n\n{body}")).unwrap();
 
@@ -760,32 +903,32 @@ mod tests {
         (dir, loaded)
     }
 
-    fn config(body: &str, env: &FakeEnv) -> Config {
+    fn config(body: &str, env: &Environment) -> Config {
         let (_dir, loaded) = load_with(body, env);
         loaded.expect("the settings should have loaded")
     }
 
-    fn error(body: &str, env: &FakeEnv) -> ConfigError {
+    fn error(body: &str, env: &Environment) -> ConfigError {
         let (_dir, loaded) = load_with(body, env);
         loaded.expect_err("the settings should not have loaded")
     }
 
     /// What the first Provider resolved to, for the tests about where a key
     /// comes from.
-    fn key(body: &str, env: &FakeEnv) -> Key {
+    fn key(body: &str, env: &Environment) -> Key {
         config(body, env).providers.remove(0).key
     }
 
     /// The key the first Provider found, and nothing else.
-    fn found(body: &str, env: &FakeEnv) -> String {
+    fn found(body: &str, env: &Environment) -> String {
         match key(body, env) {
-            Key::Found(key) => key,
+            Key::Found { key, .. } => key,
             other => panic!("the Provider should have found a key: {:?}", Named(&other)),
         }
     }
 
     /// The sentence a Provider that wanted a key and found none carries.
-    fn no_key_message(body: &str, env: &FakeEnv) -> String {
+    fn no_key_message(body: &str, env: &Environment) -> String {
         match key(body, env) {
             Key::Missing(message) => message,
             other => panic!("the Provider should have wanted a key: {:?}", Named(&other)),
@@ -799,7 +942,7 @@ mod tests {
     impl std::fmt::Debug for Named<'_> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             f.write_str(match self.0 {
-                Key::Found(_) => "a key",
+                Key::Found { .. } => "a key",
                 Key::NotNeeded => "no key needed",
                 Key::Missing(_) => "no key found",
             })
@@ -830,26 +973,29 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn the_key_comes_from_the_variable_the_provider_names() {
-        let env = FakeEnv::holding(&[("MY_OWN_KEY", "from-my-own-variable")]);
+        let env = Environment::holding(&[("MY_OWN_KEY", "from-my-own-variable")]);
 
         assert_eq!(found(EVERY_SOURCE, &env), "from-my-own-variable");
     }
 
     #[test]
     fn the_key_comes_from_the_presets_conventional_variable() {
-        let env = FakeEnv::holding(&[("DEEPSEEK_API_KEY", "from-the-preset")]);
+        let env = Environment::holding(&[("DEEPSEEK_API_KEY", "from-the-preset")]);
 
         assert_eq!(found(&without_its_own_variable(), &env), "from-the-preset");
     }
 
     #[test]
     fn the_key_comes_from_the_file_when_the_environment_holds_none() {
-        assert_eq!(found(&file_only(), &FakeEnv::default()), "from-the-file");
+        assert_eq!(
+            found(&file_only(), &Environment::default()),
+            "from-the-file"
+        );
     }
 
     #[test]
     fn the_variable_the_provider_names_wins_over_the_presets() {
-        let env = FakeEnv::holding(&[
+        let env = Environment::holding(&[
             ("MY_OWN_KEY", "from-my-own-variable"),
             ("DEEPSEEK_API_KEY", "from-the-preset"),
         ]);
@@ -859,7 +1005,7 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn the_presets_variable_wins_over_the_file() {
-        let env = FakeEnv::holding(&[("DEEPSEEK_API_KEY", "from-the-preset")]);
+        let env = Environment::holding(&[("DEEPSEEK_API_KEY", "from-the-preset")]);
 
         assert_eq!(found(EVERY_SOURCE, &env), "from-the-preset");
     }
@@ -868,14 +1014,14 @@ models = [{ id = \"deepseek-chat\" }]
     fn a_variable_that_is_set_but_empty_is_not_a_key() {
         // Exported and left empty is a common state of a shell profile, and
         // reading it as a key would turn a working configuration into a 401.
-        let env = FakeEnv::holding(&[("MY_OWN_KEY", ""), ("DEEPSEEK_API_KEY", "   ")]);
+        let env = Environment::holding(&[("MY_OWN_KEY", ""), ("DEEPSEEK_API_KEY", "   ")]);
 
         assert_eq!(found(EVERY_SOURCE, &env), "from-the-file");
     }
 
     #[test]
     fn a_key_arrives_without_the_whitespace_around_it() {
-        let env = FakeEnv::holding(&[("MY_OWN_KEY", "  from-my-own-variable\n")]);
+        let env = Environment::holding(&[("MY_OWN_KEY", "  from-my-own-variable\n")]);
 
         assert_eq!(found(EVERY_SOURCE, &env), "from-my-own-variable");
     }
@@ -883,7 +1029,7 @@ models = [{ id = \"deepseek-chat\" }]
     #[test]
     fn no_key_anywhere_names_every_variable_that_was_looked_at() {
         let missing = EVERY_SOURCE.replace("api_key = \"from-the-file\"\n", "");
-        let message = no_key_message(&missing, &FakeEnv::default());
+        let message = no_key_message(&missing, &Environment::default());
 
         assert!(message.contains("MY_OWN_KEY"), "{message}");
         assert!(message.contains("DEEPSEEK_API_KEY"), "{message}");
@@ -893,7 +1039,7 @@ models = [{ id = \"deepseek-chat\" }]
     #[test]
     fn a_provider_with_no_variables_to_name_still_says_where_a_key_goes() {
         let missing = file_only().replace("api_key = \"from-the-file\"\n", "");
-        let message = no_key_message(&missing, &FakeEnv::default());
+        let message = no_key_message(&missing, &Environment::default());
 
         assert!(message.contains(FILE_NAME), "{message}");
         assert!(message.contains("api_key_env"), "{message}");
@@ -903,7 +1049,7 @@ models = [{ id = \"deepseek-chat\" }]
     fn a_provider_with_no_key_says_which_provider_it_is() {
         // Several Providers may be configured, and only one of them is broken.
         let missing = file_only().replace("api_key = \"from-the-file\"\n", "");
-        let message = no_key_message(&missing, &FakeEnv::default());
+        let message = no_key_message(&missing, &Environment::default());
 
         assert!(message.contains("deepseek"), "{message}");
     }
@@ -916,10 +1062,10 @@ models = [{ id = \"deepseek-chat\" }]
             file_only().replace("api_key = \"from-the-file\"\n", "")
         );
 
-        let config = config(&both, &FakeEnv::holding(&[("OPENAI_API_KEY", "a-key")]));
+        let config = config(&both, &Environment::holding(&[("OPENAI_API_KEY", "a-key")]));
 
         assert!(matches!(config.providers[0].key, Key::Missing(_)));
-        assert!(matches!(&config.providers[1].key, Key::Found(key) if key == "a-key"));
+        assert!(matches!(&config.providers[1].key, Key::Found { key, .. } if key == "a-key"));
     }
 
     #[test]
@@ -927,7 +1073,10 @@ models = [{ id = \"deepseek-chat\" }]
         let local = "[[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
                      models = [{ id = \"qwen/qwen3-8b\" }]\n";
 
-        assert!(matches!(key(local, &FakeEnv::default()), Key::NotNeeded));
+        assert!(matches!(
+            key(local, &Environment::default()),
+            Key::NotNeeded
+        ));
     }
 
     #[test]
@@ -936,7 +1085,7 @@ models = [{ id = \"deepseek-chat\" }]
         let local = "[[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
                      api_key = \"from-the-file\"\nmodels = [{ id = \"a-model\" }]\n";
 
-        assert_eq!(found(local, &FakeEnv::default()), "from-the-file");
+        assert_eq!(found(local, &Environment::default()), "from-the-file");
     }
 
     #[test]
@@ -944,7 +1093,7 @@ models = [{ id = \"deepseek-chat\" }]
         let local = "[[providers]]\nname = \"local\"\npreset = \"ollama\"\n";
 
         assert_eq!(
-            config(local, &FakeEnv::default()).providers[0].base_url,
+            config(local, &Environment::default()).providers[0].base_url,
             "http://localhost:11434/v1"
         );
     }
@@ -959,7 +1108,7 @@ models = [{ id = \"deepseek-chat\" }]
         let named = "[[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
                      api_key_env = \"MY_LOCAL_KEY\"\nmodels = [{ id = \"a-model\" }]\n";
 
-        let Key::Missing(message) = key(named, &FakeEnv::default()) else {
+        let Key::Missing(message) = key(named, &Environment::default()) else {
             panic!("a variable that holds nothing should be reported, not passed over");
         };
 
@@ -970,7 +1119,7 @@ models = [{ id = \"deepseek-chat\" }]
     fn a_variable_named_for_a_keyless_service_is_used_when_it_holds_one() {
         let named = "[[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
                      api_key_env = \"MY_LOCAL_KEY\"\nmodels = [{ id = \"a-model\" }]\n";
-        let env = FakeEnv::holding(&[("MY_LOCAL_KEY", "from-my-own-variable")]);
+        let env = Environment::holding(&[("MY_LOCAL_KEY", "from-my-own-variable")]);
 
         assert_eq!(found(named, &env), "from-my-own-variable");
     }
@@ -983,12 +1132,15 @@ models = [{ id = \"deepseek-chat\" }]
         let by_hand = "[[providers]]\nname = \"local\"\n\
                        base_url = \"http://localhost:1234/v1\"\nmodels = [{ id = \"a-model\" }]\n";
 
-        assert!(matches!(key(by_hand, &FakeEnv::default()), Key::Missing(_)));
+        assert!(matches!(
+            key(by_hand, &Environment::default()),
+            Key::Missing(_)
+        ));
     }
 
     #[test]
     fn the_provider_is_read_from_the_file() {
-        let provider = config(&file_only(), &FakeEnv::default())
+        let provider = config(&file_only(), &Environment::default())
             .providers
             .remove(0);
 
@@ -1010,7 +1162,7 @@ models = [{ id = \"deepseek-chat\" }]
              api_key = \"another-key\"\nmodels = [{{ id = \"gpt-4o-mini\" }}]\n"
         );
 
-        let names: Vec<String> = config(&both, &FakeEnv::default())
+        let names: Vec<String> = config(&both, &Environment::default())
             .providers
             .into_iter()
             .map(|provider| provider.name)
@@ -1025,7 +1177,7 @@ models = [{ id = \"deepseek-chat\" }]
                          api_key = \"a-key\"\n";
 
         assert_eq!(
-            config(by_preset, &FakeEnv::default()).providers[0].base_url,
+            config(by_preset, &Environment::default()).providers[0].base_url,
             "https://api.openai.com/v1"
         );
     }
@@ -1040,7 +1192,7 @@ models = [{ id = \"deepseek-chat\" }]
         );
 
         assert_eq!(
-            config(&proxied, &FakeEnv::default()).providers[0].base_url,
+            config(&proxied, &Environment::default()).providers[0].base_url,
             "https://proxy.internal/v1"
         );
     }
@@ -1048,7 +1200,7 @@ models = [{ id = \"deepseek-chat\" }]
     #[test]
     fn a_provider_with_no_address_at_all_is_reported() {
         let nowhere = "[[providers]]\nname = \"mine\"\napi_key = \"a-key\"\n";
-        let ConfigError::Malformed(message) = error(nowhere, &FakeEnv::default()) else {
+        let ConfigError::Malformed(message) = error(nowhere, &Environment::default()) else {
             panic!("a Provider with no address should be reported as malformed");
         };
 
@@ -1061,7 +1213,7 @@ models = [{ id = \"deepseek-chat\" }]
         // The whole point of the flag: a name is not a capability.
         let named_like_one = EVERY_SOURCE.replace("deepseek-chat", "gpt-4o-vision-preview");
 
-        assert!(!config(&named_like_one, &FakeEnv::default()).providers[0].models[0].vision);
+        assert!(!config(&named_like_one, &Environment::default()).providers[0].models[0].vision);
     }
 
     #[test]
@@ -1071,12 +1223,12 @@ models = [{ id = \"deepseek-chat\" }]
             "{ id = \"deepseek-chat\", vision = true }",
         );
 
-        assert!(config(&seeing, &FakeEnv::default()).providers[0].models[0].vision);
+        assert!(config(&seeing, &Environment::default()).providers[0].models[0].vision);
     }
 
     #[test]
     fn a_model_is_found_by_the_provider_that_offers_it_and_its_own_name() {
-        let config = config(EVERY_SOURCE, &FakeEnv::default());
+        let config = config(EVERY_SOURCE, &Environment::default());
 
         let (provider, model) = config
             .model("deepseek/deepseek-chat")
@@ -1091,7 +1243,7 @@ models = [{ id = \"deepseek-chat\" }]
         // Half of what an aggregating Provider offers is named this way.
         let routed = "[[providers]]\nname = \"openrouter\"\npreset = \"openrouter\"\n\
                       api_key = \"a-key\"\nmodels = [{ id = \"anthropic/claude-sonnet-4.5\" }]\n";
-        let config = config(routed, &FakeEnv::default());
+        let config = config(routed, &Environment::default());
 
         let (_, model) = config
             .model("openrouter/anthropic/claude-sonnet-4.5")
@@ -1107,7 +1259,7 @@ models = [{ id = \"deepseek-chat\" }]
         let slashed = EVERY_SOURCE.replace("name = \"deepseek\"", "name = \"deep/seek\"");
 
         assert!(matches!(
-            error(&slashed, &FakeEnv::default()),
+            error(&slashed, &Environment::default()),
             ConfigError::Malformed(_)
         ));
     }
@@ -1115,7 +1267,7 @@ models = [{ id = \"deepseek-chat\" }]
     #[test]
     fn two_providers_of_the_same_name_are_reported() {
         let twice = format!("{EVERY_SOURCE}\n{EVERY_SOURCE}");
-        let ConfigError::Malformed(message) = error(&twice, &FakeEnv::default()) else {
+        let ConfigError::Malformed(message) = error(&twice, &Environment::default()) else {
             panic!("two Providers of one name should be reported as malformed");
         };
 
@@ -1130,7 +1282,7 @@ models = [{ id = \"deepseek-chat\" }]
         );
 
         assert!(matches!(
-            error(&twice, &FakeEnv::default()),
+            error(&twice, &Environment::default()),
             ConfigError::Malformed(_)
         ));
     }
@@ -1141,7 +1293,7 @@ models = [{ id = \"deepseek-chat\" }]
             "default_model = \"deepseek/deepseek-chat\"\n\
              default_vision_model = \"openai/gpt-4o\"\n\n{EVERY_SOURCE}"
         );
-        let config = config(&nominated, &FakeEnv::default());
+        let config = config(&nominated, &Environment::default());
 
         assert_eq!(
             config.default_model.as_deref(),
@@ -1157,7 +1309,7 @@ models = [{ id = \"deepseek-chat\" }]
     fn a_settings_file_is_created_when_there_is_none() {
         let dir = TempDir::new().unwrap();
 
-        let _ = load(dir.path(), &FakeEnv::default());
+        let _ = load(dir.path(), &Environment::default());
 
         assert!(dir.path().join(FILE_NAME).is_file());
     }
@@ -1167,7 +1319,7 @@ models = [{ id = \"deepseek-chat\" }]
         let dir = TempDir::new().unwrap();
         let nested = dir.path().join("never/been/here");
 
-        let _ = load(&nested, &FakeEnv::default());
+        let _ = load(&nested, &Environment::default());
 
         assert!(nested.join(FILE_NAME).is_file());
     }
@@ -1179,7 +1331,7 @@ models = [{ id = \"deepseek-chat\" }]
 
         let dir = TempDir::new().unwrap();
 
-        let _ = load(dir.path(), &FakeEnv::default());
+        let _ = load(dir.path(), &Environment::default());
 
         let mode = fs::metadata(dir.path().join(FILE_NAME))
             .unwrap()
@@ -1194,7 +1346,7 @@ models = [{ id = \"deepseek-chat\" }]
         let dir = TempDir::new().unwrap();
 
         assert!(matches!(
-            load(dir.path(), &FakeEnv::default()),
+            load(dir.path(), &Environment::default()),
             Err(ConfigError::NoProvider(_))
         ));
     }
@@ -1202,7 +1354,7 @@ models = [{ id = \"deepseek-chat\" }]
     #[test]
     fn the_example_the_template_offers_is_one_that_would_load() {
         // Uncommenting it is the whole of what a new user is asked to do.
-        let config = config(EXAMPLE, &FakeEnv::default());
+        let config = config(EXAMPLE, &Environment::default());
 
         assert_eq!(
             config.default_model.as_deref(),
@@ -1238,7 +1390,9 @@ models = [{ id = \"deepseek-chat\" }]
                 "[[providers]]\nname = \"mine\"\npreset = \"{}\"\n",
                 spec.name
             );
-            let provider = config(&by_preset, &FakeEnv::default()).providers.remove(0);
+            let provider = config(&by_preset, &Environment::default())
+                .providers
+                .remove(0);
 
             assert_eq!(provider.base_url, spec.base_url);
 
@@ -1270,7 +1424,7 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_settings_file_that_is_already_there_is_left_alone() {
-        let (dir, _) = load_with(&file_only(), &FakeEnv::default());
+        let (dir, _) = load_with(&file_only(), &Environment::default());
 
         let written = fs::read_to_string(dir.path().join(FILE_NAME)).unwrap();
 
@@ -1279,7 +1433,8 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_file_that_is_not_valid_toml_names_itself() {
-        let ConfigError::Malformed(message) = error("[[providers]\nname = ", &FakeEnv::default())
+        let ConfigError::Malformed(message) =
+            error("[[providers]\nname = ", &Environment::default())
         else {
             panic!("a broken file should be reported as malformed");
         };
@@ -1293,7 +1448,7 @@ models = [{ id = \"deepseek-chat\" }]
         // output, and the line it would quote is the one the key is on:
         // ADR-0002's "The key never enters the webview".
         let unquoted = file_only().replace("\"from-the-file\"", "from-the-file");
-        let ConfigError::Malformed(message) = error(&unquoted, &FakeEnv::default()) else {
+        let ConfigError::Malformed(message) = error(&unquoted, &Environment::default()) else {
             panic!("an unquoted value should be reported as malformed");
         };
 
@@ -1308,7 +1463,7 @@ models = [{ id = \"deepseek-chat\" }]
         let misspelled = file_only().replace("api_key =", "api_kye =");
 
         assert!(matches!(
-            error(&misspelled, &FakeEnv::default()),
+            error(&misspelled, &Environment::default()),
             ConfigError::Malformed(_)
         ));
     }
@@ -1318,7 +1473,7 @@ models = [{ id = \"deepseek-chat\" }]
         let misspelled = EVERY_SOURCE.replace("id = \"deepseek-chat\"", "idd = \"deepseek-chat\"");
 
         assert!(matches!(
-            error(&misspelled, &FakeEnv::default()),
+            error(&misspelled, &Environment::default()),
             ConfigError::Malformed(_)
         ));
     }
@@ -1328,7 +1483,7 @@ models = [{ id = \"deepseek-chat\" }]
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(FILE_NAME), "version = 99\n").unwrap();
 
-        let Err(ConfigError::Malformed(message)) = load(dir.path(), &FakeEnv::default()) else {
+        let Err(ConfigError::Malformed(message)) = load(dir.path(), &Environment::default()) else {
             panic!("a file from the future should not be acted on");
         };
 
@@ -1340,6 +1495,6 @@ models = [{ id = \"deepseek-chat\" }]
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(FILE_NAME), file_only()).unwrap();
 
-        assert!(load(dir.path(), &FakeEnv::default()).is_ok());
+        assert!(load(dir.path(), &Environment::default()).is_ok());
     }
 }

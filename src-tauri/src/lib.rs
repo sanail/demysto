@@ -7,6 +7,7 @@ mod commands;
 mod hotkey;
 mod palette;
 mod result;
+mod settings;
 mod tray;
 mod underway;
 
@@ -86,6 +87,11 @@ pub fn run() {
             commands::conversations,
             commands::show_conversation,
             commands::show_answers_on,
+            commands::settings,
+            commands::save_settings,
+            commands::presets,
+            commands::provider_models,
+            commands::verify_provider,
             commands::dismiss,
         ])
         .build(tauri::generate_context!())

@@ -15,7 +15,11 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      input: { palette: "palette.html", result: "result.html" },
+      input: {
+        palette: "palette.html",
+        result: "result.html",
+        settings: "settings.html",
+      },
     },
   },
 });

@@ -34,6 +34,17 @@
         "minHeight": 220,
         "center": true,
         "visible": false
+      },
+      {
+        "label": "settings",
+        "url": "settings.html",
+        "title": "Demysto Settings",
+        "width": 720,
+        "height": 640,
+        "minWidth": 480,
+        "minHeight": 400,
+        "center": true,
+        "visible": false
       }
     ],
     "security": {

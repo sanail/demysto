@@ -13,8 +13,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::Provider;
-use crate::model::Resolved;
+use crate::model::{Endpoint, Resolved};
 use crate::run::{RunError, Stopping};
 use crate::sse;
 
@@ -55,26 +54,14 @@ const BODY_KEPT: usize = 4 * 300;
 /// Answers as soon as `stopping` says the user has stopped waiting, which
 /// leaves the caller holding what had arrived by then.
 pub(crate) fn answer(
-    resolved: &Resolved<'_>,
+    resolved: &Resolved,
     said: &[(&str, String)],
     stopping: &Stopping,
     mut arriving: impl FnMut(&str),
 ) -> Result<(), RunError> {
-    let provider = resolved.provider;
-    let asking = authenticated(
-        client()?.post(endpoint(&provider.base_url, ANSWERING)),
-        resolved.api_key,
-    );
+    let provider = &resolved.endpoint;
 
-    let mut response = asking
-        .json(&Request {
-            model: &resolved.model.id,
-            messages: said
-                .iter()
-                .map(|(role, content)| Message { role, content })
-                .collect(),
-            stream: true,
-        })
+    let mut response = asking(provider, &resolved.model, said)?
         .send()
         .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
 
@@ -161,10 +148,13 @@ pub(crate) fn answer(
 /// not something the contract reports, and guessing it here is exactly what the
 /// `vision` flag exists to stop. The user picks from this list and says what
 /// each one can do.
-pub(crate) fn models(provider: &Provider, api_key: Option<&str>) -> Result<Vec<String>, RunError> {
-    let response = authenticated(client()?.get(endpoint(&provider.base_url, MODELS)), api_key)
-        .send()
-        .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+pub(crate) fn models(provider: &Endpoint) -> Result<Vec<String>, RunError> {
+    let response = authenticated(
+        client()?.get(joined(&provider.base_url, MODELS)),
+        provider.api_key.as_deref(),
+    )
+    .send()
+    .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
 
     let status = response.status();
     let body = response
@@ -179,6 +169,59 @@ pub(crate) fn models(provider: &Provider, api_key: Option<&str>) -> Result<Vec<S
         .map_err(|error| RunError::Malformed(malformed(&error.to_string(), &body)))?;
 
     Ok(offered.data.into_iter().map(|model| model.id).collect())
+}
+
+/// Whether this Provider accepts this key, asked of the Provider itself.
+///
+/// The request a Run makes, to the Model the user chose, with one word in it —
+/// and the answer is thrown away unread. Nothing cheaper is worth making: the
+/// Model list is public at some Providers, so fetching it would pass a key the
+/// service would have refused, and user story 42 exists so that a wrong key is
+/// learned about now rather than at the first Run. Asking the way a Run asks is
+/// also what tells the user their Model identifier is one this key may use.
+/// ADR-0008 records the decision and what it costs.
+///
+/// The stream is dropped at the headers rather than read to its end, so the
+/// Model is cut off after the few tokens it takes a connection to close.
+pub(crate) fn verify(provider: &Endpoint, model: &str) -> Result<(), RunError> {
+    let said = [("user", "Hi".to_owned())];
+
+    let response = asking(provider, model, &said)?
+        .send()
+        .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+
+    let body = response
+        .text()
+        .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+
+    Err(RunError::Provider(refused(status.as_u16(), &body)))
+}
+
+/// The request both a Run and a verification make: the Conversation so far, put
+/// to one Model at one Provider, as a stream.
+fn asking(
+    provider: &Endpoint,
+    model: &str,
+    said: &[(&str, String)],
+) -> Result<reqwest::blocking::RequestBuilder, RunError> {
+    let request = authenticated(
+        client()?.post(joined(&provider.base_url, ANSWERING)),
+        provider.api_key.as_deref(),
+    );
+
+    Ok(request.json(&Request {
+        model,
+        messages: said
+            .iter()
+            .map(|(role, content)| Message { role, content })
+            .collect(),
+        stream: true,
+    }))
 }
 
 /// The text one event carries, which is none when the Model sent a fragment
@@ -219,7 +262,7 @@ fn authenticated(
 
 /// The base URL and an endpoint, with exactly one slash between them: a base
 /// URL is copied out of documentation as often with a trailing slash as without.
-fn endpoint(base_url: &str, endpoint: &str) -> String {
+fn joined(base_url: &str, endpoint: &str) -> String {
     format!("{}/{endpoint}", base_url.trim_end_matches('/'))
 }
 
@@ -245,13 +288,13 @@ fn client() -> Result<&'static reqwest::blocking::Client, RunError> {
         })
 }
 
-fn unreachable(provider: &Provider, error: &reqwest::Error) -> String {
+fn unreachable(provider: &Endpoint, error: &reqwest::Error) -> String {
     format!("{} could not be reached: {error}", provider.base_url)
 }
 
 /// A stream that started and then stopped: a different thing from an endpoint
 /// that never answered, though there is nothing more to show for either.
-fn interrupted(provider: &Provider, error: &std::io::Error) -> String {
+fn interrupted(provider: &Endpoint, error: &std::io::Error) -> String {
     format!(
         "{} stopped answering part-way through: {error}",
         provider.base_url

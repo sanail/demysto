@@ -218,3 +218,121 @@ export function onRunning(handle: () => void): Promise<UnlistenFn> {
 export function onAnswered(handle: () => void): Promise<UnlistenFn> {
   return listen<null>("result://answered", () => handle());
 }
+
+/** Mirrors `demysto_core::ConfigError`. */
+export type ConfigError = {
+  kind: "unreadable" | "refused" | "unwritable" | "malformed" | "no_provider";
+  message: string;
+};
+
+/** Mirrors `demysto_core::ConfiguredModel`. */
+export type ConfiguredModel = { id: string; vision: boolean };
+
+/**
+ * Mirrors `demysto_core::KeyStanding`: where a Provider's key is.
+ *
+ * Where, and never what. ADR-0002 keeps the key on disk in exchange for one
+ * promise — that it never enters the webview — and this window is drawn in the
+ * same webview that renders whatever a Model said.
+ */
+export type KeyStanding =
+  | { state: "in_file" }
+  | { state: "in_environment"; variable: string }
+  | { state: "not_needed" }
+  | { state: "missing" };
+
+/** Mirrors `demysto_core::ConfiguredProvider`. */
+export type ConfiguredProvider = {
+  name: string;
+  /** What the file states, `null` when the preset supplies it. */
+  base_url: string | null;
+  preset: string | null;
+  api_key_env: string | null;
+  key: KeyStanding;
+  models: ConfiguredModel[];
+};
+
+/** Mirrors `demysto_core::Settings`. */
+export type Settings = {
+  providers: ConfiguredProvider[];
+  default_model: string | null;
+  default_vision_model: string | null;
+};
+
+/** Mirrors `demysto_core::KeyEdit`: what a save does to a Provider's key. */
+export type KeyEdit =
+  | { action: "keep" }
+  | { action: "set"; key: string }
+  | { action: "forget" };
+
+/** Mirrors `demysto_core::ProviderEdit`. */
+export type ProviderEdit = {
+  /** What this Provider was called in the file, `null` for one being added. */
+  was: string | null;
+  name: string;
+  base_url: string | null;
+  preset: string | null;
+  api_key_env: string | null;
+  api_key: KeyEdit;
+  models: ConfiguredModel[];
+};
+
+/** Mirrors `demysto_core::Edit`: the whole of the settings, every time. */
+export type Edit = {
+  providers: ProviderEdit[];
+  default_model: string | null;
+  default_vision_model: string | null;
+};
+
+/** Mirrors `demysto_core::Preset`. */
+export type Preset = {
+  name: string;
+  base_url: string;
+  /** What the service's own documentation says to export, `null` where none. */
+  variable: string | null;
+  /** Whether the service has keys at all — see ADR-0006. */
+  needs_key: boolean;
+};
+
+/** The settings as the file now holds them. */
+export function settings(): Promise<Settings> {
+  return invoke<Settings>("settings");
+}
+
+/**
+ * Writes the settings, and answers with them as the file then holds them —
+ * which is what the window shows next: a save is only finished when it reads
+ * back.
+ *
+ * Every key typed here is put to its Provider first, so this waits on the
+ * network. Rejects with a `ConfigError` when a Provider refused a key, or when
+ * what was edited is something Demysto could not read again; nothing is written
+ * in either case.
+ */
+export function saveSettings(edit: Edit): Promise<Settings> {
+  return invoke<Settings>("save_settings", { edit });
+}
+
+/** The services Demysto knows the conventions of. */
+export function presets(): Promise<Preset[]> {
+  return invoke<Preset[]>("presets");
+}
+
+/**
+ * The Models a Provider says it offers, asked of the Provider as this window
+ * has it now — a key just typed included — rather than as the file holds it.
+ */
+export function providerModels(provider: ProviderEdit): Promise<string[]> {
+  return invoke<string[]>("provider_models", { provider });
+}
+
+/**
+ * Whether a Provider accepts a key, asked of the Provider itself against one of
+ * its Models. Rejects with a `RunError` carrying the Provider's own words.
+ */
+export function verifyProvider(
+  provider: ProviderEdit,
+  model: string,
+): Promise<void> {
+  return invoke<void>("verify_provider", { provider, model });
+}

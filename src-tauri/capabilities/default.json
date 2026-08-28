@@ -4,7 +4,8 @@
   "description": "Permissions granted to Demysto's windows.",
   "windows": [
     "palette",
-    "result"
+    "result",
+    "settings"
   ],
   "permissions": [
     "core:default"

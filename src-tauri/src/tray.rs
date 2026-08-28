@@ -10,12 +10,14 @@ use tauri::{
 
 /// Menu item ids. Matched in the event handler below.
 const SHOW: &str = "show";
+const SETTINGS: &str = "settings";
 const QUIT: &str = "quit";
 
 pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
     let show = MenuItem::with_id(app, SHOW, "Open Demysto", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, SETTINGS, "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT, "Quit Demysto", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
 
     let icon = app
         .default_window_icon()
@@ -28,6 +30,7 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             SHOW => crate::palette::reveal(app),
+            SETTINGS => crate::settings::reveal(app),
             QUIT => app.exit(0),
             _ => {}
         })
