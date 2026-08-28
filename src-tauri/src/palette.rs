@@ -3,7 +3,7 @@
 use std::sync::atomic::AtomicBool;
 
 use demysto_core::Demysto;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, Runtime, WebviewWindow};
 
 use crate::underway::Underway;
 
@@ -100,12 +100,13 @@ fn position_at_cursor<R: Runtime>(
 ) -> tauri::Result<()> {
     let cursor = app.cursor_position()?;
     let size = window.outer_size()?;
-    let screen = app.monitor_from_point(cursor.x, cursor.y)?;
+    let screen = screen_holding(app, cursor)?;
 
     // The scale of the screen the cursor is on, not of the one the Palette was
-    // last shown on. Every distance here is in logical pixels of the screen the
-    // window is about to appear on, and on a mixed-DPI desktop those two
-    // screens disagree — a 12-pixel gap becomes 24, or 6.
+    // last shown on. Everything else here is in physical pixels, and only
+    // CURSOR_OFFSET and SCREEN_MARGIN are stated in logical ones, so this is
+    // what carries those two across — and on a mixed-DPI desktop the screens
+    // disagree about it, which is what turns a 12-pixel gap into 24, or 6.
     let scale = match &screen {
         Some(screen) => screen.scale_factor(),
         None => window.scale_factor()?,
@@ -129,6 +130,50 @@ fn position_at_cursor<R: Runtime>(
     }
 
     window.set_position(PhysicalPosition::new(x, y))
+}
+
+/// The screen the pointer is on, or the primary one when it is on none.
+///
+/// The monitors are walked here rather than asked for through
+/// `monitor_from_point`, which answers in a different coordinate space from the
+/// one the pointer arrives in: `cursor_position` is physical pixels, and that
+/// lookup compares against `CGDisplayBounds`, which is logical points. On a
+/// screen at 2x the two agree only for a pointer in the top-left quarter, and
+/// past that the screen was simply lost — which used to mean the Palette was
+/// not kept on it at all, exactly where it most needed to be. A monitor's own
+/// position and size are physical, so walking them keeps everything here in one
+/// space and needs no conversion on any platform.
+///
+/// The primary screen stands in when the pointer is on none, which is a gap
+/// between two of them: somewhere to clamp against is better than nowhere, and
+/// nowhere is how this went wrong.
+fn screen_holding<R: Runtime>(
+    app: &AppHandle<R>,
+    cursor: PhysicalPosition<f64>,
+) -> tauri::Result<Option<Monitor>> {
+    if let Some(screen) = app
+        .available_monitors()?
+        .into_iter()
+        .find(|screen| holds(screen, cursor))
+    {
+        return Ok(Some(screen));
+    }
+
+    app.primary_monitor()
+}
+
+/// Whether a point is on a screen, in the physical pixels both are given in.
+fn holds(screen: &Monitor, point: PhysicalPosition<f64>) -> bool {
+    let origin = screen.position();
+    let size = screen.size();
+
+    let within = |start: i32, extent: u32, at: f64| {
+        let start = f64::from(start);
+
+        at >= start && at < start + f64::from(extent)
+    };
+
+    within(origin.x, size.width, point.x) && within(origin.y, size.height, point.y)
 }
 
 /// Brings the Palette up in front of whatever the user is reading.
