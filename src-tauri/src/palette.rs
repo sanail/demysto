@@ -11,6 +11,10 @@ pub const LABEL: &str = "palette";
 /// Emitted to the Palette every time a Capture completes.
 const CAPTURED_EVENT: &str = "palette://captured";
 
+/// Emitted to the Palette when a Capture begins, so that it stops showing the
+/// one before it.
+const CAPTURING_EVENT: &str = "palette://capturing";
+
 /// How far from the cursor the Palette's corner sits, in logical pixels, so
 /// that the window does not open underneath the pointer itself.
 const CURSOR_OFFSET: f64 = 12.0;
@@ -19,8 +23,33 @@ const CURSOR_OFFSET: f64 = 12.0;
 const SCREEN_MARGIN: f64 = 8.0;
 
 /// Whether the Palette is in the middle of opening. Single instance is
-/// enforced, so one flag covers the whole application.
+/// enforced, so one flag covers the whole application. Claimed through
+/// [`Opening`] rather than touched directly.
 static OPENING: AtomicBool = AtomicBool::new(false);
+
+/// Holds [`OPENING`] for as long as one open is under way, and clears it
+/// however that open ends.
+///
+/// A guard rather than a pair of stores, because the thread [`off_thread`]
+/// spawns is detached: a panic on it takes nothing else down and nobody hears
+/// about it. A flag left set by one would make every later open return at its
+/// first line, so the Hotkey, the tray's Open, and a second launch would all
+/// quietly do nothing for the rest of the process's life. Unwinding past this
+/// guard clears the flag, which keeps the damage to the press that caused it.
+struct Opening;
+
+impl Opening {
+    /// Claims the flag, or answers `None` when an open already holds it.
+    fn claim() -> Option<Self> {
+        (!OPENING.swap(true, Ordering::SeqCst)).then_some(Self)
+    }
+}
+
+impl Drop for Opening {
+    fn drop(&mut self) {
+        OPENING.store(false, Ordering::SeqCst);
+    }
+}
 
 /// Opens the Palette, or closes it when it is already open.
 pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
@@ -58,9 +87,18 @@ fn off_thread<R: Runtime>(
 }
 
 fn open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
-    if OPENING.swap(true, Ordering::SeqCst) {
+    // Held until the Palette is up and holds the focus. Any shorter and a
+    // Hotkey pressed twice in a hurry sends a second copy keystroke, by then
+    // aimed at the Palette itself.
+    let Some(_opening) = Opening::claim() else {
         return;
-    }
+    };
+
+    // Hiding the Palette does not unload it, so it is still showing the last
+    // Capture. Told first that another is under way, it goes back to saying it
+    // is reading — which is what the user should see if this one turns out to
+    // have nothing to show, or never reaches the window at all.
+    let _ = window.emit(CAPTURING_EVENT, ());
 
     // Before the window is shown: the copy keystroke has to reach the
     // application the user is reading, and that is only the foreground
@@ -68,16 +106,13 @@ fn open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     let outcome = app.state::<Demysto>().capture();
 
     let _ = position_at_cursor(app, window);
-    show(app, window);
 
-    // Emitted after the window is up, and asked for again by the Palette when
-    // it mounts, so that neither order loses the Capture.
+    // Also before the window is shown, so that what it comes up showing is this
+    // Capture rather than the one before it. A window that has never loaded
+    // hears neither event, and asks for the Capture itself when it mounts.
     let _ = window.emit(CAPTURED_EVENT, &outcome);
 
-    // Released only once the Palette holds the focus. Any earlier and a Hotkey
-    // pressed twice in a hurry sends a second copy keystroke, by then aimed at
-    // the Palette itself.
-    OPENING.store(false, Ordering::SeqCst);
+    show(app, window);
 }
 
 /// Puts the Palette next to the pointer, kept whole on the screen it is on.
