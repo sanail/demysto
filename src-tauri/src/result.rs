@@ -4,6 +4,7 @@
 //! user reads and copies from, not something that floats over their work. Ticket
 //! 06 turns it into the Conversation window.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
@@ -47,8 +48,8 @@ pub fn show_answers_on(channel: Channel<String>) {
     *SHOWING.lock().unwrap() = Some(channel);
 }
 
-/// Runs the built-in explain Action over the last Capture and shows the answer.
-pub fn run<R: Runtime>(app: &AppHandle<R>) {
+/// Runs one Action over the last Capture and shows the answer.
+pub fn run<R: Runtime>(app: &AppHandle<R>, action: String, parameters: BTreeMap<String, String>) {
     let app = app.clone();
 
     // A Run waits on a Provider across the network, which is far longer than
@@ -74,12 +75,12 @@ pub fn run<R: Runtime>(app: &AppHandle<R>) {
             return;
         };
 
-        // Forgotten before the window is shown rather than when the Run begins:
-        // a window loading for this Run asks the core what the last one
-        // produced, and the answer to the question before is what it must not
-        // come up holding.
+        // Declared before the window is shown rather than when the Run begins:
+        // a window loading for this Run asks the core what it is looking at,
+        // and the question before this one is what it must not come up holding
+        // — neither that question's answer nor its name.
         let demysto = app.state::<Demysto>();
-        demysto.forget_last_run();
+        demysto.about_to_run(&action);
 
         // Shown before the answer exists, and told that one is on its way: the
         // whole point of the tracer bullet is that the user sees something
@@ -90,7 +91,7 @@ pub fn run<R: Runtime>(app: &AppHandle<R>) {
         // The whole answer so far crosses on every hand-over rather than the
         // piece that just landed, so a window still loading when one goes past
         // is put right by the next rather than left a fragment short.
-        let outcome = demysto.run(|answer| {
+        let outcome = demysto.run(&action, &parameters, |answer| {
             if let Some(showing) = SHOWING.lock().unwrap().as_ref() {
                 let _ = showing.send(answer.to_owned());
             }

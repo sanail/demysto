@@ -5,13 +5,16 @@
 //! The Tauri layer in `src-tauri` is a set of thin adapters over the [`Demysto`]
 //! facade defined here, and nothing in this crate may reference Tauri types.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
+mod action;
 mod capture;
 mod config;
 mod desktop;
+mod language;
 mod paths;
 mod provider;
 mod run;
@@ -19,6 +22,7 @@ mod selection;
 mod sse;
 mod stream;
 
+pub use action::{Action, Parameter};
 pub use capture::{Capture, CaptureError, CaptureOutcome, Captured};
 pub use paths::{config_dir, ConfigDirError, CONFIG_DIR_ENV};
 pub use run::{RunError, RunOutcome};
@@ -41,6 +45,9 @@ pub struct Demysto {
     /// The last Run, for the same reason: the result window is shown while the
     /// request is still in flight, so it loads after the Run it is showing.
     last_run: Mutex<Option<RunOutcome>>,
+    /// What that Run is running. Kept apart from what it produced because the
+    /// window is headed with it before there is anything to head.
+    running: Mutex<Option<Action>>,
     /// How often a Run under way hands over what has arrived so far. A field
     /// rather than a constant so that the suite can take the waiting out of it,
     /// the way it takes it out of a Capture.
@@ -85,6 +92,7 @@ impl Demysto {
             capture,
             last_capture: Mutex::new(None),
             last_run: Mutex::new(None),
+            running: Mutex::new(None),
             throttle: stream::THROTTLE,
         }
     }
@@ -115,35 +123,71 @@ impl Demysto {
         self.last_capture.lock().unwrap().clone()
     }
 
-    /// Forgets the last Run.
+    /// Declares the Run that is about to begin: forgets what the last one
+    /// produced, and remembers which Action this one runs.
     ///
     /// The interface shows the result window for a Run that is about to begin,
-    /// and a window shown before there is an answer asks what the last one was
-    /// as it loads. Told first to forget, it comes up saying it is asking —
-    /// which is what the user should be looking at, rather than the answer to
-    /// the question before this one.
-    pub fn forget_last_run(&self) {
+    /// and a window shown before there is an answer asks the core what it is
+    /// looking at as it loads. Told this first, it comes up saying it is asking,
+    /// under the name of the Action it is asking for — rather than the answer to
+    /// the question before this one, under that question's name.
+    pub fn about_to_run(&self, action: &str) {
         *self.last_run.lock().unwrap() = None;
+        *self.running.lock().unwrap() = action::named(action);
     }
 
-    /// Runs the built-in explain Action against the last Capture, showing the
+    /// The Action the Run under way is running, for the window that heads its
+    /// answer with it. `None` before there has been a Run to name, and when the
+    /// Action asked for was not one Demysto has.
+    pub fn running_action(&self) -> Option<Action> {
+        self.running.lock().unwrap().clone()
+    }
+
+    /// The Actions that accept the last Capture, in the order the Palette
+    /// lists them.
+    ///
+    /// Filtered against the Capture the core already holds rather than against
+    /// a kind the interface names, for the reason [`Self::run`] takes its
+    /// Selection from there: the Palette offers what can be run on what Demysto
+    /// read. Nothing captured is no Actions — there is nothing for one to
+    /// operate on, and the Palette says so instead.
+    pub fn actions(&self) -> Vec<Action> {
+        let captured = self.last_capture();
+        let Some(selection) = captured.as_ref().and_then(CaptureOutcome::selection) else {
+            return Vec::new();
+        };
+
+        action::built_in()
+            .into_iter()
+            .filter(|action| action.accepts(selection.kind()))
+            .collect()
+    }
+
+    /// Runs the Action named by `action` against the last Capture, showing the
     /// answer as it arrives, and remembers what it produced.
     ///
     /// The Selection comes from the Capture the core already holds rather than
-    /// from the interface: what gets explained is what Demysto read, not what a
-    /// window says it read. Ticket 05 gives the caller an Action to choose.
+    /// from the interface: what gets run on is what Demysto read, not what a
+    /// window says it read. `parameters` is what the Palette collected for the
+    /// Parameters the Action declares; one it did not collect falls back to
+    /// what that Parameter offered.
     ///
     /// `showing` is handed the whole answer so far, render-ready, every so
     /// often — see [`stream`] for what "render-ready" and "so often" mean and
     /// why they are decided here rather than in the window.
-    pub fn run(&self, showing: impl FnMut(&str)) -> RunOutcome {
-        // Cleared before the request as well as written after it, so that the
-        // window has nothing stale to find however it got here — the interface
-        // forgets the last Run before it shows the window, and a caller that
-        // did not still cannot leave one on screen.
-        self.forget_last_run();
+    pub fn run(
+        &self,
+        action: &str,
+        parameters: &BTreeMap<String, String>,
+        showing: impl FnMut(&str),
+    ) -> RunOutcome {
+        // Declared here as well as by the interface, so that the window has
+        // nothing stale to find however it got here — the interface declares
+        // the Run before it shows the window, and a caller that did not still
+        // cannot leave the last one on screen.
+        self.about_to_run(action);
 
-        let outcome = RunOutcome::from(self.answer(showing));
+        let outcome = RunOutcome::from(self.answer(action, parameters, showing));
         *self.last_run.lock().unwrap() = Some(outcome.clone());
 
         outcome
@@ -155,12 +199,23 @@ impl Demysto {
         self.last_run.lock().unwrap().clone()
     }
 
-    fn answer(&self, mut showing: impl FnMut(&str)) -> Result<String, RunError> {
+    fn answer(
+        &self,
+        action: &str,
+        parameters: &BTreeMap<String, String>,
+        mut showing: impl FnMut(&str),
+    ) -> Result<String, RunError> {
         let captured = self.last_capture();
         let selection = captured
             .as_ref()
             .and_then(CaptureOutcome::selection)
             .ok_or_else(run::nothing_to_run)?;
+
+        // The Palette offers only the Actions that accept what was captured, and
+        // is the only gate on that today: with one Selection kind there is no
+        // Action a Run could reach that would refuse it. The kind images bring
+        // is where this needs a check of its own.
+        let action = action::named(action).ok_or_else(|| run::no_such_action(action))?;
 
         let config = self
             .config
@@ -171,7 +226,7 @@ impl Demysto {
 
         provider::answer(
             &config.provider,
-            &run::explain(selection.as_text()),
+            &action.prompt(selection, parameters),
             |fragment| {
                 if let Some(answer) = assembly.push(fragment) {
                     showing(&answer);
@@ -281,17 +336,52 @@ mod tests {
         streaming(&[answer])
     }
 
-    /// A Run whose intermediate states nobody is watching.
+    /// A Run of the Action every test that is not about the catalogue is about,
+    /// and whose intermediate states nobody is watching.
     fn run(demysto: &Demysto) -> RunOutcome {
-        demysto.run(|_| {})
+        running(demysto, "explain", &[])
+    }
+
+    /// A Run of one named Action, with what the Palette collected for the
+    /// Parameters it declares.
+    fn running(demysto: &Demysto, action: &str, parameters: &[(&str, &str)]) -> RunOutcome {
+        demysto.run(action, &collected(parameters), |_| {})
+    }
+
+    fn collected(parameters: &[(&str, &str)]) -> BTreeMap<String, String> {
+        parameters
+            .iter()
+            .map(|(id, value)| ((*id).to_owned(), (*value).to_owned()))
+            .collect()
     }
 
     /// Every state a Run put on screen, and what it finally produced.
     fn watching(demysto: &Demysto) -> (Vec<String>, RunOutcome) {
         let mut shown = Vec::new();
-        let outcome = demysto.run(|answer| shown.push(answer.to_owned()));
+        let outcome = demysto.run("explain", &BTreeMap::new(), |answer| {
+            shown.push(answer.to_owned())
+        });
 
         (shown, outcome)
+    }
+
+    /// The names of the Actions the Palette would list, in its order.
+    fn offered(demysto: &Demysto) -> Vec<String> {
+        demysto
+            .actions()
+            .into_iter()
+            .map(|action| action.name)
+            .collect()
+    }
+
+    /// A Demysto pointed at `server`, having captured `selection`, whose Runs
+    /// are asserted on the request they send rather than the answer they get.
+    fn asked_for(server: &mut ServerGuard, body: Vec<Matcher>) -> mockito::Mock {
+        server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(Matcher::AllOf(body))
+            .with_body(answering("an answer"))
+            .create()
     }
 
     /// A Demysto that has captured `selection` and is pointed at `server`.
@@ -845,5 +935,167 @@ mod tests {
         let desktop = Arc::new(FakeDesktop::new(None, None));
 
         assert_eq!(demysto(fake::over(&desktop)).last_run(), None);
+    }
+
+    #[test]
+    fn the_palette_is_offered_the_actions_that_accept_what_was_captured() {
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+        let demysto = demysto(fake::over(&desktop));
+        demysto.capture();
+
+        // The order is the catalogue's, not the alphabet's: the first is the
+        // one Enter runs without the user having read anything.
+        assert_eq!(offered(&demysto), ["Explain", "Translate", "Summarize"]);
+    }
+
+    #[test]
+    fn a_capture_that_found_nothing_leaves_no_action_to_offer() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = demysto(fake::over(&desktop));
+        demysto.capture();
+
+        assert!(offered(&demysto).is_empty());
+    }
+
+    #[test]
+    fn nothing_is_offered_before_the_first_capture() {
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+
+        assert!(offered(&demysto(fake::over(&desktop))).is_empty());
+    }
+
+    #[test]
+    fn a_window_shown_for_a_run_is_told_which_action_before_there_is_an_answer() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = demysto(fake::over(&desktop));
+
+        demysto.about_to_run("translate");
+
+        assert_eq!(
+            demysto.running_action().map(|action| action.name),
+            Some("Translate".to_owned())
+        );
+        assert_eq!(demysto.last_run(), None);
+    }
+
+    #[test]
+    fn a_run_of_an_action_demysto_does_not_have_leaves_the_window_nothing_to_name() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = demysto(fake::over(&desktop));
+
+        demysto.about_to_run("translat");
+
+        assert_eq!(demysto.running_action(), None);
+    }
+
+    #[test]
+    fn explaining_names_the_language_it_read_and_asks_for_the_one_the_user_reads() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![
+                Matcher::Regex("The text is in German".to_owned()),
+                Matcher::Regex("answer in English".to_owned()),
+                Matcher::Regex("Der Mensch ist frei geschaffen".to_owned()),
+            ],
+        );
+
+        run(&ready_to_run(
+            &server,
+            "Der Mensch ist frei geschaffen, ist frei",
+        ));
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn a_selection_too_short_to_place_is_not_given_a_language_it_may_not_be_in() {
+        // Two words are not enough to tell a language from — on the balance of
+        // probabilities "borrow checker" is Shona — and a prompt is better told
+        // nothing than told that.
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![Matcher::Regex(
+                "The text is in an unknown language".to_owned(),
+            )],
+        );
+
+        run(&ready_to_run(&server, "borrow checker"));
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn translating_asks_for_the_language_the_palette_collected() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![
+                Matcher::Regex("Translate the text below into Georgian".to_owned()),
+                Matcher::Regex("Ceci n'est pas une pipe".to_owned()),
+            ],
+        );
+
+        running(
+            &ready_to_run(&server, "Ceci n'est pas une pipe"),
+            "translate",
+            &[("target", "Georgian")],
+        );
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn a_parameter_the_user_left_alone_falls_back_to_what_it_offered() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![Matcher::Regex(
+                "Translate the text below into English".to_owned(),
+            )],
+        )
+        .expect(2);
+
+        let demysto = ready_to_run(&server, "Ceci n'est pas une pipe");
+
+        // Nothing collected at all, and a field the user cleared and left:
+        // both are the absence of an answer rather than an answer of nothing.
+        running(&demysto, "translate", &[]);
+        running(&demysto, "translate", &[("target", "   ")]);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn each_action_sends_its_own_prompt_rather_than_one_wording_for_all_of_them() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![
+                Matcher::Regex("Summarize the text below".to_owned()),
+                Matcher::Regex("answer in English".to_owned()),
+            ],
+        );
+
+        running(&ready_to_run(&server, "a paragraph"), "summarize", &[]);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn an_action_demysto_does_not_have_sends_nothing_anywhere() {
+        // The Provider is an address that refuses connections, so anything but
+        // this outcome would mean a request went out.
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+        let demysto = demysto_asking(fake::over(&desktop), "http://127.0.0.1:1/v1");
+        demysto.capture();
+
+        let RunOutcome::Failed(RunError::NoSuchAction(message)) = running(&demysto, "explan", &[])
+        else {
+            panic!("an Action Demysto does not have should be reported as one");
+        };
+
+        assert!(message.contains("explan"), "{message}");
     }
 }

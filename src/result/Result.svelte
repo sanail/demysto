@@ -7,6 +7,8 @@
     onAnswered,
     onRunning,
     onStreaming,
+    runningAction,
+    type Action,
     type RunOutcome,
   } from "../lib/ipc";
   import { latest } from "../lib/latest.svelte";
@@ -25,7 +27,30 @@
     last: lastRun,
   });
 
-  onMount(run.watch);
+  /**
+   * The Action this window is heading its answer with.
+   *
+   * Asked for rather than carried on the events, because the answer is the
+   * same question's however many hand-overs it arrives in; and asked again
+   * whenever a Run begins, because by then it is a different question.
+   */
+  let action = $state<Action | null>(null);
+
+  onMount(() => {
+    const stop = run.watch();
+    const running = onRunning(heading);
+
+    heading();
+
+    return () => {
+      stop();
+      running.then((unlisten) => unlisten());
+    };
+  });
+
+  function heading() {
+    runningAction().then((named) => (action = named));
+  }
 
   const outcome = $derived(run.value);
 
@@ -113,7 +138,7 @@
          dark:bg-neutral-900 dark:text-neutral-100"
 >
   <header class="flex items-baseline justify-between gap-3">
-    <h1 class="text-sm font-semibold tracking-tight">Explain</h1>
+    <h1 class="text-sm font-semibold tracking-tight">{action?.name ?? "Demysto"}</h1>
 
     {#if answer !== null}
       <button

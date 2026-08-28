@@ -1,8 +1,6 @@
 //! One execution of an Action against one Selection, and what it produced.
 //!
-//! The prompt of the one Action this ticket has lives here too, as a string.
-//! Ticket 05 brings the Action catalogue and the *Prompt assembly* the spec
-//! describes, and the prompt moves there with them.
+//! What the Run says to a Model belongs to the Action it runs; see `action`.
 
 use std::fmt;
 
@@ -40,6 +38,8 @@ pub enum RunError {
     Configuration(String),
     /// There was no Selection to run against.
     NothingToRun(String),
+    /// The interface asked for an Action Demysto does not have.
+    NoSuchAction(String),
     /// The Provider could not be reached at all.
     Unreachable(String),
     /// The Provider was reached and answered with an error of its own.
@@ -54,6 +54,7 @@ impl RunError {
         match self {
             Self::Configuration(message)
             | Self::NothingToRun(message)
+            | Self::NoSuchAction(message)
             | Self::Unreachable(message)
             | Self::Provider(message)
             | Self::Malformed(message) => message,
@@ -69,27 +70,23 @@ impl fmt::Display for RunError {
 
 impl std::error::Error for RunError {}
 
-/// The prompt of the one Action this ticket has.
-///
-/// A fixed string, on purpose: ticket 05 brings the Action catalogue, prompt
-/// templates, and the variables the spec's *Prompt assembly* lists, and there is
-/// nothing to be gained from half-building that here.
-const EXPLAIN: &str = "\
-Explain the text below to somebody who has just run into it while reading. Say \
-what it means and unpack anything in it that is not obvious. Be brief and \
-concrete, and do not repeat the text back.
-
-";
-
-/// The prompt for explaining a Selection.
-pub(crate) fn explain(selection: &str) -> String {
-    format!("{EXPLAIN}{selection}")
-}
-
 /// What the user is told when the Hotkey found nothing to act on.
 pub(crate) fn nothing_to_run() -> RunError {
     RunError::NothingToRun(
-        "There is nothing to explain: select some text, or copy it, and press the Hotkey again."
+        "There is nothing to run an Action on: select some text, or copy it, and press the \
+         Hotkey again."
             .to_owned(),
     )
+}
+
+/// What the user is told when the Action they chose is not one Demysto has.
+///
+/// Not reachable from a Palette showing this build's catalogue, and reachable
+/// the moment ticket 09 lets an Action be deleted while a Palette listing it is
+/// still on screen.
+pub(crate) fn no_such_action(id: &str) -> RunError {
+    RunError::NoSuchAction(format!(
+        "There is no Action called \"{id}\". It may have been removed since the Palette \
+         opened; press the Hotkey again."
+    ))
 }

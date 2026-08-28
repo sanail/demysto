@@ -27,6 +27,21 @@ export type CaptureOutcome =
   | { status: "captured"; detail: Captured }
   | { status: "failed"; detail: CaptureError };
 
+/** Mirrors `demysto_core::Parameter`. */
+export type Parameter = {
+  id: string;
+  label: string;
+  /** What the field holds before the user types, and when they type nothing. */
+  default: string;
+};
+
+/** Mirrors `demysto_core::Action`. */
+export type Action = {
+  id: string;
+  name: string;
+  parameters: Parameter[];
+};
+
 export function status(): Promise<Status> {
   return invoke<Status>("status");
 }
@@ -34,6 +49,15 @@ export function status(): Promise<Status> {
 /** What the last Capture produced, for a Palette that mounted after it. */
 export function lastCapture(): Promise<CaptureOutcome | null> {
   return invoke<CaptureOutcome | null>("last_capture");
+}
+
+/**
+ * The Actions the Palette lists: the ones that accept the last Capture, in the
+ * order they are listed in. Filtered by the backend against the Selection it
+ * read, rather than here against the one the window is showing.
+ */
+export function actions(): Promise<Action[]> {
+  return invoke<Action[]>("actions");
 }
 
 /** Hides the window this is called from, which is what Escape asks for. */
@@ -63,6 +87,7 @@ export type RunError = {
   kind:
     | "configuration"
     | "nothing_to_run"
+    | "no_such_action"
     | "unreachable"
     | "provider"
     | "malformed";
@@ -75,13 +100,17 @@ export type RunOutcome =
   | { status: "failed"; detail: RunError };
 
 /**
- * Runs the built-in explain Action over the last Capture.
+ * Runs one Action over the last Capture, with what the Palette collected for
+ * the Parameters it declares.
  *
  * Answers as soon as the Run has somewhere to happen, not when the Model has:
  * the answer arrives in the result window, through the events below.
  */
-export function run(): Promise<void> {
-  return invoke<void>("run");
+export function run(
+  action: string,
+  parameters: Record<string, string>,
+): Promise<void> {
+  return invoke<void>("run", { action, parameters });
 }
 
 /** What the last Run produced, for a result window that mounted after it. */
@@ -113,6 +142,14 @@ export function onStreaming(
       channel.onmessage = () => {};
     },
   );
+}
+
+/**
+ * The Action the Run under way is running, for the window that heads its answer
+ * with it. `null` before there has been a Run to name.
+ */
+export function runningAction(): Promise<Action | null> {
+  return invoke<Action | null>("running_action");
 }
 
 /** Every Run from here on that has begun but not yet finished. */

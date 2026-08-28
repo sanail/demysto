@@ -13,6 +13,7 @@ arboard = { version = "3", default-features = false, features = ["wayland-data-c
 enigo = "0.6"
 toml = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls", "system-proxy"] }
+whatlang = "0.18.0"
 
 [dev-dependencies]
 mockito = "1"
