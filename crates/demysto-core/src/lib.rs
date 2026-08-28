@@ -9,21 +9,34 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 mod capture;
+mod config;
 mod desktop;
 mod paths;
+mod provider;
+mod run;
 mod selection;
 
 pub use capture::{Capture, CaptureError, CaptureOutcome, Captured};
 pub use paths::{config_dir, ConfigDirError, CONFIG_DIR_ENV};
+pub use run::{RunError, RunOutcome};
 pub use selection::Selection;
+
+use config::{Config, ConfigError};
 
 /// The facade every user interface talks to.
 pub struct Demysto {
     config_dir: PathBuf,
     version: String,
     capture: Box<dyn Capture>,
+    /// The settings as they were at startup, however that went. A file that
+    /// cannot be used is no reason to refuse to start: the Palette still opens,
+    /// and the Run is where the user is told what to fix.
+    config: Result<Config, ConfigError>,
     /// The last Capture, so that a Palette which loads after one still finds it.
     last_capture: Mutex<Option<CaptureOutcome>>,
+    /// The last Run, for the same reason: the result window is shown while the
+    /// request is still in flight, so it loads after the Run it is showing.
+    last_run: Mutex<Option<RunOutcome>>,
 }
 
 /// What the application can report about itself before anything is configured.
@@ -52,11 +65,18 @@ impl Demysto {
         version: impl Into<String>,
         capture: Box<dyn Capture>,
     ) -> Self {
+        let config_dir = config_dir.into();
+
         Self {
-            config_dir: config_dir.into(),
+            // Read once, here, and nowhere else in the crate: the environment
+            // holds the key, and a key that can change under a running Demysto
+            // is a key nobody can reason about (the spec's *Core modules*).
+            config: config::load(&config_dir, &config::SystemEnv),
+            config_dir,
             version: version.into(),
             capture,
             last_capture: Mutex::new(None),
+            last_run: Mutex::new(None),
         }
     }
 
@@ -78,6 +98,58 @@ impl Demysto {
         self.last_capture.lock().unwrap().clone()
     }
 
+    /// Forgets the last Run.
+    ///
+    /// The interface shows the result window for a Run that is about to begin,
+    /// and a window shown before there is an answer asks what the last one was
+    /// as it loads. Told first to forget, it comes up saying it is asking —
+    /// which is what the user should be looking at, rather than the answer to
+    /// the question before this one.
+    pub fn forget_last_run(&self) {
+        *self.last_run.lock().unwrap() = None;
+    }
+
+    /// Runs the built-in explain Action against the last Capture, and remembers
+    /// what it produced.
+    ///
+    /// The Selection comes from the Capture the core already holds rather than
+    /// from the interface: what gets explained is what Demysto read, not what a
+    /// window says it read. Ticket 05 gives the caller an Action to choose, and
+    /// ticket 04 turns this into a stream rather than one long wait.
+    pub fn run(&self) -> RunOutcome {
+        // Cleared before the request as well as written after it, so that the
+        // window has nothing stale to find however it got here — the interface
+        // forgets the last Run before it shows the window, and a caller that
+        // did not still cannot leave one on screen.
+        self.forget_last_run();
+
+        let outcome = RunOutcome::from(self.answer());
+        *self.last_run.lock().unwrap() = Some(outcome.clone());
+
+        outcome
+    }
+
+    /// What the last Run produced, `None` before there has been one and while
+    /// one is under way.
+    pub fn last_run(&self) -> Option<RunOutcome> {
+        self.last_run.lock().unwrap().clone()
+    }
+
+    fn answer(&self) -> Result<String, RunError> {
+        let captured = self.last_capture();
+        let selection = captured
+            .as_ref()
+            .and_then(CaptureOutcome::selection)
+            .ok_or_else(run::nothing_to_run)?;
+
+        let config = self
+            .config
+            .as_ref()
+            .map_err(|error| RunError::Configuration(error.to_string()))?;
+
+        provider::answer(&config.provider, &run::explain(selection.as_text()))
+    }
+
     pub fn status(&self) -> Status {
         Status {
             version: self.version.clone(),
@@ -93,11 +165,77 @@ mod tests {
 
     use std::sync::Arc;
 
+    use mockito::{Matcher, Server, ServerGuard};
+    use serde_json::json;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::capture::fake::{self, FakeDesktop};
 
-    fn demysto(capture: Box<dyn Capture>) -> Demysto {
-        Demysto::with_capture("/somewhere/demysto", "1.2.3", capture)
+    /// A Demysto with a configuration directory of its own, kept for as long as
+    /// the test holds it.
+    ///
+    /// The facade reads its settings as it is built, so every test gets a
+    /// directory nobody else is writing to: the temporary directory standing in
+    /// for the config location, per the spec's *Testing Decisions*.
+    struct Rooted {
+        demysto: Demysto,
+        _dir: TempDir,
+    }
+
+    impl std::ops::Deref for Rooted {
+        type Target = Demysto;
+
+        fn deref(&self) -> &Demysto {
+            &self.demysto
+        }
+    }
+
+    /// A Demysto with nothing configured to talk to.
+    fn demysto(capture: Box<dyn Capture>) -> Rooted {
+        rooted(capture, None)
+    }
+
+    /// A Demysto configured with one Provider, at `base_url`.
+    ///
+    /// The Provider names no preset and no variable of its own, so that the
+    /// environment of whoever is running the suite cannot reach into it.
+    fn demysto_asking(capture: Box<dyn Capture>, base_url: &str) -> Rooted {
+        rooted(capture, Some(base_url))
+    }
+
+    fn rooted(capture: Box<dyn Capture>, base_url: Option<&str>) -> Rooted {
+        let dir = TempDir::new().unwrap();
+
+        if let Some(base_url) = base_url {
+            std::fs::write(
+                dir.path().join(config::FILE_NAME),
+                format!(
+                    "version = 1\n\n[[providers]]\nname = \"a provider\"\n\
+                     base_url = \"{base_url}\"\nmodel = \"a-model\"\napi_key = \"a-key\"\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        Rooted {
+            demysto: Demysto::with_capture(dir.path(), "1.2.3", capture),
+            _dir: dir,
+        }
+    }
+
+    /// The body an OpenAI-compatible Provider answers with.
+    fn answering(answer: &str) -> String {
+        json!({ "choices": [{ "message": { "role": "assistant", "content": answer } }] }).to_string()
+    }
+
+    /// A Demysto that has captured `selection` and is pointed at `server`.
+    fn ready_to_run(server: &ServerGuard, selection: &str) -> Rooted {
+        let desktop = Arc::new(FakeDesktop::new(None, Some(selection)));
+        let demysto = demysto_asking(fake::over(&desktop), &format!("{}/v1", server.url()));
+        demysto.capture();
+
+        demysto
     }
 
     fn captured(demysto: &Demysto) -> Captured {
@@ -292,18 +430,206 @@ mod tests {
 
     #[test]
     fn status_reports_the_config_dir_it_was_built_with() {
-        let demysto = Demysto::new("/somewhere/demysto", "1.2.3");
+        let dir = TempDir::new().unwrap();
+        let demysto = Demysto::new(dir.path(), "1.2.3");
 
-        assert_eq!(
-            demysto.status().config_dir,
-            PathBuf::from("/somewhere/demysto")
-        );
+        assert_eq!(demysto.status().config_dir, dir.path());
     }
 
     #[test]
     fn status_reports_the_version_it_was_built_with() {
-        let demysto = Demysto::new("/somewhere/demysto", "1.2.3");
+        let dir = TempDir::new().unwrap();
+        let demysto = Demysto::new(dir.path(), "1.2.3");
 
         assert_eq!(demysto.status().version, "1.2.3");
+    }
+
+    #[test]
+    fn the_selection_reaches_the_provider_and_its_answer_comes_back() {
+        let mut server = Server::new();
+        let endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_header("content-type", "application/json")
+            .with_body(answering("A painting of a pipe is not a pipe."))
+            .create();
+
+        let outcome = ready_to_run(&server, "Ceci n'est pas une pipe").run();
+
+        endpoint.assert();
+        assert_eq!(
+            outcome,
+            RunOutcome::Answered("A painting of a pipe is not a pipe.".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_request_carries_the_key_the_model_and_the_selection() {
+        let mut server = Server::new();
+        let endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("authorization", "Bearer a-key")
+            .match_header("content-type", "application/json")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::PartialJson(json!({
+                    "model": "a-model",
+                    "stream": false,
+                    "messages": [{ "role": "user" }],
+                })),
+                // The Selection itself, wherever the prompt around it puts it.
+                Matcher::Regex("Ceci n'est pas une pipe".to_owned()),
+            ]))
+            .with_body(answering("A painting of a pipe is not a pipe."))
+            .create();
+
+        ready_to_run(&server, "Ceci n'est pas une pipe").run();
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn a_base_url_with_a_trailing_slash_still_reaches_the_endpoint() {
+        let mut server = Server::new();
+        let endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+        let demysto = demysto_asking(fake::over(&desktop), &format!("{}/v1/", server.url()));
+        demysto.capture();
+        demysto.run();
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn a_provider_that_refuses_says_so_in_its_own_words() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(401)
+            .with_body(json!({ "error": { "message": "Incorrect API key provided" } }).to_string())
+            .create();
+
+        let RunOutcome::Failed(RunError::Provider(message)) =
+            ready_to_run(&server, "a paragraph").run()
+        else {
+            panic!("a refusal should be reported as one");
+        };
+
+        assert!(message.contains("Incorrect API key provided"), "{message}");
+        assert!(message.contains("401"), "{message}");
+    }
+
+    #[test]
+    fn a_refusal_with_nothing_to_say_is_still_reported() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(500)
+            .with_body("<html>Bad Gateway</html>")
+            .create();
+
+        let RunOutcome::Failed(RunError::Provider(message)) =
+            ready_to_run(&server, "a paragraph").run()
+        else {
+            panic!("a refusal should be reported as one");
+        };
+
+        assert!(message.contains("500"), "{message}");
+    }
+
+    #[test]
+    fn an_answer_that_is_not_the_contracts_shape_is_reported_as_such() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(json!({ "choices": [] }).to_string())
+            .create();
+
+        assert!(matches!(
+            ready_to_run(&server, "a paragraph").run(),
+            RunOutcome::Failed(RunError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn an_answer_that_is_not_json_at_all_is_reported_rather_than_shown() {
+        // What a proxy or a captive portal answers with, on the way to an
+        // endpoint the user is sure they configured correctly.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body("<html>Sign in to continue</html>")
+            .create();
+
+        assert!(matches!(
+            ready_to_run(&server, "a paragraph").run(),
+            RunOutcome::Failed(RunError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn a_provider_that_cannot_be_reached_names_the_address_that_did_not_answer() {
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+        let demysto = demysto_asking(fake::over(&desktop), "http://127.0.0.1:1/v1");
+        demysto.capture();
+
+        let RunOutcome::Failed(RunError::Unreachable(message)) = demysto.run() else {
+            panic!("an endpoint that never answered should be reported as unreachable");
+        };
+
+        assert!(message.contains("127.0.0.1:1"), "{message}");
+    }
+
+    #[test]
+    fn a_run_with_nothing_captured_sends_nothing_anywhere() {
+        // The Provider is an address that refuses connections, so anything but
+        // this outcome would mean a request went out.
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = demysto_asking(fake::over(&desktop), "http://127.0.0.1:1/v1");
+        demysto.capture();
+
+        assert!(matches!(
+            demysto.run(),
+            RunOutcome::Failed(RunError::NothingToRun(_))
+        ));
+    }
+
+    #[test]
+    fn a_run_with_no_provider_configured_names_the_file_that_would_configure_one() {
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+        let demysto = demysto(fake::over(&desktop));
+        demysto.capture();
+
+        let RunOutcome::Failed(RunError::Configuration(message)) = demysto.run() else {
+            panic!("a Run with nothing configured should say what to configure");
+        };
+
+        assert!(message.contains(config::FILE_NAME), "{message}");
+    }
+
+    #[test]
+    fn the_last_run_is_remembered_for_a_window_that_opens_after_it() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        demysto.run();
+
+        assert_eq!(
+            demysto.last_run(),
+            Some(RunOutcome::Answered("an answer".to_owned()))
+        );
+    }
+
+    #[test]
+    fn nothing_is_remembered_before_the_first_run() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+
+        assert_eq!(demysto(fake::over(&desktop)).last_run(), None);
     }
 }

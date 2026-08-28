@@ -15,4 +15,11 @@ impl Selection {
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
+
+    /// What a Run operates on, as the text a prompt is assembled around.
+    pub fn as_text(&self) -> &str {
+        match self {
+            Self::Text { text } => text,
+        }
+    }
 }

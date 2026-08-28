@@ -39,6 +39,28 @@ pub enum CaptureOutcome {
     Failed(CaptureError),
 }
 
+impl CaptureOutcome {
+    /// The Selection this Capture produced, or `None` when it produced none:
+    /// there was nothing to read, or reading it failed.
+    pub fn selection(&self) -> Option<&Selection> {
+        match self {
+            Self::Captured(captured) => captured.selection(),
+            Self::Failed(_) => None,
+        }
+    }
+}
+
+impl Captured {
+    /// The Selection, wherever it came from. Where it came from is what the
+    /// Palette shows; what a Run operates on is the same either way.
+    pub fn selection(&self) -> Option<&Selection> {
+        match self {
+            Self::Selection(selection) | Self::Clipboard(selection) => Some(selection),
+            Self::Nothing => None,
+        }
+    }
+}
+
 impl From<Result<Captured, CaptureError>> for CaptureOutcome {
     fn from(result: Result<Captured, CaptureError>) -> Self {
         match result {
