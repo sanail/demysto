@@ -11,11 +11,18 @@
   "app": {
     "windows": [
       {
-        "label": "main",
+        "label": "palette",
+        "url": "palette.html",
         "title": "Demysto",
-        "width": 520,
-        "height": 320,
-        "resizable": true
+        "width": 560,
+        "height": 240,
+        "resizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "shadow": true,
+        "acceptFirstMouse": true
       }
     ],
     "security": {

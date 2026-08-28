@@ -5,7 +5,7 @@ use std::error::Error;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    App, Manager, Runtime,
+    App, Runtime,
 };
 
 /// Menu item ids. Matched in the event handler below.
@@ -27,20 +27,11 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            SHOW => reveal_main_window(app),
+            SHOW => crate::palette::reveal(app),
             QUIT => app.exit(0),
             _ => {}
         })
         .build(app)?;
 
     Ok(())
-}
-
-/// Brings the main window back, whether it was hidden or merely behind something.
-pub fn reveal_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
 }

@@ -8,3 +8,5 @@ description = "Demysto's product logic, independent of any user interface toolki
 [dependencies]
 serde.workspace = true
 dirs = "6"
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+enigo = "0.6"
