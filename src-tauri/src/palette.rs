@@ -87,15 +87,24 @@ fn position_at_cursor<R: Runtime>(
 ) -> tauri::Result<()> {
     let cursor = app.cursor_position()?;
     let size = window.outer_size()?;
-    let scale = window.scale_factor()?;
+    let screen = app.monitor_from_point(cursor.x, cursor.y)?;
+
+    // The scale of the screen the cursor is on, not of the one the Palette was
+    // last shown on. Every distance here is in logical pixels of the screen the
+    // window is about to appear on, and on a mixed-DPI desktop those two
+    // screens disagree — a 12-pixel gap becomes 24, or 6.
+    let scale = match &screen {
+        Some(screen) => screen.scale_factor(),
+        None => window.scale_factor()?,
+    };
 
     let mut x = cursor.x + CURSOR_OFFSET * scale;
     let mut y = cursor.y + CURSOR_OFFSET * scale;
 
-    if let Some(screen) = app.monitor_from_point(cursor.x, cursor.y)? {
+    if let Some(screen) = screen {
         let origin = screen.position();
         let bounds = screen.size();
-        let margin = SCREEN_MARGIN * screen.scale_factor();
+        let margin = SCREEN_MARGIN * scale;
 
         let furthest_x = f64::from(origin.x + bounds.width as i32 - size.width as i32) - margin;
         let furthest_y = f64::from(origin.y + bounds.height as i32 - size.height as i32) - margin;
