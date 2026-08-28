@@ -2,9 +2,10 @@
 //!
 //! Built-in Actions are compiled in rather than seeded onto disk, per ADR-0005:
 //! the config directory belongs to the user, and an Action written into it can
-//! never be improved by a later version. Ticket 09 puts user-authored Actions
-//! and Overrides of these alongside them; the shape is already the one they get,
-//! because a built-in Action is not a privileged variety of anything.
+//! never be improved by a later version. What the user writes for themselves,
+//! and what they change about these, is `catalogue`'s — and comes back through
+//! [`assembled`] as exactly this shape, because a built-in Action is not a
+//! privileged variety of anything.
 
 use std::collections::BTreeMap;
 
@@ -40,8 +41,8 @@ pub struct Action {
     /// The Model this Action runs on whatever the defaults say, `None` when it
     /// takes whichever Model resolution arrives at. No built-in binds
     /// one — a built-in that insisted on somebody's expensive Model would be a
-    /// built-in most people could not run — and ticket 09 lets an Override give
-    /// one to any Action.
+    /// built-in most people could not run — and an Override gives one to any
+    /// Action that wants it.
     #[serde(skip)]
     pub(crate) model: Option<String>,
     #[serde(skip)]
@@ -50,9 +51,19 @@ pub struct Action {
     template: String,
 }
 
+/// A built-in Action taken apart, so that `catalogue` can put an Override over
+/// each piece of it without this module having to know what an Override is.
+pub(crate) struct Parts {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) template: String,
+    pub(crate) parameters: Vec<Parameter>,
+    pub(crate) accepts: Vec<Kind>,
+}
+
 /// A value an Action declares and collects before running, beyond the Selection
 /// itself.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Parameter {
     /// What the template refers to it by, written `{{like_this}}`.
     pub id: String,
@@ -60,6 +71,7 @@ pub struct Parameter {
     pub label: String,
     /// What the field holds before the user types, and therefore what is used
     /// when they type nothing. Empty when there is nothing sensible to offer.
+    #[serde(default)]
     pub default: String,
 }
 
@@ -104,9 +116,43 @@ pub(crate) fn built_in() -> Vec<Action> {
     ]
 }
 
-/// The Action an interface asked for, or `None` when there is no such Action.
-pub(crate) fn named(id: &str) -> Option<Action> {
-    built_in().into_iter().find(|action| action.id == id)
+/// An Action put together out of what a definition on disk states, so that one
+/// the user wrote and one compiled in are the same thing by the time anything
+/// runs either.
+pub(crate) fn assembled(
+    id: &str,
+    name: &str,
+    template: &str,
+    parameters: &[Parameter],
+    model: Option<&str>,
+    accepts: &[Kind],
+) -> Action {
+    Action {
+        id: id.to_owned(),
+        name: name.to_owned(),
+        parameters: parameters.to_vec(),
+        model: model.map(ToOwned::to_owned),
+        accepts: accepts.to_vec(),
+        template: template.to_owned(),
+    }
+}
+
+/// A built-in taken apart into the pieces an Override is written over.
+pub(crate) fn parts(action: Action) -> Parts {
+    Parts {
+        id: action.id,
+        name: action.name,
+        template: action.template,
+        parameters: action.parameters,
+        accepts: action.accepts,
+    }
+}
+
+/// Whether a name in a template is one Demysto fills in, which is what a
+/// Parameter may not be called: `render` below answers these before it looks at
+/// the Parameters, so one named after them would never be collected.
+pub(crate) fn is_a_variable(name: &str) -> bool {
+    matches!(name, SELECTION | UI_LANGUAGE | SELECTION_LANGUAGE)
 }
 
 impl Action {

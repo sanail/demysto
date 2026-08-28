@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 
 use demysto_core::{
-    Action, CaptureOutcome, ConfigError, Conversation, Demysto, Edit, Preset, ProviderEdit,
-    RunError, Settings, Status, Summary,
+    Action, ActionEdit, ActionError, CaptureOutcome, Catalogue, ConfigError, Conversation, Demysto,
+    Edit, Preset, ProviderEdit, RunError, Settings, Status, Summary,
 };
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
@@ -80,6 +80,30 @@ pub fn show_conversation(demysto: State<'_, Demysto>, id: u64) -> Option<Convers
 #[tauri::command]
 pub fn show_answers_on(channel: Channel<String>) {
     crate::result::show_answers_on(channel);
+}
+
+/// Every Action there is, with everything about it, for the window that writes
+/// them.
+#[tauri::command]
+pub fn catalogue(demysto: State<'_, Demysto>) -> Catalogue {
+    demysto.catalogue()
+}
+
+/// Writes one Action, and answers with the catalogue as the directory then
+/// holds it.
+#[tauri::command]
+pub fn save_action(
+    demysto: State<'_, Demysto>,
+    edit: ActionEdit,
+) -> Result<Catalogue, ActionError> {
+    demysto.save_action(&edit)
+}
+
+/// Deletes an Action of the user's own, or removes the Override over a built-in
+/// and leaves the built-in.
+#[tauri::command]
+pub fn delete_action(demysto: State<'_, Demysto>, id: String) -> Result<Catalogue, ActionError> {
+    demysto.delete_action(&id)
 }
 
 /// The settings as the file now holds them, for the window that edits it.

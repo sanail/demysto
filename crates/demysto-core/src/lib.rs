@@ -12,9 +12,11 @@ use std::time::Duration;
 
 mod action;
 mod capture;
+mod catalogue;
 mod config;
 mod conversation;
 mod desktop;
+mod files;
 mod language;
 mod model;
 mod paths;
@@ -27,11 +29,12 @@ mod stream;
 
 pub use action::{Action, Parameter};
 pub use capture::{Capture, CaptureError, CaptureOutcome, Captured};
+pub use catalogue::{ActionEdit, ActionError, ActionStanding, Catalogue, DefinedAction};
 pub use config::ConfigError;
 pub use conversation::{Conversation, Summary, Turn};
 pub use paths::{config_dir, ConfigDirError, CONFIG_DIR_ENV};
 pub use run::{RunError, RunOutcome};
-pub use selection::Selection;
+pub use selection::{Kind, Selection};
 pub use settings::{
     ConfiguredModel, ConfiguredProvider, Edit, KeyEdit, KeyStanding, Preset, ProviderEdit, Settings,
 };
@@ -39,7 +42,6 @@ pub use settings::{
 use config::{Config, Environment};
 use conversation::Store;
 use run::Stopping;
-use selection::Kind;
 use stream::Assembly;
 
 /// The facade every user interface talks to.
@@ -225,10 +227,52 @@ impl Demysto {
             return Vec::new();
         };
 
-        action::built_in()
+        catalogue::runnable(&self.config_dir)
             .into_iter()
             .filter(|action| action.accepts(selection.kind()))
             .collect()
+    }
+
+    /// Every Action there is, with everything about it, for the window that
+    /// writes them.
+    ///
+    /// Unlike [`Self::actions`] this is not filtered by anything: what the
+    /// Palette lists depends on what was captured, and what can be edited does
+    /// not.
+    pub fn catalogue(&self) -> Catalogue {
+        catalogue::read(&self.config_dir)
+    }
+
+    /// Writes one Action, and answers with the catalogue as the directory then
+    /// holds it.
+    ///
+    /// An edit naming no Action creates one, under an identifier found from its
+    /// name; one naming a built-in writes the Override of it, stating only what
+    /// the user changed. Either way what comes back is what was read off the
+    /// disk afterwards, for the reason a saved settings file is read back: a
+    /// save is only finished when it reads back.
+    pub fn save_action(&self, edit: &ActionEdit) -> Result<Catalogue, ActionError> {
+        catalogue::write(&self.config_dir, edit, &self.models_configured())
+    }
+
+    /// Takes an Action off the user: deletes one of their own, or removes an
+    /// Override and leaves the built-in it was over.
+    pub fn delete_action(&self, id: &str) -> Result<Catalogue, ActionError> {
+        catalogue::delete(&self.config_dir, id)
+    }
+
+    /// Every Model configured, by the name one is bound by, so that an Action
+    /// cannot be saved bound to a Model nothing offers. Empty where the
+    /// settings could not be read at all — which is a state in which nothing
+    /// offers any Model, and the window has none to choose from either.
+    fn models_configured(&self) -> Vec<String> {
+        match self.config.read().unwrap().as_ref() {
+            Ok(config) => config
+                .models()
+                .map(|(provider, model)| config::qualified(provider, model))
+                .collect(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// Runs the Action named by `action` against the last Capture in a
@@ -306,7 +350,7 @@ impl Demysto {
         self.store
             .lock()
             .unwrap()
-            .open(action::named(action), selection)
+            .open(catalogue::named(&self.config_dir, action), selection)
     }
 
     /// Asks the Turn that opens a Conversation, which the Action asks on the
@@ -327,7 +371,7 @@ impl Demysto {
         // is the only gate on that today: with one Selection kind there is no
         // Action a Run could reach that would refuse it. The kind images bring
         // is where this needs a check of its own.
-        let Some(action) = action::named(action) else {
+        let Some(action) = catalogue::named(&self.config_dir, action) else {
             return RunOutcome::Failed(run::no_such_action(action));
         };
 
@@ -2488,6 +2532,689 @@ mod tests {
                 preset.name
             );
         }
+    }
+
+    // The Action catalogue on disk: what the user writes, what they change
+    // about a built-in, and the effective set the two make together (ticket 09).
+
+    /// An edit of a new Action, stating the two things one has to state.
+    fn writing(name: &str, template: &str) -> ActionEdit {
+        ActionEdit {
+            id: None,
+            name: name.to_owned(),
+            template: template.to_owned(),
+            parameters: Vec::new(),
+            model: None,
+            hotkey: None,
+            accepts: vec![Kind::Text],
+        }
+    }
+
+    /// An edit of the Action already filed under `id`, which is what the window
+    /// hands back for a built-in it is overriding.
+    fn changing(id: &str, name: &str, template: &str) -> ActionEdit {
+        ActionEdit {
+            id: Some(id.to_owned()),
+            ..writing(name, template)
+        }
+    }
+
+    fn authored(demysto: &Demysto, edit: &ActionEdit) -> Catalogue {
+        demysto
+            .save_action(edit)
+            .expect("the Action should have saved")
+    }
+
+    /// Why a save was refused. Panics when it was not.
+    fn refused(demysto: &Demysto, edit: &ActionEdit) -> String {
+        match demysto.save_action(edit) {
+            Err(error) => error.message().to_owned(),
+            Ok(_) => panic!("the Action should not have saved"),
+        }
+    }
+
+    /// The Action the catalogue holds under `id`. Panics when it holds none.
+    fn defined(demysto: &Demysto, id: &str) -> DefinedAction {
+        demysto
+            .catalogue()
+            .actions
+            .into_iter()
+            .find(|action| action.id == id)
+            .unwrap_or_else(|| panic!("the catalogue should hold an Action called {id:?}"))
+    }
+
+    /// Where the Actions live, whether or not anything has put one there yet.
+    fn actions_dir(demysto: &Demysto) -> PathBuf {
+        demysto.config_dir().join(catalogue::DIR_NAME)
+    }
+
+    /// Writes an Action file by hand, the way a file somebody was sent arrives.
+    fn dropped_in(demysto: &Demysto, id: &str, text: &str) {
+        let dir = actions_dir(demysto);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{id}.toml")), text).unwrap();
+    }
+
+    /// What the catalogue is filed under, in its order.
+    fn catalogued(demysto: &Demysto) -> Vec<String> {
+        demysto
+            .catalogue()
+            .actions
+            .into_iter()
+            .map(|action| action.id)
+            .collect()
+    }
+
+    #[test]
+    fn a_fresh_installation_has_the_built_in_actions_and_nothing_written_anywhere() {
+        let demysto = unconfigured("a paragraph");
+
+        assert_eq!(catalogued(&demysto), ["explain", "translate", "summarize"]);
+        assert!(demysto.catalogue().unreadable.is_empty());
+
+        // ADR-0005: the configuration directory belongs to the user, and a
+        // built-in seeded into it could never be improved by a later version.
+        // Reading the catalogue is not an occasion to write into it.
+        assert!(
+            !actions_dir(&demysto).exists(),
+            "reading the catalogue should not have created a directory"
+        );
+    }
+
+    #[test]
+    fn an_action_the_user_writes_is_offered_beside_the_built_in_ones() {
+        let demysto = unconfigured("a paragraph");
+
+        authored(
+            &demysto,
+            &writing("Rewrite plainly", "Rewrite: {{selection}}"),
+        );
+
+        // The built-ins keep their order, which is how often they are reached
+        // for; the user's own follow.
+        assert_eq!(
+            offered(&demysto),
+            ["Explain", "Translate", "Summarize", "Rewrite plainly"]
+        );
+    }
+
+    #[test]
+    fn an_action_the_user_writes_runs_its_own_prompt() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![
+                Matcher::Regex("Rewrite this so a child could read it".to_owned()),
+                Matcher::Regex("Ceci n'est pas une pipe".to_owned()),
+            ],
+        );
+
+        let demysto = ready_to_run(&server, "Ceci n'est pas une pipe");
+        authored(
+            &demysto,
+            &writing(
+                "Rewrite plainly",
+                "Rewrite this so a child could read it:\n\n{{selection}}",
+            ),
+        );
+
+        running(&demysto, "rewrite-plainly", &[]);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn each_action_the_user_writes_is_a_file_of_its_own() {
+        // User story 29: one file each, so that one can be backed up or sent to
+        // a colleague.
+        let demysto = unconfigured("a paragraph");
+
+        authored(
+            &demysto,
+            &writing("Rewrite plainly", "Rewrite: {{selection}}"),
+        );
+        authored(
+            &demysto,
+            &writing("Find the flaw", "Fault it: {{selection}}"),
+        );
+
+        let mut files: Vec<String> = std::fs::read_dir(actions_dir(&demysto))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        files.sort();
+
+        assert_eq!(files, ["find-the-flaw.toml", "rewrite-plainly.toml"]);
+    }
+
+    #[test]
+    fn an_action_carried_to_another_installation_as_a_file_runs_there() {
+        // The other half of user story 29: a file arriving in that directory is
+        // an Action, with nothing to import and nothing restarted.
+        let mut server = Server::new();
+        let endpoint = asked_for(&mut server, vec![Matcher::Regex("Fault it".to_owned())]);
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        dropped_in(
+            &demysto,
+            "find-the-flaw",
+            "name = \"Find the flaw\"\ntemplate = \"Fault it: {{selection}}\"\n",
+        );
+
+        assert!(offered(&demysto).contains(&"Find the flaw".to_owned()));
+
+        running(&demysto, "find-the-flaw", &[]);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn an_action_collects_the_parameters_it_declares() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![Matcher::Regex("Rewrite this for a lawyer".to_owned())],
+        );
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        authored(
+            &demysto,
+            &ActionEdit {
+                parameters: vec![Parameter {
+                    id: "reader".to_owned(),
+                    label: "For whom?".to_owned(),
+                    default: "a child".to_owned(),
+                }],
+                ..writing("Rewrite for", "Rewrite this for {{reader}}: {{selection}}")
+            },
+        );
+
+        assert_eq!(
+            defined(&demysto, "rewrite-for").parameters[0].label,
+            "For whom?"
+        );
+
+        running(&demysto, "rewrite-for", &[("reader", "a lawyer")]);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn an_action_can_be_deleted() {
+        let demysto = unconfigured("a paragraph");
+        let written = authored(
+            &demysto,
+            &writing("Rewrite plainly", "Rewrite: {{selection}}"),
+        );
+        let path = written.actions.last().unwrap().path.clone().unwrap();
+
+        demysto
+            .delete_action("rewrite-plainly")
+            .expect("the Action should have been deleted");
+
+        assert_eq!(catalogued(&demysto), ["explain", "translate", "summarize"]);
+        assert!(!path.exists(), "the file should have gone with it");
+    }
+
+    #[test]
+    fn deleting_an_action_that_is_already_gone_says_so_rather_than_failing_silently() {
+        let demysto = unconfigured("a paragraph");
+
+        let Err(ActionError::NoSuchAction(message)) = demysto.delete_action("rewrite-plainly")
+        else {
+            panic!("deleting an Action nothing holds should be reported as one");
+        };
+
+        assert!(message.contains("rewrite-plainly"), "{message}");
+    }
+
+    #[test]
+    fn an_override_replaces_the_prompt_of_the_built_in_it_is_filed_under() {
+        // User story 26: adjust the wording without recreating the Action.
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![Matcher::Regex("Explain it in one sentence".to_owned())],
+        );
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        authored(
+            &demysto,
+            &changing(
+                "explain",
+                "Explain",
+                "Explain it in one sentence: {{selection}}",
+            ),
+        );
+
+        // Still the first Action in the Palette, and still called what it was:
+        // an Override changes an Action, it does not add one.
+        assert_eq!(catalogued(&demysto), ["explain", "translate", "summarize"]);
+        assert_eq!(
+            defined(&demysto, "explain").standing,
+            ActionStanding::Overridden
+        );
+
+        run(&demysto);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn an_override_states_only_what_the_user_changed() {
+        // So that a built-in whose wording a later version improves still
+        // improves for somebody who only ever bound a Model to it (ADR-0005).
+        let demysto = unconfigured("a paragraph");
+        let built_in = defined(&demysto, "summarize");
+
+        authored(
+            &demysto,
+            &ActionEdit {
+                hotkey: Some("Ctrl+Alt+S".to_owned()),
+                ..changing("summarize", &built_in.name, &built_in.template)
+            },
+        );
+
+        let written =
+            std::fs::read_to_string(defined(&demysto, "summarize").path.unwrap()).unwrap();
+
+        assert!(written.contains("hotkey = \"Ctrl+Alt+S\""), "{written}");
+        assert!(!written.contains("name ="), "{written}");
+        assert!(!written.contains("template ="), "{written}");
+    }
+
+    #[test]
+    fn an_override_that_states_nothing_is_no_override_at_all() {
+        let demysto = unconfigured("a paragraph");
+        let built_in = defined(&demysto, "summarize");
+
+        // Whitespace around what was typed is not a change: a textarea that
+        // gained a trailing newline on its way through a window must not leave
+        // an Override behind that says nothing.
+        authored(
+            &demysto,
+            &changing(
+                "summarize",
+                &format!("  {}  ", built_in.name),
+                &format!("{}\n", built_in.template),
+            ),
+        );
+
+        assert_eq!(defined(&demysto, "summarize"), built_in);
+        assert!(
+            !actions_dir(&demysto).join("summarize.toml").exists(),
+            "an Override of nothing should leave no file"
+        );
+    }
+
+    #[test]
+    fn an_override_can_bind_a_model_the_built_in_did_not() {
+        let mut server = Server::new();
+        let asked = server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(Matcher::PartialJson(json!({ "model": "the-careful-one" })))
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_with(
+            &format!(
+                "default_model = \"a provider/a-model\"\n\n\
+                 [[providers]]\nname = \"a provider\"\nbase_url = \"{}/v1\"\n\
+                 api_key = \"a-key\"\n\
+                 models = [{{ id = \"a-model\" }}, {{ id = \"the-careful-one\" }}]\n",
+                server.url()
+            ),
+            "a paragraph",
+        );
+
+        authored(
+            &demysto,
+            &ActionEdit {
+                model: Some("a provider/the-careful-one".to_owned()),
+                ..changing("explain", "Explain", "Explain: {{selection}}")
+            },
+        );
+
+        run(&demysto);
+
+        asked.assert();
+    }
+
+    #[test]
+    fn removing_an_override_restores_the_built_in() {
+        // User story 27: experimenting with the prompt is not a one-way door.
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![Matcher::Regex("Explain the text below".to_owned())],
+        );
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        let built_in = defined(&demysto, "explain");
+
+        authored(
+            &demysto,
+            &changing("explain", "Explain briefly", "One sentence: {{selection}}"),
+        );
+        demysto
+            .delete_action("explain")
+            .expect("the Override should have been removed");
+
+        assert_eq!(defined(&demysto, "explain"), built_in);
+
+        run(&demysto);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn an_action_named_after_a_built_in_is_a_second_action_and_not_an_override() {
+        let demysto = unconfigured("a paragraph");
+
+        authored(
+            &demysto,
+            &writing("Explain", "Explain it my way: {{selection}}"),
+        );
+
+        // Both are listed, under the one name the user chose for both, and each
+        // is reachable: the identifier is what an Override is keyed on, and
+        // creating an Action never takes one that is spoken for.
+        assert_eq!(
+            offered(&demysto),
+            ["Explain", "Translate", "Summarize", "Explain"]
+        );
+        assert_eq!(
+            catalogued(&demysto),
+            ["explain", "translate", "summarize", "explain-2"]
+        );
+        assert_eq!(
+            defined(&demysto, "explain").standing,
+            ActionStanding::BuiltIn
+        );
+        assert_eq!(
+            defined(&demysto, "explain-2").template,
+            "Explain it my way: {{selection}}"
+        );
+    }
+
+    #[test]
+    fn every_built_in_action_reaches_a_user_who_already_has_a_configuration_directory() {
+        // ADR-0005's whole point: built-ins are compiled in, so the set a build
+        // ships is the set every user gets, however long they have had that
+        // directory and whatever is in it.
+        let demysto = unconfigured("a paragraph");
+
+        authored(
+            &demysto,
+            &writing("Rewrite plainly", "Rewrite: {{selection}}"),
+        );
+        authored(
+            &demysto,
+            &changing("explain", "Explain", "One sentence: {{selection}}"),
+        );
+
+        let held = catalogued(&demysto);
+
+        for built_in in action::built_in() {
+            assert!(held.contains(&built_in.id), "{} is missing", built_in.id);
+        }
+    }
+
+    #[test]
+    fn renaming_an_action_leaves_it_in_the_file_it_was_already_in() {
+        // The identifier is the identity: an Override is keyed on it, and so —
+        // once ticket 10 lands — is a Hotkey. Renaming is not re-filing.
+        let demysto = unconfigured("a paragraph");
+
+        authored(
+            &demysto,
+            &writing("Rewrite plainly", "Rewrite: {{selection}}"),
+        );
+        authored(
+            &demysto,
+            &changing(
+                "rewrite-plainly",
+                "Put it plainly",
+                "Rewrite: {{selection}}",
+            ),
+        );
+
+        assert_eq!(defined(&demysto, "rewrite-plainly").name, "Put it plainly");
+        assert_eq!(
+            catalogued(&demysto),
+            ["explain", "translate", "summarize", "rewrite-plainly"]
+        );
+    }
+
+    #[test]
+    fn what_the_window_writes_is_what_it_reads_back() {
+        let demysto = unconfigured("a paragraph");
+
+        let written = authored(
+            &demysto,
+            &ActionEdit {
+                hotkey: Some("Ctrl+Alt+R".to_owned()),
+                parameters: vec![Parameter {
+                    id: "reader".to_owned(),
+                    label: "For whom?".to_owned(),
+                    default: "a child".to_owned(),
+                }],
+                ..writing("Rewrite for", "Rewrite this for {{reader}}: {{selection}}")
+            },
+        );
+
+        assert_eq!(
+            written.actions.last().cloned(),
+            Some(defined(&demysto, "rewrite-for"))
+        );
+        assert_eq!(
+            defined(&demysto, "rewrite-for"),
+            DefinedAction {
+                id: "rewrite-for".to_owned(),
+                name: "Rewrite for".to_owned(),
+                template: "Rewrite this for {{reader}}: {{selection}}".to_owned(),
+                parameters: vec![Parameter {
+                    id: "reader".to_owned(),
+                    label: "For whom?".to_owned(),
+                    default: "a child".to_owned(),
+                }],
+                model: None,
+                // Carried through a save rather than offered by the window:
+                // registering one is ticket 10's, and a file that names one
+                // must not lose it to a save made here.
+                hotkey: Some("Ctrl+Alt+R".to_owned()),
+                accepts: vec![Kind::Text],
+                standing: ActionStanding::Authored,
+                path: Some(actions_dir(&demysto).join("rewrite-for.toml")),
+            }
+        );
+    }
+
+    #[test]
+    fn an_action_file_nobody_can_read_is_reported_without_taking_the_others_down() {
+        let demysto = unconfigured("a paragraph");
+
+        authored(
+            &demysto,
+            &writing("Rewrite plainly", "Rewrite: {{selection}}"),
+        );
+        dropped_in(
+            &demysto,
+            "half-a-thought",
+            "name = \"Half a thought\"\ntemp",
+        );
+        dropped_in(
+            &demysto,
+            "nameless",
+            "template = \"Do something: {{selection}}\"\n",
+        );
+
+        let catalogue = demysto.catalogue();
+
+        assert_eq!(
+            catalogue
+                .actions
+                .into_iter()
+                .map(|action| action.id)
+                .collect::<Vec<_>>(),
+            ["explain", "translate", "summarize", "rewrite-plainly"]
+        );
+        assert_eq!(catalogue.unreadable.len(), 2);
+        assert!(
+            catalogue
+                .unreadable
+                .iter()
+                .any(|said| said.contains("half-a-thought")),
+            "{:?}",
+            catalogue.unreadable
+        );
+        assert!(
+            catalogue
+                .unreadable
+                .iter()
+                .any(|said| said.contains("nameless") && said.contains("name")),
+            "{:?}",
+            catalogue.unreadable
+        );
+    }
+
+    #[test]
+    fn an_action_file_from_a_newer_demysto_is_left_alone_rather_than_guessed_at() {
+        let demysto = unconfigured("a paragraph");
+
+        dropped_in(
+            &demysto,
+            "explain",
+            "version = 9\nname = \"Explain\"\ntemplate = \"{{selection}}\"\n",
+        );
+
+        assert_eq!(
+            defined(&demysto, "explain").standing,
+            ActionStanding::BuiltIn
+        );
+        assert!(
+            demysto.catalogue().unreadable[0].contains("version 9"),
+            "{:?}",
+            demysto.catalogue().unreadable
+        );
+    }
+
+    #[test]
+    fn an_action_with_nothing_to_say_is_refused() {
+        let demysto = unconfigured("a paragraph");
+
+        assert!(refused(&demysto, &writing("  ", "Rewrite: {{selection}}")).contains("name"));
+        assert!(refused(&demysto, &writing("Rewrite plainly", "  ")).contains("prompt"));
+    }
+
+    #[test]
+    fn a_parameter_that_could_never_be_collected_is_refused() {
+        let demysto = unconfigured("a paragraph");
+
+        let declaring = |id: &str, label: &str| ActionEdit {
+            parameters: vec![
+                Parameter {
+                    id: id.to_owned(),
+                    label: label.to_owned(),
+                    default: String::new(),
+                },
+                Parameter {
+                    id: "reader".to_owned(),
+                    label: "For whom?".to_owned(),
+                    default: String::new(),
+                },
+            ],
+            ..writing("Rewrite for", "Rewrite: {{selection}}")
+        };
+
+        // A Parameter named after something Demysto fills in would never be
+        // asked for: the template's own variables are answered first.
+        assert!(refused(&demysto, &declaring("selection", "Which?")).contains("selection"));
+        assert!(refused(&demysto, &declaring("reader", "Which?")).contains("Two Parameters"));
+        assert!(refused(&demysto, &declaring("tone", "  ")).contains("label"));
+        assert!(refused(&demysto, &declaring(" ", "Which?")).contains("Parameter"));
+    }
+
+    #[test]
+    fn an_action_bound_to_a_model_no_provider_offers_is_refused() {
+        // The window had the whole list of Models on screen as this was
+        // written, so a binding that resolves to nothing is caught here rather
+        // than met at the next Run — as `settings::nominating` catches the same
+        // mistake in the two defaults.
+        let demysto = ready_with(&one_provider("http://127.0.0.1:1/v1"), "a paragraph");
+
+        let message = refused(
+            &demysto,
+            &ActionEdit {
+                model: Some("a provider/a-model-nobody-has".to_owned()),
+                ..writing("Rewrite plainly", "Rewrite: {{selection}}")
+            },
+        );
+
+        assert!(
+            message.contains("a provider/a-model-nobody-has"),
+            "{message}"
+        );
+        assert!(message.contains("a provider/a-model"), "{message}");
+        assert!(
+            !actions_dir(&demysto).exists(),
+            "nothing should have been written"
+        );
+    }
+
+    #[test]
+    fn an_identifier_that_could_not_be_a_file_is_refused() {
+        let demysto = unconfigured("a paragraph");
+
+        for id in ["../elsewhere", "with/a/path", ".hidden", "aux"] {
+            let message = refused(
+                &demysto,
+                &changing(id, "Rewrite plainly", "Rewrite: {{selection}}"),
+            );
+
+            assert!(message.contains(id), "{message}");
+        }
+    }
+
+    #[test]
+    fn an_action_named_in_an_alphabet_of_the_users_own_is_filed_under_that_name() {
+        // A user writing their Actions in Russian should not find them all
+        // called `action-2`.
+        let demysto = unconfigured("a paragraph");
+
+        authored(
+            &demysto,
+            &writing("Объяснить проще", "Проще: {{selection}}"),
+        );
+
+        assert_eq!(
+            catalogued(&demysto),
+            ["explain", "translate", "summarize", "объяснить-проще"]
+        );
+    }
+
+    #[test]
+    fn an_action_deleted_while_a_palette_is_still_listing_it_sends_nothing_anywhere() {
+        // Reachable now that an Action can be deleted: the Palette holds the
+        // list it opened with, and Enter on one that has since gone is not a
+        // request to send anything.
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+        let demysto = demysto_asking(fake::over(&desktop), "http://127.0.0.1:1/v1");
+        demysto.capture();
+
+        authored(
+            &demysto,
+            &writing("Rewrite plainly", "Rewrite: {{selection}}"),
+        );
+        demysto.delete_action("rewrite-plainly").unwrap();
+
+        let RunOutcome::Failed(RunError::NoSuchAction(message)) =
+            running(&demysto, "rewrite-plainly", &[])
+        else {
+            panic!("an Action that has been deleted should be reported as one Demysto lacks");
+        };
+
+        assert!(message.contains("rewrite-plainly"), "{message}");
     }
 
     #[test]

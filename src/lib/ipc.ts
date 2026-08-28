@@ -35,6 +35,9 @@ export type Parameter = {
   default: string;
 };
 
+/** Mirrors `demysto_core::Kind`: what an Action will run on. */
+export type Kind = "text" | "image";
+
 /** Mirrors `demysto_core::Action`. */
 export type Action = {
   id: string;
@@ -293,6 +296,80 @@ export type Preset = {
   /** Whether the service has keys at all — see ADR-0006. */
   needs_key: boolean;
 };
+
+/** Mirrors `demysto_core::ActionStanding`: where a definition comes from. */
+export type ActionStanding = "built_in" | "overridden" | "authored";
+
+/**
+ * Mirrors `demysto_core::DefinedAction`: one Action with everything about it.
+ *
+ * The other view of what `Action` above is: that one is what the Palette lists,
+ * and keeps the prompt to itself; this is what the window whose whole purpose is
+ * to change the prompt holds.
+ */
+export type DefinedAction = {
+  id: string;
+  name: string;
+  template: string;
+  parameters: Parameter[];
+  model: string | null;
+  /** The Hotkey that runs it without the Palette — ticket 10 registers it. */
+  hotkey: string | null;
+  accepts: Kind[];
+  standing: ActionStanding;
+  /** The file it is in, `null` for a built-in nobody has changed. */
+  path: string | null;
+};
+
+/** Mirrors `demysto_core::Catalogue`. */
+export type Catalogue = {
+  actions: DefinedAction[];
+  /** What went wrong with the files that are not in it, in whole sentences. */
+  unreadable: string[];
+};
+
+/** Mirrors `demysto_core::ActionEdit`: what the window saves for one Action. */
+export type ActionEdit = {
+  /** The Action this edits, `null` for one being created. */
+  id: string | null;
+  name: string;
+  template: string;
+  parameters: Parameter[];
+  model: string | null;
+  hotkey: string | null;
+  accepts: Kind[];
+};
+
+/** Mirrors `demysto_core::ActionError`. */
+export type ActionError = {
+  kind: "unreadable" | "unwritable" | "refused" | "no_such_action";
+  message: string;
+};
+
+/** Every Action there is, with everything about it. */
+export function catalogue(): Promise<Catalogue> {
+  return invoke<Catalogue>("catalogue");
+}
+
+/**
+ * Writes one Action, and answers with the catalogue as the directory then holds
+ * it — which is what the window shows next, for the reason a saved settings
+ * file is read back.
+ *
+ * Rejects with an `ActionError` when what was edited is not an Action Demysto
+ * could run; nothing is written in that case.
+ */
+export function saveAction(edit: ActionEdit): Promise<Catalogue> {
+  return invoke<Catalogue>("save_action", { edit });
+}
+
+/**
+ * Deletes an Action of the user's own, or removes the Override over a built-in
+ * and leaves the built-in as it was written.
+ */
+export function deleteAction(id: string): Promise<Catalogue> {
+  return invoke<Catalogue>("delete_action", { id });
+}
 
 /** The settings as the file now holds them. */
 export function settings(): Promise<Settings> {

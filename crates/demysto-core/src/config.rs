@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::files;
+
 /// The file Demysto reads, inside the configuration directory.
 pub(crate) const FILE_NAME: &str = "settings.toml";
 
@@ -756,10 +758,10 @@ fn create(path: &Path) -> Result<(), ConfigError> {
     use std::io::Write;
 
     if let Some(parent) = path.parent() {
-        create_dir(parent)?;
+        files::create_dir(parent).map_err(|error| unreadable(parent, &error))?;
     }
 
-    let mut file = match options().create_new(true).write(true).open(path) {
+    let mut file = match files::options().create_new(true).write(true).open(path) {
         Ok(file) => file,
         // Somebody else got there between the read and this line. Their file is
         // as good as ours, and better than an error the user cannot act on.
@@ -772,83 +774,10 @@ fn create(path: &Path) -> Result<(), ConfigError> {
 }
 
 /// Replaces the settings file with `text`, owner-only, without ever leaving a
-/// half-written one behind.
-///
-/// Written beside the file and renamed over it rather than truncated and filled
-/// in: the file holds a key, and a crash between the truncation and the last
-/// byte would be a user whose credentials are simply gone. The rename is one
-/// step as far as anybody reading the file is concerned, and the new file
-/// carries the mode rather than inheriting whatever the old one had — ADR-0002
-/// asks for owner-only, and a file the window wrote is no less bound by it than
-/// one Demysto created.
+/// half-written one behind — see [`crate::files::replace`], which `catalogue`
+/// writes an Action through in the same way.
 pub(crate) fn write(path: &Path, text: &str) -> Result<(), ConfigError> {
-    use std::io::Write;
-
-    if let Some(parent) = path.parent() {
-        create_dir(parent)?;
-    }
-
-    // Beside the file, so that the rename stays within one filesystem: a
-    // temporary directory elsewhere would make it a copy, which is exactly the
-    // half-written state this is here to avoid.
-    let beside = path.with_extension("toml.writing");
-
-    // Whatever a crashed write left there is not a file to append to, and
-    // `create_new` below would refuse it. Its mode is not to be trusted either.
-    let _ = fs::remove_file(&beside);
-
-    let mut file = options()
-        .create_new(true)
-        .write(true)
-        .open(&beside)
-        .map_err(|error| unwritable(&beside, &error))?;
-
-    file.write_all(text.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|error| unwritable(&beside, &error))?;
-
-    drop(file);
-
-    fs::rename(&beside, path).map_err(|error| {
-        // The half-written file is not left lying next to the real one, where
-        // the next write would have to distrust it and the user would have to
-        // wonder what it is.
-        let _ = fs::remove_file(&beside);
-        unwritable(path, &error)
-    })
-}
-
-/// The file carries a key, so it is created readable by nobody else — the whole
-/// of what ADR-0002 asks in exchange for keeping the key out of the keychain.
-#[cfg(unix)]
-fn options() -> fs::OpenOptions {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut options = fs::OpenOptions::new();
-    options.mode(0o600);
-    options
-}
-
-#[cfg(not(unix))]
-fn options() -> fs::OpenOptions {
-    fs::OpenOptions::new()
-}
-
-/// The directory the file goes in, owner-only for the same reason.
-#[cfg(unix)]
-fn create_dir(path: &Path) -> Result<(), ConfigError> {
-    use std::os::unix::fs::DirBuilderExt;
-
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(path)
-        .map_err(|error| unreadable(path, &error))
-}
-
-#[cfg(not(unix))]
-fn create_dir(path: &Path) -> Result<(), ConfigError> {
-    fs::create_dir_all(path).map_err(|error| unreadable(path, &error))
+    files::replace(path, text).map_err(|error| unwritable(path, &error))
 }
 
 fn unreadable(path: &Path, error: &io::Error) -> ConfigError {

@@ -1,15 +1,22 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
+    catalogue as catalogued,
+    deleteAction,
     dismiss,
     presets as offeredPresets,
     providerModels,
+    saveAction,
     saveSettings,
     settings as configured,
     status,
     verifyProvider,
+    type ActionEdit,
+    type ActionStanding,
+    type Catalogue,
     type ConfiguredModel,
     type ConfiguredProvider,
+    type DefinedAction,
     type KeyEdit,
     type KeyStanding,
     type Preset,
@@ -53,11 +60,36 @@
     said: { well: boolean; message: string } | null;
   };
 
+  /**
+   * One Action being edited, and where its definition stood before the editing
+   * began — `null` for one being written, which stands nowhere yet.
+   *
+   * One at a time, and not a draft each: an Action is a file of its own and is
+   * saved on its own, so there is never more than one unsaved.
+   */
+  type Editing = { draft: ActionEdit; standing: ActionStanding | null };
+
   let drafts = $state<Draft[]>([]);
   let defaultModel = $state("");
   let defaultVisionModel = $state("");
   let presets = $state<Preset[]>([]);
   let where = $state("");
+
+  /** The Actions as the directory holds them, and what could not be read. */
+  let actions = $state<DefinedAction[]>([]);
+  let unreadableActions = $state<string[]>([]);
+  let editing = $state<Editing | null>(null);
+  /** What went wrong with the last Action saved, in the backend's own words. */
+  let actionProblem = $state<string | null>(null);
+  let actionSaving = $state(false);
+  /**
+   * The settings as the file holds them, which is where the Models an Action
+   * can bind come from. Taken from what was saved rather than from the
+   * Providers on screen: an Action binding a Model that has not been saved yet
+   * is a binding the backend would refuse, and offering it would be inviting
+   * that.
+   */
+  let savedSettings = $state<Settings | null>(null);
 
   /** What went wrong with the last save, in the words the backend chose. */
   let problem = $state<string | null>(null);
@@ -90,6 +122,7 @@
   onMount(async () => {
     presets = await offeredPresets();
     where = (await status()).config_dir;
+    held(await catalogued());
 
     try {
       show(await configured());
@@ -102,9 +135,16 @@
 
   /** Takes the settings as the file holds them as the state of this window. */
   function show(settings: Settings) {
+    savedSettings = settings;
     drafts = settings.providers.map(drafted);
     defaultModel = settings.default_model ?? "";
     defaultVisionModel = settings.default_vision_model ?? "";
+  }
+
+  /** Takes the catalogue as the directory holds it as the state of this window. */
+  function held(catalogue: Catalogue) {
+    actions = catalogue.actions;
+    unreadableActions = catalogue.unreadable;
   }
 
   function drafted(provider: ConfiguredProvider): Draft {
@@ -299,10 +339,124 @@
     }
   }
 
+  /**
+   * Every Model configured, by the name an Action binds it with — from the file
+   * rather than from the Providers on screen, for the reason `savedSettings`
+   * exists.
+   */
+  const bindable = $derived(
+    (savedSettings?.providers ?? []).flatMap((provider) =>
+      provider.models.map((model) => `${provider.name}/${model.id}`),
+    ),
+  );
+
+  /** What an Action being written starts as. */
+  function write() {
+    actionProblem = null;
+    editing = {
+      standing: null,
+      draft: {
+        id: null,
+        name: "",
+        template: "",
+        parameters: [],
+        model: null,
+        hotkey: null,
+        accepts: ["text"],
+      },
+    };
+  }
+
+  /**
+   * Opens an Action for editing.
+   *
+   * Everything it states is carried into the draft, the Hotkey and the
+   * Selection kinds included — neither has a field here yet, and a save that
+   * dropped what the file already said would be this window destroying what it
+   * does not show.
+   */
+  function change(action: DefinedAction) {
+    actionProblem = null;
+    editing = {
+      standing: action.standing,
+      draft: {
+        id: action.id,
+        name: action.name,
+        template: action.template,
+        parameters: action.parameters.map((parameter) => ({ ...parameter })),
+        model: action.model,
+        hotkey: action.hotkey,
+        accepts: action.accepts,
+      },
+    };
+  }
+
+  function declare() {
+    editing?.draft.parameters.push({ id: "", label: "", default: "" });
+  }
+
+  function stopDeclaring(at: number) {
+    editing?.draft.parameters.splice(at, 1);
+  }
+
+  async function keep() {
+    if (!editing) return;
+
+    actionSaving = true;
+    actionProblem = null;
+
+    try {
+      // Shown from what came back rather than from what went out, for the
+      // reason a saved settings file is read back: a save is finished when the
+      // directory reads back, and an Override that changed nothing leaves no
+      // file at all.
+      held(await saveAction(editing.draft));
+      editing = null;
+    } catch (error) {
+      actionProblem = saidBy(error);
+    } finally {
+      actionSaving = false;
+    }
+  }
+
+  /** Deletes an Action of the user's own, or resets a built-in to how it was
+      written by removing the Override over it. */
+  async function forget(action: DefinedAction) {
+    actionProblem = null;
+
+    try {
+      held(await deleteAction(action.id));
+      if (editing?.draft.id === action.id) editing = null;
+    } catch (error) {
+      actionProblem = saidBy(error);
+    }
+  }
+
+  /** What the list calls an Action's standing, where it is worth calling
+      anything: an Action nobody has touched needs no label. */
+  function standing(action: DefinedAction): string | null {
+    switch (action.standing) {
+      case "built_in":
+        return null;
+      case "overridden":
+        return "Changed";
+      case "authored":
+        return "Yours";
+    }
+  }
+
   function onKeydown(event: KeyboardEvent) {
     if (event.key !== "Escape") return;
 
     event.preventDefault();
+
+    // Escape leaves what it is in: an Action being edited first, and the window
+    // only once there is nothing left to back out of.
+    if (editing) {
+      editing = null;
+      return;
+    }
+
     dismiss();
   }
 </script>
@@ -561,6 +715,189 @@
       </div>
     </section>
     {/if}
+
+    <section class="flex flex-col gap-3">
+      <div class="flex items-baseline justify-between gap-3">
+        <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
+          Actions
+        </h2>
+        <button type="button" class={BUTTON} onclick={write}>
+          Write an Action
+        </button>
+      </div>
+
+      <p class="text-xs opacity-50">
+        Each Action is a file of its own in <code>actions</code>, so one can be
+        backed up or sent to somebody. Built-in Actions are not written there:
+        changing one keeps only what you changed, and resetting it deletes that.
+        An Action is saved on its own, not by the Save button below.
+      </p>
+
+      {#each unreadableActions as said (said)}
+        <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
+      {/each}
+
+      <ul class="flex flex-col gap-1">
+        {#each actions as action (action.id)}
+          <li
+            class="flex items-center gap-2 rounded border border-neutral-200 px-2
+                   py-1.5 dark:border-neutral-700"
+          >
+            <span class="flex-1 truncate text-sm" title={action.path ?? ""}>
+              {action.name}
+            </span>
+
+            {#if standing(action)}
+              <span class="text-xs opacity-40">{standing(action)}</span>
+            {/if}
+
+            {#if action.model}
+              <span class="truncate text-xs opacity-40">{action.model}</span>
+            {/if}
+
+            <button
+              type="button"
+              class={BUTTON}
+              onclick={() => change(action)}
+              disabled={editing?.draft.id === action.id}
+            >
+              Edit
+            </button>
+
+            {#if action.standing === "overridden"}
+              <button type="button" class={BUTTON} onclick={() => forget(action)}>
+                Reset
+              </button>
+            {:else if action.standing === "authored"}
+              <button type="button" class={BUTTON} onclick={() => forget(action)}>
+                Delete
+              </button>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+
+      {#if editing}
+        <article
+          class="flex flex-col gap-3 rounded-md border border-neutral-300 p-3
+                 dark:border-neutral-600"
+        >
+          <div class="grid grid-cols-2 gap-3">
+            <label class="flex flex-col gap-1">
+              <span class="text-xs opacity-60">Name — what the Palette lists</span>
+              <input
+                bind:value={editing.draft.name}
+                class={FIELD}
+                placeholder="Rewrite plainly"
+              />
+            </label>
+
+            <label class="flex flex-col gap-1">
+              <span class="text-xs opacity-60">
+                Model — leave at the default unless this Action needs its own
+              </span>
+              <select bind:value={editing.draft.model} class={FIELD}>
+                <option value={null}>Whatever the defaults say</option>
+                {#each bindable as model (model)}
+                  <option value={model}>{model}</option>
+                {/each}
+              </select>
+            </label>
+          </div>
+
+          <label class="flex flex-col gap-1">
+            <span class="text-xs opacity-60">Prompt</span>
+            <textarea
+              bind:value={editing.draft.template}
+              rows="8"
+              class="{FIELD} resize-y font-mono text-xs"
+              placeholder="Explain the text below. The text is in
+{'{{'}selection_language{'}}'}; answer in {'{{'}ui_language{'}}'}.
+
+{'{{'}selection{'}}'}"
+            ></textarea>
+          </label>
+
+          <p class="text-xs opacity-50">
+            <code>{"{{selection}}"}</code> is what you selected;
+            <code>{"{{ui_language}}"}</code> and
+            <code>{"{{selection_language}}"}</code> are the language you read and
+            the one it turned out to be in. Anything else in double braces is a
+            Parameter, which the Palette asks for before the Run — declare it
+            below.
+          </p>
+
+          <div class="flex flex-col gap-2">
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="text-xs opacity-60">Parameters</span>
+              <button type="button" class={BUTTON} onclick={declare}>
+                Declare a Parameter
+              </button>
+            </div>
+
+            <ul class="flex flex-col gap-1">
+              {#each editing.draft.parameters as parameter, at (at)}
+                <li class="flex items-center gap-2">
+                  <input
+                    bind:value={parameter.id}
+                    class="{FIELD} flex-1 font-mono text-xs"
+                    placeholder="target"
+                  />
+                  <input
+                    bind:value={parameter.label}
+                    class="{FIELD} flex-1"
+                    placeholder="Into which language?"
+                  />
+                  <input
+                    bind:value={parameter.default}
+                    class="{FIELD} flex-1"
+                    placeholder="What it offers"
+                  />
+                  <button
+                    type="button"
+                    class={BUTTON}
+                    onclick={() => stopDeclaring(at)}
+                  >
+                    Remove
+                  </button>
+                </li>
+              {:else}
+                <li class="text-xs opacity-50">
+                  None. This Action runs the moment it is chosen.
+                </li>
+              {/each}
+            </ul>
+          </div>
+
+          {#if actionProblem}
+            <p class="text-xs text-red-600 dark:text-red-400">{actionProblem}</p>
+          {/if}
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class={BUTTON}
+              disabled={actionSaving}
+              onclick={keep}
+            >
+              {actionSaving ? "Saving\u2026" : "Save this Action"}
+            </button>
+            <button
+              type="button"
+              class={BUTTON}
+              onclick={() => (editing = null)}
+            >
+              Cancel
+            </button>
+            {#if editing.standing === "overridden"}
+              <span class="text-xs opacity-50">
+                Saving this with nothing changed puts the built-in back.
+              </span>
+            {/if}
+          </div>
+        </article>
+      {/if}
+    </section>
   </div>
 
   <footer class="flex items-center justify-between gap-3">
