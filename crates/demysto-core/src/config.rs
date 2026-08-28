@@ -126,8 +126,7 @@ impl Env for SystemEnv {
 pub(crate) fn load(config_dir: &Path, env: &dyn Env) -> Result<Config, ConfigError> {
     let path = config_dir.join(FILE_NAME);
     let text = read_or_create(&path)?;
-    let file: File =
-        toml::from_str(&text).map_err(|error| unparseable(&path, &text, &error))?;
+    let file: File = toml::from_str(&text).map_err(|error| unparseable(&path, &text, &error))?;
 
     if file.version > VERSION {
         return Err(ConfigError::Malformed(format!(
@@ -148,7 +147,8 @@ pub(crate) fn load(config_dir: &Path, env: &dyn Env) -> Result<Config, ConfigErr
         ))
     })?;
 
-    let api_key = resolve_key(&entry, env).ok_or_else(|| ConfigError::NoKey(no_key(&entry, &path)))?;
+    let api_key =
+        resolve_key(&entry, env).ok_or_else(|| ConfigError::NoKey(no_key(&entry, &path)))?;
 
     Ok(Config {
         provider: Provider {
@@ -224,7 +224,11 @@ fn resolve_key(entry: &ProviderEntry, env: &dyn Env) -> Option<String> {
         .api_key_env
         .as_deref()
         .and_then(from_env)
-        .or_else(|| entry.preset.and_then(|preset| from_env(preset.conventional_key_env())))
+        .or_else(|| {
+            entry
+                .preset
+                .and_then(|preset| from_env(preset.conventional_key_env()))
+        })
         .or_else(|| stated(entry.api_key.clone()))
 }
 
@@ -442,7 +446,10 @@ api_key_env = \"MY_OWN_KEY\"
     fn the_key_comes_from_the_variable_the_provider_names() {
         let env = FakeEnv::holding(&[("MY_OWN_KEY", "from-my-own-variable")]);
 
-        assert_eq!(config(EVERY_SOURCE, &env).provider.api_key, "from-my-own-variable");
+        assert_eq!(
+            config(EVERY_SOURCE, &env).provider.api_key,
+            "from-my-own-variable"
+        );
     }
 
     #[test]
@@ -470,14 +477,20 @@ api_key_env = \"MY_OWN_KEY\"
             ("DEEPSEEK_API_KEY", "from-the-preset"),
         ]);
 
-        assert_eq!(config(EVERY_SOURCE, &env).provider.api_key, "from-my-own-variable");
+        assert_eq!(
+            config(EVERY_SOURCE, &env).provider.api_key,
+            "from-my-own-variable"
+        );
     }
 
     #[test]
     fn the_presets_variable_wins_over_the_file() {
         let env = FakeEnv::holding(&[("DEEPSEEK_API_KEY", "from-the-preset")]);
 
-        assert_eq!(config(EVERY_SOURCE, &env).provider.api_key, "from-the-preset");
+        assert_eq!(
+            config(EVERY_SOURCE, &env).provider.api_key,
+            "from-the-preset"
+        );
     }
 
     #[test]
@@ -493,13 +506,18 @@ api_key_env = \"MY_OWN_KEY\"
     fn a_key_arrives_without_the_whitespace_around_it() {
         let env = FakeEnv::holding(&[("MY_OWN_KEY", "  from-my-own-variable\n")]);
 
-        assert_eq!(config(EVERY_SOURCE, &env).provider.api_key, "from-my-own-variable");
+        assert_eq!(
+            config(EVERY_SOURCE, &env).provider.api_key,
+            "from-my-own-variable"
+        );
     }
 
     #[test]
     fn no_key_anywhere_names_every_variable_that_was_looked_at() {
-        let ConfigError::NoKey(message) = error(&EVERY_SOURCE.replace("api_key = \"from-the-file\"\n", ""), &FakeEnv::default())
-        else {
+        let ConfigError::NoKey(message) = error(
+            &EVERY_SOURCE.replace("api_key = \"from-the-file\"\n", ""),
+            &FakeEnv::default(),
+        ) else {
             panic!("a Provider with no key should fail for want of one");
         };
 
