@@ -4,8 +4,9 @@
 //! The clipboard and the keystroke are the outside world, so nothing that
 //! touches them is covered by the test suite. They are substituted at the
 //! [`Desktop`] trait, which is what leaves everything built on top of them
-//! testable — see the spec's *Testing Decisions*. What is tested here is the
-//! one decision that is not I/O: which Capture this session can perform.
+//! testable — see the spec's *Testing Decisions*. What is tested here are the
+//! two decisions that are not I/O: which Capture this session can perform, and
+//! which key the copy chord is sent as.
 
 use std::ffi::OsStr;
 use std::time::Duration;
@@ -84,7 +85,7 @@ impl Desktop for SystemDesktop {
 
         enigo
             .key(copy, Direction::Press)
-            .and_then(|()| enigo.key(Key::Unicode('c'), Direction::Click))
+            .and_then(|()| enigo.key(copy_letter(), Direction::Click))
             .map_err(|error| keystroke(&error.to_string()))?;
 
         // Released outside the `?` above: leaving a modifier stuck down would
@@ -93,6 +94,39 @@ impl Desktop for SystemDesktop {
             .key(copy, Direction::Release)
             .map_err(|error| keystroke(&error.to_string()))
     }
+}
+
+/// The letter half of the copy chord, as the key the user's fingers are on.
+///
+/// Asking enigo for the character would make it consult the active keyboard
+/// layout to find out where that character sits, and on macOS that lookup goes
+/// through the Text Services Manager, which asserts it is being called on the
+/// main thread and aborts the process when it is not — see the test below, and
+/// `palette::off_thread` for why a Capture is never on that thread.
+///
+/// The keycode is the better answer besides. macOS matches a Command chord
+/// against the physical key whatever layout is active, so `Cmd+C` copies from
+/// the same key under a Cyrillic layout as under a Latin one — while the
+/// character lookup, finding no `c` on that layout at all, would come back with
+/// keycode zero and send `Cmd+A`.
+#[cfg(target_os = "macos")]
+fn copy_letter() -> Key {
+    /// `kVK_ANSI_C`, from `Carbon/HIToolbox/Events.h`.
+    const ANSI_C: u32 = 0x08;
+
+    Key::Other(ANSI_C)
+}
+
+/// The letter half of the copy chord.
+///
+/// macOS is the platform whose character lookup insists on a thread this code
+/// is never on, and the only one this has been watched failing on, so it is the
+/// only one moved off the character. Whether X11 and Windows resolve a `c` that
+/// a Cyrillic layout does not carry is ticket 13's to find out, on machines
+/// that can be watched.
+#[cfg(not(target_os = "macos"))]
+fn copy_letter() -> Key {
+    Key::Unicode('c')
 }
 
 fn clipboard() -> Result<arboard::Clipboard, CaptureError> {
@@ -111,6 +145,19 @@ mod tests {
 
     fn accepts(session_type: Option<&str>) -> bool {
         accepts_synthetic_input(session_type.map(OsStr::new))
+    }
+
+    /// The copy chord's letter must not be one enigo has to look up.
+    ///
+    /// `Key::Unicode` sends enigo to the Text Services Manager to ask where the
+    /// character sits on the layout that is active, and that API asserts it is
+    /// being called on the main thread. A Capture is never on it — it waits on
+    /// another application, and the comment on `palette::off_thread` says why
+    /// that wait cannot happen there — so the assertion aborts the process.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn the_copy_letter_is_not_one_the_keyboard_layout_has_to_resolve() {
+        assert!(!matches!(copy_letter(), Key::Unicode(_)));
     }
 
     #[test]
