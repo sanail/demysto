@@ -40,6 +40,14 @@ export function dismissPalette(): Promise<void> {
   return invoke<void>("dismiss_palette");
 }
 
+/**
+ * Every Capture from here on that has begun but not yet finished, so that the
+ * Palette can stop showing the one before it.
+ */
+export function onCapturing(handle: () => void): Promise<UnlistenFn> {
+  return listen<null>("palette://capturing", () => handle());
+}
+
 /** Every Capture from here on, as the Hotkey produces them. */
 export function onCapture(
   handle: (outcome: CaptureOutcome) => void,

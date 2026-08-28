@@ -4,19 +4,46 @@
     dismissPalette,
     lastCapture,
     onCapture,
+    onCapturing,
     type CaptureOutcome,
   } from "../lib/ipc";
 
   let outcome = $state<CaptureOutcome | null>(null);
 
+  // Whether the backend has said anything yet. `outcome` cannot answer that on
+  // its own: a Capture that is under way sets it back to null, which is not the
+  // same thing as never having heard from the backend at all.
+  let heard = false;
+
   onMount(() => {
-    // Both, because the Hotkey may fire before this window has ever loaded:
-    // the event carries every later Capture, the call catches the first one.
-    const unlisten = onCapture((next) => (outcome = next));
-    lastCapture().then((first) => (outcome ??= first));
+    // The Palette is hidden between opens rather than unloaded, so what the
+    // last Capture put on screen is still there. A Capture beginning clears it,
+    // which is what the user should be left looking at if this one turns out to
+    // have nothing to show.
+    const capturing = onCapturing(() => {
+      heard = true;
+      outcome = null;
+    });
+
+    const captured = onCapture((next) => {
+      heard = true;
+      outcome = next;
+    });
+
+    // Asked for as well as listened for, because the Hotkey may fire before
+    // this window has ever loaded: the events carry every Capture from now on,
+    // and the call catches one that happened before there was anybody here to
+    // hear it. Only while nothing has been heard, since by the time it answers
+    // a newer Capture may already have replaced what it is holding.
+    lastCapture().then((first) => {
+      if (!heard) {
+        outcome = first;
+      }
+    });
 
     return () => {
-      unlisten.then((stop) => stop());
+      capturing.then((stop) => stop());
+      captured.then((stop) => stop());
     };
   });
 
