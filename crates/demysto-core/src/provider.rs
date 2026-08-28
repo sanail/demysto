@@ -14,15 +14,15 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Provider;
-use crate::run::RunError;
+use crate::run::{RunError, Stopping};
 use crate::sse;
 
 /// The contract's one endpoint, joined onto whatever base URL the user gave.
 const ENDPOINT: &str = "chat/completions";
 
 /// How long a Provider has to answer at all before Demysto stops waiting. Long,
-/// because a slow answer is still an answer; ticket 06 gives the user a way to
-/// stop waiting sooner.
+/// because a slow answer is still an answer, and the user has Stop for the
+/// answer that is going nowhere.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How long the endpoint has to accept a connection. Short, because a base URL
@@ -42,14 +42,20 @@ const READ_SIZE: usize = 8 * 1024;
 /// [`snippet`] counts in characters.
 const BODY_KEPT: usize = 4 * 300;
 
-/// Asks a Provider one question and delivers the answer as it arrives.
+/// Puts a Conversation to a Provider and delivers the reply as it arrives.
 ///
-/// The fragments are handed over one at a time and not accumulated here: the
+/// `said` is the whole Conversation as the contract wants it — who said each
+/// part, and what they said — ending on the Turn being asked now. The fragments
+/// of the reply are handed over one at a time and not accumulated here: the
 /// caller is assembling them anyway, and two copies of the same answer would be
 /// two places for it to differ.
+///
+/// Answers as soon as `stopping` says the user has stopped waiting, which
+/// leaves the caller holding what had arrived by then.
 pub(crate) fn answer(
     provider: &Provider,
-    prompt: &str,
+    said: &[(&str, String)],
+    stopping: &Stopping,
     mut arriving: impl FnMut(&str),
 ) -> Result<(), RunError> {
     let mut response = client()?
@@ -57,10 +63,10 @@ pub(crate) fn answer(
         .bearer_auth(&provider.api_key)
         .json(&Request {
             model: &provider.model,
-            messages: vec![Message {
-                role: "user",
-                content: prompt,
-            }],
+            messages: said
+                .iter()
+                .map(|(role, content)| Message { role, content })
+                .collect(),
             stream: true,
         })
         .send()
@@ -82,6 +88,15 @@ pub(crate) fn answer(
     let mut delivered = false;
 
     'reading: loop {
+        // Stop is looked for here as well as after each fragment, so that it is
+        // seen between two reads rather than only between two fragments of one.
+        // A stream that has gone silent is a different matter: this thread is
+        // inside the read until the Provider says something or the request
+        // times out, and Stop waits with it. Timeouts are ticket 11's.
+        if stopping.stopped() {
+            return Ok(());
+        }
+
         // A stream that breaks part-way through loses the fragments already
         // delivered, because a failure is the whole of what a Run produced.
         // Ticket 11 owns keeping them and offering to continue.
@@ -109,6 +124,13 @@ pub(crate) fn answer(
             if let Some(fragment) = fragment(&payload)? {
                 delivered = true;
                 arriving(&fragment);
+
+                // Checked per fragment and not per read: a whole answer often
+                // arrives in one read, and a Stop pressed over the second
+                // sentence should not have to wait for the last.
+                if stopping.stopped() {
+                    return Ok(());
+                }
             }
         }
 

@@ -97,7 +97,36 @@ export type RunError = {
 /** Mirrors `demysto_core::RunOutcome`. */
 export type RunOutcome =
   | { status: "answered"; detail: string }
+  /** The user stopped it, keeping whatever had already arrived. */
+  | { status: "stopped"; detail: string }
   | { status: "failed"; detail: RunError };
+
+/** Mirrors `demysto_core::Turn`. */
+export type Turn = {
+  /**
+   * What the user asked in their own words, `null` for the Turn that opened
+   * the Conversation — which the Action asked on their behalf.
+   */
+  question: string | null;
+  /** What it produced, `null` while the Model is still answering. */
+  outcome: RunOutcome | null;
+};
+
+/** Mirrors `demysto_core::Conversation`. */
+export type Conversation = {
+  id: number;
+  /** The Action the opening Run ran, `null` when it was not one Demysto has. */
+  action: Action | null;
+  turns: Turn[];
+};
+
+/** Mirrors `demysto_core::Summary`: one line of the list of Conversations. */
+export type Summary = {
+  id: number;
+  name: string | null;
+  /** The opening words of what it is about. */
+  about: string;
+};
 
 /**
  * Runs one Action over the last Capture, with what the Palette collected for
@@ -113,9 +142,39 @@ export function run(
   return invoke<void>("run", { action, parameters });
 }
 
-/** What the last Run produced, for a result window that mounted after it. */
-export function lastRun(): Promise<RunOutcome | null> {
-  return invoke<RunOutcome | null>("last_run");
+/**
+ * Asks a follow-up in the Conversation the window is showing.
+ *
+ * Answers for the same reason [`run`] does: the reply arrives through the
+ * events and the channel below, not as this call's result.
+ */
+export function followUp(question: string): Promise<void> {
+  return invoke<void>("follow_up", { question });
+}
+
+/** Stops the Turn under way, keeping what has already arrived. */
+export function stop(): Promise<void> {
+  return invoke<void>("stop");
+}
+
+/**
+ * The Conversation the window is showing, `null` before there has been one.
+ *
+ * Asked for rather than carried on the events, because it is the one answer
+ * that is right whether or not the window was loaded for the events before it.
+ */
+export function conversation(): Promise<Conversation | null> {
+  return invoke<Conversation | null>("conversation");
+}
+
+/** This session's Conversations, newest first. */
+export function conversations(): Promise<Summary[]> {
+  return invoke<Summary[]>("conversations");
+}
+
+/** Puts an earlier Conversation on screen. */
+export function showConversation(id: number): Promise<Conversation | null> {
+  return invoke<Conversation | null>("show_conversation", { id });
 }
 
 /**
@@ -144,24 +203,18 @@ export function onStreaming(
   );
 }
 
-/**
- * The Action the Run under way is running, for the window that heads its answer
- * with it. `null` before there has been a Run to name.
- */
-export function runningAction(): Promise<Action | null> {
-  return invoke<Action | null>("running_action");
-}
-
-/** Every Run from here on that has begun but not yet finished. */
+/** Every Turn from here on that has begun but not yet finished. */
 export function onRunning(handle: () => void): Promise<UnlistenFn> {
   return listen<null>("result://running", () => handle());
 }
 
-/** Every Run from here on, as it finishes. */
-export function onAnswered(
-  handle: (outcome: RunOutcome) => void,
-): Promise<UnlistenFn> {
-  return listen<RunOutcome>("result://answered", (event) =>
-    handle(event.payload),
-  );
+/**
+ * Every Turn from here on, as it finishes.
+ *
+ * Neither event carries what changed: the window asks for the Conversation as
+ * it now stands, which spares it having to reconcile a payload against what it
+ * already had.
+ */
+export function onAnswered(handle: () => void): Promise<UnlistenFn> {
+  return listen<null>("result://answered", () => handle());
 }

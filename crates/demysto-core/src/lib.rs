@@ -13,6 +13,7 @@ use std::time::Duration;
 mod action;
 mod capture;
 mod config;
+mod conversation;
 mod desktop;
 mod language;
 mod paths;
@@ -24,11 +25,14 @@ mod stream;
 
 pub use action::{Action, Parameter};
 pub use capture::{Capture, CaptureError, CaptureOutcome, Captured};
+pub use conversation::{Conversation, Summary, Turn};
 pub use paths::{config_dir, ConfigDirError, CONFIG_DIR_ENV};
 pub use run::{RunError, RunOutcome};
 pub use selection::Selection;
 
 use config::{Config, ConfigError};
+use conversation::Store;
+use run::Stopping;
 use stream::Assembly;
 
 /// The facade every user interface talks to.
@@ -42,12 +46,16 @@ pub struct Demysto {
     config: Result<Config, ConfigError>,
     /// The last Capture, so that a Palette which loads after one still finds it.
     last_capture: Mutex<Option<CaptureOutcome>>,
-    /// The last Run, for the same reason: the result window is shown while the
-    /// request is still in flight, so it loads after the Run it is showing.
-    last_run: Mutex<Option<RunOutcome>>,
-    /// What that Run is running. Kept apart from what it produced because the
-    /// window is headed with it before there is anything to head.
-    running: Mutex<Option<Action>>,
+    /// This session's Conversations, and which of them the result window is
+    /// showing. Held here for the reason the last Capture is: the window is
+    /// shown while the request is still in flight, so it loads after the
+    /// Conversation it is showing was opened.
+    store: Mutex<Store>,
+    /// The stop signal of the Turn under way, so that Stop — pressed on the
+    /// thread the window is drawn on — reaches the thread inside the request.
+    /// One rather than one per Turn, because the interface holds a flag that
+    /// keeps two Turns from being under way at once.
+    stopping: Mutex<Option<Stopping>>,
     /// How often a Run under way hands over what has arrived so far. A field
     /// rather than a constant so that the suite can take the waiting out of it,
     /// the way it takes it out of a Capture.
@@ -91,8 +99,8 @@ impl Demysto {
             version: version.into(),
             capture,
             last_capture: Mutex::new(None),
-            last_run: Mutex::new(None),
-            running: Mutex::new(None),
+            store: Mutex::new(Store::new()),
+            stopping: Mutex::new(None),
             throttle: stream::THROTTLE,
         }
     }
@@ -123,8 +131,8 @@ impl Demysto {
         self.last_capture.lock().unwrap().clone()
     }
 
-    /// Declares the Run that is about to begin: forgets what the last one
-    /// produced, and remembers which Action this one runs.
+    /// Declares the Run that is about to begin, opening the Conversation it
+    /// will fill and putting that on screen.
     ///
     /// The interface shows the result window for a Run that is about to begin,
     /// and a window shown before there is an answer asks the core what it is
@@ -132,15 +140,40 @@ impl Demysto {
     /// under the name of the Action it is asking for — rather than the answer to
     /// the question before this one, under that question's name.
     pub fn about_to_run(&self, action: &str) {
-        *self.last_run.lock().unwrap() = None;
-        *self.running.lock().unwrap() = action::named(action);
+        self.conversation_for(action);
     }
 
-    /// The Action the Run under way is running, for the window that heads its
-    /// answer with it. `None` before there has been a Run to name, and when the
-    /// Action asked for was not one Demysto has.
-    pub fn running_action(&self) -> Option<Action> {
-        self.running.lock().unwrap().clone()
+    /// Declares the follow-up Turn that is about to be asked, so that the
+    /// window shows the question while the Model is still answering it.
+    ///
+    /// Answers with whether there was a Conversation to ask it in.
+    pub fn about_to_follow_up(&self, question: &str) -> bool {
+        self.store.lock().unwrap().follow_up(question).is_some()
+    }
+
+    /// The Conversation the result window is showing, `None` before there has
+    /// been one.
+    pub fn conversation(&self) -> Option<Conversation> {
+        self.store.lock().unwrap().showing().cloned()
+    }
+
+    /// This session's Conversations, newest first, as the list of them reads.
+    pub fn conversations(&self) -> Vec<Summary> {
+        self.store.lock().unwrap().summaries()
+    }
+
+    /// Puts an earlier Conversation on screen, and answers with it. `None` when
+    /// the session no longer holds one by that name.
+    pub fn show_conversation(&self, id: u64) -> Option<Conversation> {
+        self.store.lock().unwrap().show(id).cloned()
+    }
+
+    /// Stops the Turn under way, keeping what has already arrived. Does nothing
+    /// when there is no Turn to stop.
+    pub fn stop(&self) {
+        if let Some(stopping) = self.stopping.lock().unwrap().as_ref() {
+            stopping.stop();
+        }
     }
 
     /// The Actions that accept the last Capture, in the order the Palette
@@ -163,8 +196,8 @@ impl Demysto {
             .collect()
     }
 
-    /// Runs the Action named by `action` against the last Capture, showing the
-    /// answer as it arrives, and remembers what it produced.
+    /// Runs the Action named by `action` against the last Capture in a
+    /// Conversation of its own, showing the answer as it arrives.
     ///
     /// The Selection comes from the Capture the core already holds rather than
     /// from the interface: what gets run on is what Demysto read, not what a
@@ -185,56 +218,104 @@ impl Demysto {
         // nothing stale to find however it got here — the interface declares
         // the Run before it shows the window, and a caller that did not still
         // cannot leave the last one on screen.
-        self.about_to_run(action);
+        let id = self.conversation_for(action);
+        let outcome = self.opening_turn(id, action, parameters, showing);
 
-        let outcome = RunOutcome::from(self.answer(action, parameters, showing));
-        *self.last_run.lock().unwrap() = Some(outcome.clone());
+        self.store.lock().unwrap().answered(id, outcome.clone());
 
         outcome
     }
 
-    /// What the last Run produced, `None` before there has been one and while
-    /// one is under way.
-    pub fn last_run(&self) -> Option<RunOutcome> {
-        self.last_run.lock().unwrap().clone()
+    /// Asks a follow-up in the Conversation on screen, showing the answer as it
+    /// arrives, and adds the Turn to it.
+    ///
+    /// The question is the whole of what is sent: the Selection and everything
+    /// said about it so far travel as the Turns before this one, which is what
+    /// makes a follow-up cost nothing but typing.
+    pub fn follow_up(&self, question: &str, showing: impl FnMut(&str)) -> RunOutcome {
+        let Some(id) = self.store.lock().unwrap().follow_up(question) else {
+            return RunOutcome::Failed(run::no_conversation());
+        };
+
+        let outcome = self.ask(id, question.to_owned(), showing);
+        self.store.lock().unwrap().answered(id, outcome.clone());
+
+        outcome
     }
 
-    fn answer(
-        &self,
-        action: &str,
-        parameters: &BTreeMap<String, String>,
-        mut showing: impl FnMut(&str),
-    ) -> Result<String, RunError> {
+    /// Opens the Conversation a Run of `action` fills, on what was captured,
+    /// and answers with what it is asked for by.
+    fn conversation_for(&self, action: &str) -> u64 {
         let captured = self.last_capture();
         let selection = captured
             .as_ref()
             .and_then(CaptureOutcome::selection)
-            .ok_or_else(run::nothing_to_run)?;
+            .cloned();
+
+        self.store
+            .lock()
+            .unwrap()
+            .open(action::named(action), selection)
+    }
+
+    /// Asks the Turn that opens a Conversation, which the Action asks on the
+    /// user's behalf rather than the user in their own words.
+    fn opening_turn(
+        &self,
+        id: u64,
+        action: &str,
+        parameters: &BTreeMap<String, String>,
+        showing: impl FnMut(&str),
+    ) -> RunOutcome {
+        let captured = self.last_capture();
+        let Some(selection) = captured.as_ref().and_then(CaptureOutcome::selection) else {
+            return RunOutcome::Failed(run::nothing_to_run());
+        };
 
         // The Palette offers only the Actions that accept what was captured, and
         // is the only gate on that today: with one Selection kind there is no
         // Action a Run could reach that would refuse it. The kind images bring
         // is where this needs a check of its own.
-        let action = action::named(action).ok_or_else(|| run::no_such_action(action))?;
+        let Some(action) = action::named(action) else {
+            return RunOutcome::Failed(run::no_such_action(action));
+        };
 
-        let config = self
-            .config
-            .as_ref()
-            .map_err(|error| RunError::Configuration(error.to_string()))?;
+        self.ask(id, action.prompt(selection, parameters), showing)
+    }
+
+    /// Puts the Conversation to the Provider, with `prompt` as what the Turn
+    /// now being asked sends.
+    fn ask(&self, id: u64, prompt: String, mut showing: impl FnMut(&str)) -> RunOutcome {
+        let config = match self.config.as_ref() {
+            Ok(config) => config,
+            Err(error) => return RunOutcome::Failed(RunError::Configuration(error.to_string())),
+        };
+
+        let Some(said) = self.store.lock().unwrap().asking(id, prompt) else {
+            return RunOutcome::Failed(run::no_conversation());
+        };
+
+        // Installed before the request and taken down after it, so that Stop
+        // between two Runs stops neither — and released before the waiting
+        // starts, because Stop arrives on another thread and would otherwise
+        // wait for the Run it is trying to end.
+        let stopping = Stopping::default();
+        *self.stopping.lock().unwrap() = Some(stopping.clone());
 
         let mut assembly = Assembly::new(self.throttle);
+        let asked = provider::answer(&config.provider, &said, &stopping, |fragment| {
+            if let Some(answer) = assembly.push(fragment) {
+                showing(&answer);
+            }
+        });
 
-        provider::answer(
-            &config.provider,
-            &action.prompt(selection, parameters),
-            |fragment| {
-                if let Some(answer) = assembly.push(fragment) {
-                    showing(&answer);
-                }
-            },
-        )?;
+        *self.stopping.lock().unwrap() = None;
 
-        Ok(assembly.text())
+        match asked {
+            Err(error) => RunOutcome::Failed(error),
+            Ok(()) if stopping.stopped() => RunOutcome::Stopped(assembly.text()),
+            Ok(()) => RunOutcome::Answered(assembly.text()),
+        }
     }
 
     pub fn status(&self) -> Status {
@@ -304,20 +385,25 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         if let Some(base_url) = base_url {
-            std::fs::write(
-                dir.path().join(config::FILE_NAME),
-                format!(
-                    "version = 1\n\n[[providers]]\nname = \"a provider\"\n\
-                     base_url = \"{base_url}\"\nmodel = \"a-model\"\napi_key = \"a-key\"\n"
-                ),
-            )
-            .unwrap();
+            configured(dir.path(), base_url);
         }
 
         Rooted {
             demysto: Demysto::with_capture(dir.path(), "1.2.3", capture).unthrottled(),
             _dir: dir,
         }
+    }
+
+    /// Writes a settings file naming one Provider, at `base_url`.
+    fn configured(dir: &Path, base_url: &str) {
+        std::fs::write(
+            dir.join(config::FILE_NAME),
+            format!(
+                "version = 1\n\n[[providers]]\nname = \"a provider\"\n\
+                 base_url = \"{base_url}\"\nmodel = \"a-model\"\napi_key = \"a-key\"\n"
+            ),
+        )
+        .unwrap();
     }
 
     /// The body an OpenAI-compatible Provider answers with, one event per
@@ -391,6 +477,34 @@ mod tests {
         demysto.capture();
 
         demysto
+    }
+
+    /// The Conversation the result window would be showing.
+    fn showing(demysto: &Demysto) -> Conversation {
+        demysto
+            .conversation()
+            .expect("there should be a Conversation on screen")
+    }
+
+    /// A follow-up Turn on the Conversation on screen, whose intermediate
+    /// states nobody is watching.
+    fn following_up(demysto: &Demysto, question: &str) -> RunOutcome {
+        demysto.follow_up(question, |_| {})
+    }
+
+    /// What every Turn of the Conversation on screen asked, and what it was
+    /// answered with.
+    fn turns(demysto: &Demysto) -> Vec<(Option<String>, Option<RunOutcome>)> {
+        showing(demysto)
+            .turns
+            .into_iter()
+            .map(|turn| (turn.question, turn.outcome))
+            .collect()
+    }
+
+    /// A Turn the Model answered, as the assertions below write one.
+    fn answered(text: &str) -> Option<RunOutcome> {
+        Some(RunOutcome::Answered(text.to_owned()))
     }
 
     fn captured(demysto: &Demysto) -> Captured {
@@ -914,7 +1028,7 @@ mod tests {
     }
 
     #[test]
-    fn the_last_run_is_remembered_for_a_window_that_opens_after_it() {
+    fn the_conversation_is_there_for_a_window_that_opens_after_the_run() {
         let mut server = Server::new();
         let _endpoint = server
             .mock("POST", "/v1/chat/completions")
@@ -924,17 +1038,16 @@ mod tests {
         let demysto = ready_to_run(&server, "a paragraph");
         run(&demysto);
 
-        assert_eq!(
-            demysto.last_run(),
-            Some(RunOutcome::Answered("an answer".to_owned()))
-        );
+        assert_eq!(turns(&demysto), [(None, answered("an answer"))]);
     }
 
     #[test]
-    fn nothing_is_remembered_before_the_first_run() {
+    fn nothing_is_on_screen_before_the_first_run() {
         let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = demysto(fake::over(&desktop));
 
-        assert_eq!(demysto(fake::over(&desktop)).last_run(), None);
+        assert_eq!(demysto.conversation(), None);
+        assert!(demysto.conversations().is_empty());
     }
 
     #[test]
@@ -972,10 +1085,23 @@ mod tests {
         demysto.about_to_run("translate");
 
         assert_eq!(
-            demysto.running_action().map(|action| action.name),
+            showing(&demysto).action.map(|action| action.name),
             Some("Translate".to_owned())
         );
-        assert_eq!(demysto.last_run(), None);
+        assert_eq!(turns(&demysto), [(None, None)]);
+    }
+
+    #[test]
+    fn declaring_the_same_run_twice_opens_one_conversation_and_not_two() {
+        // The interface declares a Run before it shows the window, and the Run
+        // declares it again for a caller that did not.
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = demysto(fake::over(&desktop));
+
+        demysto.about_to_run("translate");
+        demysto.about_to_run("translate");
+
+        assert_eq!(demysto.conversations().len(), 1);
     }
 
     #[test]
@@ -985,7 +1111,7 @@ mod tests {
 
         demysto.about_to_run("translat");
 
-        assert_eq!(demysto.running_action(), None);
+        assert_eq!(showing(&demysto).action, None);
     }
 
     #[test]
@@ -1097,5 +1223,306 @@ mod tests {
         };
 
         assert!(message.contains("explan"), "{message}");
+    }
+
+    #[test]
+    fn a_run_opens_a_conversation_holding_the_turn_it_took() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("A painting of a pipe is not a pipe."))
+            .create();
+
+        let demysto = ready_to_run(&server, "Ceci n'est pas une pipe");
+        run(&demysto);
+
+        // The opening Turn asked nothing in the user's own words: the Action
+        // asked it for them, and the window heads it with the Action's name.
+        assert_eq!(
+            turns(&demysto),
+            [(None, answered("A painting of a pipe is not a pipe."))]
+        );
+        assert_eq!(
+            showing(&demysto).action.map(|action| action.name),
+            Some("Explain".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_follow_up_is_asked_in_the_context_of_the_turns_before_it() {
+        let mut server = Server::new();
+
+        // Created first so that it is the one preferred where it matches: the
+        // opening Run carries no follow-up and falls through to the mock below.
+        let follow_up = server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(Matcher::AllOf(vec![
+                // The Selection is still there, in the prompt the Action
+                // assembled for the Turn that opened the Conversation …
+                Matcher::Regex("Ceci n'est pas une pipe".to_owned()),
+                // … followed by what the Model replied, and then by the
+                // question, in that order and each as whose words they are.
+                Matcher::Regex(
+                    [
+                        r#""role":"user".*"#,
+                        r#""role":"assistant","content":"A painting of a pipe is not a pipe\.".*"#,
+                        r#""role":"user","content":"Why not\?""#,
+                    ]
+                    .concat(),
+                ),
+            ]))
+            .with_body(answering("Because you cannot smoke it."))
+            .create();
+
+        let _opening = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("A painting of a pipe is not a pipe."))
+            .create();
+
+        let demysto = ready_to_run(&server, "Ceci n'est pas une pipe");
+        run(&demysto);
+
+        assert_eq!(
+            following_up(&demysto, "Why not?"),
+            RunOutcome::Answered("Because you cannot smoke it.".to_owned())
+        );
+        follow_up.assert();
+    }
+
+    #[test]
+    fn turns_accumulate_rather_than_replacing_one_another() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        run(&demysto);
+        following_up(&demysto, "and then?");
+        following_up(&demysto, "why?");
+
+        assert_eq!(
+            turns(&demysto),
+            [
+                (None, answered("an answer")),
+                (Some("and then?".to_owned()), answered("an answer")),
+                (Some("why?".to_owned()), answered("an answer")),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_second_run_opens_a_conversation_of_its_own() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        run(&demysto);
+        run(&demysto);
+
+        // A Run is a new question about a new Selection: it belongs beside the
+        // Conversation before it rather than inside it.
+        assert_eq!(demysto.conversations().len(), 2);
+        assert_eq!(turns(&demysto).len(), 1);
+    }
+
+    #[test]
+    fn the_session_holds_fifty_conversations_and_forgets_the_oldest_first() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        for _ in 0..conversation::CAP + 1 {
+            run(&demysto);
+        }
+
+        let held = demysto.conversations();
+        let ids: Vec<_> = held.iter().map(|held| held.id).collect();
+
+        // Newest first, and the very first Run is the one that fell off.
+        assert_eq!(ids.len(), conversation::CAP);
+        assert_eq!(ids.first(), Some(&(conversation::CAP as u64 + 1)));
+        assert_eq!(ids.last(), Some(&2));
+    }
+
+    #[test]
+    fn a_conversation_the_user_goes_back_to_is_the_one_the_next_turn_joins() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        run(&demysto);
+        let earlier = showing(&demysto).id;
+        run(&demysto);
+
+        assert_eq!(
+            demysto.show_conversation(earlier).map(|shown| shown.id),
+            Some(earlier)
+        );
+
+        following_up(&demysto, "and then?");
+
+        assert_eq!(showing(&demysto).id, earlier);
+        assert_eq!(turns(&demysto).len(), 2);
+    }
+
+    #[test]
+    fn a_conversation_the_session_never_held_cannot_be_gone_back_to() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+
+        assert_eq!(demysto(fake::over(&desktop)).show_conversation(7), None);
+    }
+
+    #[test]
+    fn a_run_stopped_part_way_keeps_the_text_that_had_arrived() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(streaming(&["A painting ", "of a pipe ", "is not a pipe."]))
+            .create();
+
+        let demysto = ready_to_run(&server, "Ceci n'est pas une pipe");
+
+        // Stopped as the first words land, which is when a reader watching an
+        // answer go nowhere reaches for it.
+        let outcome = demysto.run("explain", &BTreeMap::new(), |_| demysto.stop());
+
+        assert_eq!(outcome, RunOutcome::Stopped("A painting ".to_owned()));
+        assert_eq!(turns(&demysto), [(None, Some(outcome))]);
+    }
+
+    #[test]
+    fn what_a_stopped_turn_did_deliver_is_context_for_the_next_one() {
+        let mut server = Server::new();
+
+        let follow_up = server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(Matcher::Regex(
+                r#""role":"assistant","content":"A painting ""#.to_owned(),
+            ))
+            .with_body(answering("Because you cannot smoke it."))
+            .create();
+
+        let _opening = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(streaming(&["A painting ", "of a pipe ", "is not a pipe."]))
+            .create();
+
+        let demysto = ready_to_run(&server, "Ceci n'est pas une pipe");
+        demysto.run("explain", &BTreeMap::new(), |_| demysto.stop());
+        following_up(&demysto, "Why not?");
+
+        follow_up.assert();
+    }
+
+    #[test]
+    fn a_turn_that_failed_still_carries_its_selection_into_the_next_one() {
+        let mut server = Server::new();
+
+        // Created first so that it is the one preferred where it matches: the
+        // opening Run carries no follow-up and falls through to the mock below.
+        let follow_up = server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(Matcher::AllOf(vec![
+                // The Selection the refused Turn asked about is still there, so
+                // that the Turn after it is about something.
+                Matcher::Regex("Ceci n'est pas une pipe".to_owned()),
+                Matcher::Regex(r#""role":"user","content":"try again\?""#.to_owned()),
+            ]))
+            .with_body(answering("A painting of a pipe is not a pipe."))
+            .create();
+
+        let _refusing = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(500)
+            .with_body("<html>Bad Gateway</html>")
+            .create();
+
+        let demysto = ready_to_run(&server, "Ceci n'est pas une pipe");
+        run(&demysto);
+
+        // What the Provider never replied to is a question the user is still
+        // owed an answer to. Dropping it because it failed once would leave
+        // this Turn asking about nothing at all.
+        assert_eq!(
+            following_up(&demysto, "try again?"),
+            RunOutcome::Answered("A painting of a pipe is not a pipe.".to_owned())
+        );
+        follow_up.assert();
+    }
+
+    #[test]
+    fn a_turn_the_provider_refused_stays_in_the_conversation_as_the_turn_it_was() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(500)
+            .with_body("<html>Bad Gateway</html>")
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        run(&demysto);
+        following_up(&demysto, "and then?");
+
+        // A failure is an entry in the Conversation rather than something that
+        // replaces it, per the spec's *Errors*. Ticket 11 gives it a retry.
+        let turns = turns(&demysto);
+
+        assert_eq!(turns.len(), 2);
+        assert!(
+            turns.iter().all(|(_, outcome)| matches!(
+                outcome,
+                Some(RunOutcome::Failed(RunError::Provider(_)))
+            )),
+            "{turns:?}"
+        );
+    }
+
+    #[test]
+    fn a_follow_up_with_no_conversation_on_screen_sends_nothing_anywhere() {
+        // The Provider is an address that refuses connections, so anything but
+        // this outcome would mean a request went out.
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+        let demysto = demysto_asking(fake::over(&desktop), "http://127.0.0.1:1/v1");
+
+        assert!(matches!(
+            following_up(&demysto, "and then?"),
+            RunOutcome::Failed(RunError::NothingToRun(_))
+        ));
+    }
+
+    #[test]
+    fn conversations_do_not_outlive_the_session_that_held_them() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let dir = TempDir::new().unwrap();
+        configured(dir.path(), &format!("{}/v1", server.url()));
+
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+        let session = Demysto::with_capture(dir.path(), "1.2.3", fake::over(&desktop));
+        session.capture();
+        run(&session);
+
+        assert_eq!(session.conversations().len(), 1);
+
+        // The same configuration directory, and nothing of the Conversation in
+        // it: history is held in memory and nowhere else (user story 62).
+        let next = Demysto::with_capture(dir.path(), "1.2.3", fake::over(&desktop));
+
+        assert!(next.conversations().is_empty());
     }
 }

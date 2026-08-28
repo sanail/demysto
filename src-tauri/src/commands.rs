@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use demysto_core::{Action, CaptureOutcome, Demysto, RunOutcome, Status};
+use demysto_core::{Action, CaptureOutcome, Conversation, Demysto, Status, Summary};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Runtime, State, WebviewWindow};
 
@@ -39,19 +39,41 @@ pub fn run<R: Runtime>(app: AppHandle<R>, action: String, parameters: BTreeMap<S
     crate::result::run(&app, action, parameters);
 }
 
-/// What the last Run produced, for a result window that mounted after it.
+/// Asks a follow-up in the Conversation the window is showing.
+///
+/// Returns for the same reason [`run`] does, and through the same path: the
+/// answer reaches the window as it arrives rather than as this call's result.
 #[tauri::command]
-pub fn last_run(demysto: State<'_, Demysto>) -> Option<RunOutcome> {
-    demysto.last_run()
+pub fn follow_up<R: Runtime>(app: AppHandle<R>, question: String) {
+    crate::result::follow_up(&app, question);
 }
 
-/// The Action the Run under way is running, for the window showing its answer.
+/// Stops the Turn under way, keeping what has already arrived.
 #[tauri::command]
-pub fn running_action(demysto: State<'_, Demysto>) -> Option<Action> {
-    demysto.running_action()
+pub fn stop(demysto: State<'_, Demysto>) {
+    demysto.stop();
 }
 
-/// Says where a result window wants an answer sent as it arrives.
+/// The Conversation the window is showing, for one that mounted after the Turn
+/// it is showing began.
+#[tauri::command]
+pub fn conversation(demysto: State<'_, Demysto>) -> Option<Conversation> {
+    demysto.conversation()
+}
+
+/// This session's Conversations, newest first, for the list the window offers.
+#[tauri::command]
+pub fn conversations(demysto: State<'_, Demysto>) -> Vec<Summary> {
+    demysto.conversations()
+}
+
+/// Puts an earlier Conversation on screen.
+#[tauri::command]
+pub fn show_conversation(demysto: State<'_, Demysto>, id: u64) -> Option<Conversation> {
+    demysto.show_conversation(id)
+}
+
+/// Says where a Conversation window wants an answer sent as it arrives.
 #[tauri::command]
 pub fn show_answers_on(channel: Channel<String>) {
     crate::result::show_answers_on(channel);

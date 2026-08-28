@@ -80,8 +80,11 @@ pub fn run() {
             commands::last_capture,
             commands::actions,
             commands::run,
-            commands::last_run,
-            commands::running_action,
+            commands::follow_up,
+            commands::stop,
+            commands::conversation,
+            commands::conversations,
+            commands::show_conversation,
             commands::show_answers_on,
             commands::dismiss,
         ])
