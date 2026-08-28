@@ -36,8 +36,9 @@ export function lastCapture(): Promise<CaptureOutcome | null> {
   return invoke<CaptureOutcome | null>("last_capture");
 }
 
-export function dismissPalette(): Promise<void> {
-  return invoke<void>("dismiss_palette");
+/** Hides the window this is called from, which is what Escape asks for. */
+export function dismiss(): Promise<void> {
+  return invoke<void>("dismiss");
 }
 
 /**
@@ -53,6 +54,51 @@ export function onCapture(
   handle: (outcome: CaptureOutcome) => void,
 ): Promise<UnlistenFn> {
   return listen<CaptureOutcome>("palette://captured", (event) =>
+    handle(event.payload),
+  );
+}
+
+/** Mirrors `demysto_core::RunError`. */
+export type RunError = {
+  kind:
+    | "configuration"
+    | "nothing_to_run"
+    | "unreachable"
+    | "provider"
+    | "malformed";
+  message: string;
+};
+
+/** Mirrors `demysto_core::RunOutcome`. */
+export type RunOutcome =
+  | { status: "answered"; detail: string }
+  | { status: "failed"; detail: RunError };
+
+/**
+ * Runs the built-in explain Action over the last Capture.
+ *
+ * Answers as soon as the Run has somewhere to happen, not when the Model has:
+ * the answer arrives in the result window, through the events below.
+ */
+export function run(): Promise<void> {
+  return invoke<void>("run");
+}
+
+/** What the last Run produced, for a result window that mounted after it. */
+export function lastRun(): Promise<RunOutcome | null> {
+  return invoke<RunOutcome | null>("last_run");
+}
+
+/** Every Run from here on that has begun but not yet finished. */
+export function onRunning(handle: () => void): Promise<UnlistenFn> {
+  return listen<null>("result://running", () => handle());
+}
+
+/** Every Run from here on, as it finishes. */
+export function onAnswered(
+  handle: (outcome: RunOutcome) => void,
+): Promise<UnlistenFn> {
+  return listen<RunOutcome>("result://answered", (event) =>
     handle(event.payload),
   );
 }

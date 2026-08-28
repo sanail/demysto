@@ -1,9 +1,11 @@
 //! The Palette: the window the Hotkey opens, over whatever the user is reading.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use demysto_core::Demysto;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewWindow};
+
+use crate::underway::Underway;
 
 /// The window label, fixed in `tauri.conf.json`.
 pub const LABEL: &str = "palette";
@@ -22,34 +24,10 @@ const CURSOR_OFFSET: f64 = 12.0;
 /// How close the Palette may come to the edge of the screen, in logical pixels.
 const SCREEN_MARGIN: f64 = 8.0;
 
-/// Whether the Palette is in the middle of opening. Single instance is
-/// enforced, so one flag covers the whole application. Claimed through
-/// [`Opening`] rather than touched directly.
+/// Whether the Palette is in the middle of opening. Held through
+/// [`Underway`] rather than touched directly; see that module for why the
+/// detached thread [`off_thread`] spawns makes it a guard.
 static OPENING: AtomicBool = AtomicBool::new(false);
-
-/// Holds [`OPENING`] for as long as one open is under way, and clears it
-/// however that open ends.
-///
-/// A guard rather than a pair of stores, because the thread [`off_thread`]
-/// spawns is detached: a panic on it takes nothing else down and nobody hears
-/// about it. A flag left set by one would make every later open return at its
-/// first line, so the Hotkey, the tray's Open, and a second launch would all
-/// quietly do nothing for the rest of the process's life. Unwinding past this
-/// guard clears the flag, which keeps the damage to the press that caused it.
-struct Opening;
-
-impl Opening {
-    /// Claims the flag, or answers `None` when an open already holds it.
-    fn claim() -> Option<Self> {
-        (!OPENING.swap(true, Ordering::SeqCst)).then_some(Self)
-    }
-}
-
-impl Drop for Opening {
-    fn drop(&mut self) {
-        OPENING.store(false, Ordering::SeqCst);
-    }
-}
 
 /// Opens the Palette, or closes it when it is already open.
 pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
@@ -90,7 +68,7 @@ fn open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     // Held until the Palette is up and holds the focus. Any shorter and a
     // Hotkey pressed twice in a hurry sends a second copy keystroke, by then
     // aimed at the Palette itself.
-    let Some(_opening) = Opening::claim() else {
+    let Some(_opening) = Underway::claim(&OPENING) else {
         return;
     };
 

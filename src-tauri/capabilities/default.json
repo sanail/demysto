@@ -3,7 +3,8 @@
   "identifier": "default",
   "description": "Permissions granted to Demysto's windows.",
   "windows": [
-    "palette"
+    "palette",
+    "result"
   ],
   "permissions": [
     "core:default"

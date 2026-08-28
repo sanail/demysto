@@ -1,65 +1,44 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
-    dismissPalette,
+    dismiss,
     lastCapture,
     onCapture,
     onCapturing,
+    run,
     type CaptureOutcome,
   } from "../lib/ipc";
+  import { latest } from "../lib/latest.svelte";
 
-  let outcome = $state<CaptureOutcome | null>(null);
-
-  // Whether the backend has said anything yet. `outcome` cannot answer that on
-  // its own: a Capture that is under way sets it back to null, which is not the
-  // same thing as never having heard from the backend at all.
-  let heard = false;
-
-  onMount(() => {
-    // The Palette is hidden between opens rather than unloaded, so what the
-    // last Capture put on screen is still there. A Capture beginning clears it,
-    // which is what the user should be left looking at if this one turns out to
-    // have nothing to show.
-    const capturing = onCapturing(() => {
-      heard = true;
-      outcome = null;
-    });
-
-    const captured = onCapture((next) => {
-      heard = true;
-      outcome = next;
-    });
-
-    // Asked for as well as listened for, because the Hotkey may fire before
-    // this window has ever loaded: the events carry every Capture from now on,
-    // and the call catches one that happened before there was anybody here to
-    // hear it. Only while nothing has been heard, since by the time it answers
-    // a newer Capture may already have replaced what it is holding.
-    lastCapture().then((first) => {
-      if (!heard) {
-        outcome = first;
-      }
-    });
-
-    return () => {
-      capturing.then((stop) => stop());
-      captured.then((stop) => stop());
-    };
+  const capture = latest<CaptureOutcome>({
+    began: onCapturing,
+    completed: onCapture,
+    last: lastCapture,
   });
 
-  function onKeydown(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      dismissPalette();
-    }
-  }
+  onMount(capture.watch);
 
+  const outcome = $derived(capture.value);
   const captured = $derived(
     outcome?.status === "captured" ? outcome.detail : null,
   );
   const selection = $derived(
     captured && captured.origin !== "nothing" ? captured.selection : null,
   );
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dismiss();
+    }
+
+    // Ticket 05 puts the Actions on screen and gives Enter one to run; until
+    // then there is exactly one, and Enter runs it.
+    if (event.key === "Enter" && selection) {
+      event.preventDefault();
+      run();
+    }
+  }
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -96,5 +75,7 @@
   </div>
 
   <!-- Ticket 05 puts the Actions that accept this Selection here. -->
-  <footer class="text-xs opacity-40">Esc to close</footer>
+  <footer class="text-xs opacity-40">
+    {selection ? "Enter to explain · Esc to close" : "Esc to close"}
+  </footer>
 </main>

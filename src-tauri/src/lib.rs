@@ -6,7 +6,9 @@
 mod commands;
 mod hotkey;
 mod palette;
+mod result;
 mod tray;
+mod underway;
 
 use demysto_core::Demysto;
 use tauri::{Manager, RunEvent, WindowEvent};
@@ -76,7 +78,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::status,
             commands::last_capture,
-            commands::dismiss_palette,
+            commands::run,
+            commands::last_run,
+            commands::dismiss,
         ])
         .build(tauri::generate_context!())
         .expect("Demysto failed to start");
