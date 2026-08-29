@@ -24,7 +24,11 @@ const MODELS: &str = "models";
 /// How long a Provider has to answer at all before Demysto stops waiting. Long,
 /// because a slow answer is still an answer, and the user has Stop for the
 /// answer that is going nowhere.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+///
+/// Carried into each request rather than built into the client, so that the
+/// suite can take the waiting out of it the way it takes it out of the
+/// throttle: a timeout nobody can reach is a timeout nobody has tested.
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How long the endpoint has to accept a connection. Short, because a base URL
 /// that is wrong is wrong immediately, and the user should hear so.
@@ -56,46 +60,48 @@ const BODY_KEPT: usize = 4 * 300;
 pub(crate) fn answer(
     resolved: &Resolved,
     said: &[(&str, String)],
+    timeout: Duration,
     stopping: &Stopping,
     mut arriving: impl FnMut(&str),
 ) -> Result<(), RunError> {
     let provider = &resolved.endpoint;
 
-    let mut response = asking(provider, &resolved.model, said)?
+    let mut response = asking(provider, &resolved.model, said, timeout)?
         .send()
-        .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+        .map_err(|error| sending(provider, timeout, &error))?;
 
     // A refusal is not a stream: it is one body, and one worth showing whole.
     let status = response.status();
     if !status.is_success() {
         let body = response
             .text()
-            .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+            .map_err(|error| sending(provider, timeout, &error))?;
 
-        return Err(RunError::Provider(refused(status.as_u16(), &body)));
+        return Err(refusal(provider, status.as_u16(), &body));
     }
 
     let mut events = sse::Events::new();
     let mut buffer = [0; READ_SIZE];
     let mut body_start = Vec::new();
     let mut delivered = false;
+    let mut finished = false;
 
     'reading: loop {
         // Stop is looked for here as well as after each fragment, so that it is
         // seen between two reads rather than only between two fragments of one.
         // A stream that has gone silent is a different matter: this thread is
         // inside the read until the Provider says something or the request
-        // times out, and Stop waits with it. Timeouts are ticket 11's.
+        // times out, and Stop waits with it.
         if stopping.stopped() {
             return Ok(());
         }
 
-        // A stream that breaks part-way through loses the fragments already
-        // delivered, because a failure is the whole of what a Run produced.
-        // Ticket 11 owns keeping them and offering to continue.
+        // A stream that breaks part-way through is reported as what it is, and
+        // the caller keeps the fragments already handed over: they are the
+        // user's answer as far as it got (user story 46).
         let read = response
             .read(&mut buffer)
-            .map_err(|error| RunError::Unreachable(interrupted(provider, &error)))?;
+            .map_err(|error| broke_off(provider, &error))?;
 
         let chunk = &buffer[..read];
         keep(&mut body_start, chunk);
@@ -111,10 +117,21 @@ pub(crate) fn answer(
             // The contract's full stop. What follows it, if anything does, is
             // not part of the answer.
             if payload.trim() == DONE {
+                finished = true;
                 break 'reading;
             }
 
-            if let Some(fragment) = fragment(&payload)? {
+            let carried = carried(&payload)?;
+
+            // The Model saying it has finished is the other way a stream ends
+            // on purpose. Not every service sends the sentinel above — several
+            // local servers and gateways close the connection instead — and
+            // without this every one of their answers would be reported as
+            // having broken off, with an offer to carry on from a reply that
+            // was already complete.
+            finished |= carried.finished;
+
+            if let Some(fragment) = carried.text {
                 delivered = true;
                 arriving(&fragment);
 
@@ -132,12 +149,22 @@ pub(crate) fn answer(
         }
     }
 
-    match delivered {
-        true => Ok(()),
-        false => Err(RunError::Malformed(malformed(
+    // A stream that said nothing is not an answer, however tidily it ended.
+    if !delivered {
+        return Err(malformed(
             "it holds no answer",
             &String::from_utf8_lossy(&body_start),
-        ))),
+        ));
+    }
+
+    // The socket closed and the contract's full stop never came. A Provider
+    // that had finished says so; one that stopped mid-sentence is a stream that
+    // broke, whatever the network thought of it — and the difference to the
+    // user is a paragraph that ends where the Model meant it to and one that
+    // ends anywhere.
+    match finished {
+        true => Ok(()),
+        false => Err(cut_short(provider)),
     }
 }
 
@@ -148,25 +175,27 @@ pub(crate) fn answer(
 /// not something the contract reports, and guessing it here is exactly what the
 /// `vision` flag exists to stop. The user picks from this list and says what
 /// each one can do.
-pub(crate) fn models(provider: &Endpoint) -> Result<Vec<String>, RunError> {
+pub(crate) fn models(provider: &Endpoint, timeout: Duration) -> Result<Vec<String>, RunError> {
     let response = authenticated(
-        client()?.get(joined(&provider.base_url, MODELS)),
+        client()?
+            .get(joined(&provider.base_url, MODELS))
+            .timeout(timeout),
         provider.api_key.as_deref(),
     )
     .send()
-    .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+    .map_err(|error| sending(provider, timeout, &error))?;
 
     let status = response.status();
     let body = response
         .text()
-        .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+        .map_err(|error| sending(provider, timeout, &error))?;
 
     if !status.is_success() {
-        return Err(RunError::Provider(refused(status.as_u16(), &body)));
+        return Err(refusal(provider, status.as_u16(), &body));
     }
 
-    let offered: Offered = serde_json::from_str(&body)
-        .map_err(|error| RunError::Malformed(malformed(&error.to_string(), &body)))?;
+    let offered: Offered =
+        serde_json::from_str(&body).map_err(|error| malformed(&error.to_string(), &body))?;
 
     Ok(offered.data.into_iter().map(|model| model.id).collect())
 }
@@ -183,12 +212,12 @@ pub(crate) fn models(provider: &Endpoint) -> Result<Vec<String>, RunError> {
 ///
 /// The stream is dropped at the headers rather than read to its end, so the
 /// Model is cut off after the few tokens it takes a connection to close.
-pub(crate) fn verify(provider: &Endpoint, model: &str) -> Result<(), RunError> {
+pub(crate) fn verify(provider: &Endpoint, model: &str, timeout: Duration) -> Result<(), RunError> {
     let said = [("user", "Hi".to_owned())];
 
-    let response = asking(provider, model, &said)?
+    let response = asking(provider, model, &said, timeout)?
         .send()
-        .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+        .map_err(|error| sending(provider, timeout, &error))?;
 
     let status = response.status();
     if status.is_success() {
@@ -197,9 +226,9 @@ pub(crate) fn verify(provider: &Endpoint, model: &str) -> Result<(), RunError> {
 
     let body = response
         .text()
-        .map_err(|error| RunError::Unreachable(unreachable(provider, &error)))?;
+        .map_err(|error| sending(provider, timeout, &error))?;
 
-    Err(RunError::Provider(refused(status.as_u16(), &body)))
+    Err(refusal(provider, status.as_u16(), &body))
 }
 
 /// The request both a Run and a verification make: the Conversation so far, put
@@ -208,9 +237,12 @@ fn asking(
     provider: &Endpoint,
     model: &str,
     said: &[(&str, String)],
+    timeout: Duration,
 ) -> Result<reqwest::blocking::RequestBuilder, RunError> {
     let request = authenticated(
-        client()?.post(joined(&provider.base_url, ANSWERING)),
+        client()?
+            .post(joined(&provider.base_url, ANSWERING))
+            .timeout(timeout),
         provider.api_key.as_deref(),
     );
 
@@ -224,18 +256,29 @@ fn asking(
     }))
 }
 
-/// The text one event carries, which is none when the Model sent a fragment
-/// with nothing in it — the first of a stream, carrying only the role, is one.
-fn fragment(payload: &str) -> Result<Option<String>, RunError> {
-    let chunk: Chunk = serde_json::from_str(payload)
-        .map_err(|error| RunError::Malformed(malformed(&error.to_string(), payload)))?;
+/// What one event of a stream carries.
+struct Carried {
+    /// Its text, which is none when the Model sent a fragment with nothing in
+    /// it — the first of a stream, carrying only the role, is one.
+    text: Option<String>,
+    /// Whether the Model said this is where the answer ends.
+    finished: bool,
+}
 
-    Ok(chunk
-        .choices
-        .into_iter()
-        .next()
-        .and_then(|choice| choice.delta.content)
-        .filter(|fragment| !fragment.is_empty()))
+fn carried(payload: &str) -> Result<Carried, RunError> {
+    let chunk: Chunk =
+        serde_json::from_str(payload).map_err(|error| malformed(&error.to_string(), payload))?;
+
+    let choice = chunk.choices.into_iter().next();
+
+    Ok(Carried {
+        finished: choice
+            .as_ref()
+            .is_some_and(|choice| choice.finish_reason.is_some()),
+        text: choice
+            .and_then(|choice| choice.delta.content)
+            .filter(|fragment| !fragment.is_empty()),
+    })
 }
 
 /// Holds on to the start of the body, and only the start, so that a stream that
@@ -277,28 +320,117 @@ fn client() -> Result<&'static reqwest::blocking::Client, RunError> {
         .get_or_init(|| {
             reqwest::blocking::Client::builder()
                 .connect_timeout(CONNECT_TIMEOUT)
-                .timeout(REQUEST_TIMEOUT)
                 .user_agent(concat!("demysto/", env!("CARGO_PKG_VERSION")))
                 .build()
                 .map_err(|error| error.to_string())
         })
         .as_ref()
-        .map_err(|error| {
-            RunError::Unreachable(format!("Demysto could not open a connection: {error}"))
+        .map_err(|error| RunError::Unreachable {
+            message: format!("Demysto could not open a connection: {error}"),
         })
 }
 
-fn unreachable(provider: &Endpoint, error: &reqwest::Error) -> String {
-    format!("{} could not be reached: {error}", provider.base_url)
+/// What went wrong on the way out, or on the way back before there was a body:
+/// an endpoint that never answered, or one that took longer than Demysto waits.
+///
+/// The two are held apart because only one of them is worth trying again
+/// unchanged: an address nobody answers at is a setting to fix, and a Model
+/// that thought for too long is a Model to ask a second time.
+fn sending(provider: &Endpoint, waited: Duration, error: &reqwest::Error) -> RunError {
+    match error.is_timeout() {
+        true => RunError::TimedOut {
+            message: format!(
+                "{} did not answer within {} seconds, so Demysto stopped waiting.",
+                provider.base_url,
+                waited.as_secs()
+            ),
+        },
+        false => RunError::Unreachable {
+            message: format!("{} could not be reached: {error}", provider.base_url),
+        },
+    }
 }
 
-/// A stream that started and then stopped: a different thing from an endpoint
-/// that never answered, though there is nothing more to show for either.
-fn interrupted(provider: &Endpoint, error: &std::io::Error) -> String {
-    format!(
-        "{} stopped answering part-way through: {error}",
-        provider.base_url
-    )
+/// A stream that started and then stopped being read: a different thing from an
+/// endpoint that never answered, because there is an answer so far to keep.
+fn broke_off(provider: &Endpoint, error: &std::io::Error) -> RunError {
+    let timed_out = matches!(
+        error.kind(),
+        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+    ) || timed_out_beneath(error);
+
+    match timed_out {
+        true => RunError::TimedOut {
+            message: format!(
+                "{} went quiet part-way through the answer, so Demysto stopped waiting.",
+                provider.base_url
+            ),
+        },
+        false => RunError::Unreachable {
+            message: format!(
+                "{} stopped answering part-way through: {error}",
+                provider.base_url
+            ),
+        },
+    }
+}
+
+/// Whether an `io` error is a timeout wearing another error's clothes.
+///
+/// A request that runs out of time while its body is still arriving does not
+/// reach this as `ErrorKind::TimedOut`: the HTTP client wraps its own error and
+/// leaves the kind generic, so the only place the fact survives is further down
+/// the chain. Asked rather than assumed, because a Provider that stopped
+/// speaking and one that was never there want different things said about them.
+fn timed_out_beneath(error: &std::io::Error) -> bool {
+    use std::error::Error;
+
+    let mut beneath: Option<&(dyn Error + 'static)> = error.source();
+
+    while let Some(cause) = beneath {
+        if cause
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(reqwest::Error::is_timeout)
+        {
+            return true;
+        }
+
+        beneath = cause.source();
+    }
+
+    false
+}
+
+/// A stream the Provider closed without the contract's full stop, having said
+/// something first. Nothing went wrong at the socket, which is why this is not
+/// [`broke_off`]: the connection ended cleanly in the middle of a sentence.
+fn cut_short(provider: &Endpoint) -> RunError {
+    RunError::Unreachable {
+        message: format!(
+            "{} closed the connection before the answer was finished.",
+            provider.base_url
+        ),
+    }
+}
+
+/// What a Provider refusing the request comes back as: its own words, and which
+/// of the two kinds of refusal it was.
+///
+/// A refused key is held apart from every other refusal because it is the one
+/// the user cannot fix from the Conversation: the fix is in that Provider's
+/// settings, and the window is expected to offer the way there (user story 45).
+/// 401 and 403 are the contract's two ways of saying it — one for a key that is
+/// wrong, one for a key that is right and not allowed here.
+fn refusal(provider: &Endpoint, status: u16, body: &str) -> RunError {
+    let message = refused(status, body);
+
+    match status {
+        401 | 403 => RunError::Authentication {
+            message,
+            provider: provider.provider.clone(),
+        },
+        _ => RunError::Provider { message },
+    }
 }
 
 /// What the Provider said when it refused, in its own words where it gave any.
@@ -319,11 +451,20 @@ fn refused(status: u16, body: &str) -> String {
     }
 }
 
-fn malformed(reason: &str, body: &str) -> String {
-    format!(
-        "The Provider's answer was not one Demysto could read ({reason}): {}",
-        snippet(body)
-    )
+/// What the user is shown, and what a log is given, for an answer that is not
+/// the contract's shape.
+///
+/// Two halves rather than one because they go to different places: the user
+/// gets the reason and what arrived, so they can see for themselves; the log
+/// gets the reason alone, what arrived being the Model's own words (ADR-0010).
+fn malformed(reason: &str, body: &str) -> RunError {
+    RunError::Malformed {
+        message: format!(
+            "The Provider's answer was not one Demysto could read ({reason}): {}",
+            snippet(body)
+        ),
+        reason: reason.to_owned(),
+    }
 }
 
 /// Enough of a body to recognise it by, and no more: the whole of one is a page
@@ -365,6 +506,11 @@ struct Chunk {
 #[derive(Deserialize)]
 struct Choice {
     delta: Delta,
+    /// Why the Model stopped, on the event where it did. Absent on every event
+    /// before that one, and on the whole stream at a Provider that does not
+    /// report it.
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]

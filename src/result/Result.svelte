@@ -2,16 +2,22 @@
   import { onMount, tick } from "svelte";
   import { copy } from "../lib/clipboard";
   import {
+    continueAnswer,
     conversation,
     conversations,
     dismiss,
     followUp,
+    models as configuredModels,
     onAnswered,
     onRunning,
     onStreaming,
+    openSettings,
+    retry,
     showConversation,
     stop,
     type Conversation,
+    type RunError,
+    type RunOutcome,
     type Summary,
     type Turn,
   } from "../lib/ipc";
@@ -22,6 +28,11 @@
 
   /** How long a copy button says it copied something. */
   const ACKNOWLEDGED = 1200;
+
+  /** What every control under an answer looks like. */
+  const FOOTER =
+    "cursor-pointer rounded border border-neutral-300 bg-transparent px-1.5 py-0.5 " +
+    "hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800";
 
   /**
    * The Conversation on screen, as the core last had it.
@@ -48,10 +59,22 @@
       onRunning(() => {
         // What the last Turn streamed is not this one's, and the Conversation
         // this one is in may not be the Conversation that was on screen.
-        progress = null;
+        //
+        // Except where the Turn is being carried on: that one is adding to
+        // what is on screen, and clearing it would blank the answer for as
+        // long as the Model takes to say the next word.
+        progress = carryingOn ? progress : null;
+        carryingOn = false;
         refresh();
       }),
-      onAnswered(refresh),
+      onAnswered(() => {
+        // Cleared here rather than only where it is set: a continuation the
+        // backend declines never reaches `onRunning`, and a flag left standing
+        // would keep the next Turn showing the last one's text until its first
+        // hand-over arrived. Every Turn ends here, however it ended.
+        carryingOn = false;
+        refresh();
+      }),
       onStreaming((answer) => (progress = answer)),
     ];
 
@@ -64,6 +87,16 @@
   /** Asks for the Conversation as the core now has it, and shows that. */
   async function refresh() {
     await show(conversation());
+
+    // Fetched the moment a failure is on screen rather than when the field is
+    // opened: a native select builds its menu at the click, before an answer
+    // from the backend could arrive, so a list asked for on focus is a list
+    // that is empty exactly when somebody wants it. Asked again each time,
+    // because Settings may have added a Model since — this window stays open
+    // for the session.
+    if (wrong(turns.at(-1)?.outcome ?? null)) {
+      switchable = await configuredModels();
+    }
   }
 
   /**
@@ -87,11 +120,36 @@
   /**
    * What one Turn is showing: what it produced, or — for the Turn still being
    * answered — as much of it as has arrived. `null` while there is neither.
+   *
+   * A Turn that broke off part-way shows what did arrive: that text is the
+   * user's answer as far as it got, and the error under it says why there is
+   * no more of it yet.
    */
   function said(turn: Turn, last: boolean): string | null {
     if (turn.outcome === null) return last ? progress : null;
 
-    return turn.outcome.status === "failed" ? null : turn.outcome.detail;
+    switch (turn.outcome.status) {
+      case "failed":
+        return null;
+      case "interrupted":
+        return turn.outcome.detail.text;
+      default:
+        return turn.outcome.detail;
+    }
+  }
+
+  /** Why a Turn has no more to show, where something went wrong. */
+  function wrong(outcome: RunOutcome | null): RunError | null {
+    if (outcome === null) return null;
+
+    switch (outcome.status) {
+      case "failed":
+        return outcome.detail;
+      case "interrupted":
+        return outcome.detail.error;
+      default:
+        return null;
+    }
   }
 
   let reading = $state<HTMLElement>();
@@ -103,6 +161,49 @@
 
   /** What the user has typed but not yet asked. */
   let question = $state("");
+
+  /**
+   * Every Model configured, by the name a Conversation is switched to. Filled
+   * in by [`refresh`], which is the only place that knows a failure has just
+   * landed.
+   */
+  let switchable = $state<string[]>([]);
+
+  /**
+   * Whether the Turn about to begin is carrying on the one on screen, so that
+   * what already arrived is not blanked while the rest of it is asked for.
+   */
+  let carryingOn = $state(false);
+
+  /** What went wrong reaching Settings, in the words the backend chose. */
+  let unreachableSettings = $state<string | null>(null);
+
+  /** Asks the Turn on screen again, of the Model the user picked or of the same one. */
+  async function askAgain(model?: string) {
+    pinned = true;
+    progress = null;
+
+    await retry(model);
+  }
+
+  /** Asks the Model for the rest of an answer that broke off part-way. */
+  async function carryOn() {
+    pinned = true;
+    carryingOn = true;
+
+    await continueAnswer();
+  }
+
+  /** Opens Settings where the Provider that refused a key is configured. */
+  async function fix(provider: string) {
+    unreachableSettings = null;
+
+    try {
+      await openSettings(provider);
+    } catch (error) {
+      unreachableSettings = String(error);
+    }
+  }
 
   /** Whether the list of this session's Conversations is open, and what it holds. */
   let listing = $state(false);
@@ -269,9 +370,22 @@
     onclick={onAnswerClick}
     class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto"
   >
+    {#if showing?.warning}
+      <!-- Said before the answer and left there: the Selection is what every
+           Turn in this Conversation is about, so this is about all of them. -->
+      <p
+        class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs
+               text-amber-900 dark:border-amber-900 dark:bg-amber-950
+               dark:text-amber-200"
+      >
+        {showing.warning}
+      </p>
+    {/if}
+
     {#each turns as turn, at (at)}
       {@const last = at === turns.length - 1}
       {@const text = said(turn, last)}
+      {@const problem = wrong(turn.outcome)}
 
       <article class="flex flex-col gap-2">
         {#if turn.question !== null}
@@ -283,26 +397,30 @@
           </p>
         {/if}
 
-        {#if turn.outcome?.status === "failed"}
-          <p class="text-sm text-red-600 dark:text-red-400">
-            {turn.outcome.detail.message}
-          </p>
-        {:else if text === null}
+        {#if text === null && problem === null}
           <p class="text-sm opacity-50">Asking the Model…</p>
         {:else}
-          {#if text !== ""}
+          {#if text !== null && text !== ""}
             <div class="answer select-text">
               {@html render(text)}
             </div>
           {/if}
 
+          {#if problem}
+            <!-- Inside the Conversation and never as a dialog: the user asked a
+                 question and is owed an answer to it, even when the answer is
+                 what went wrong. -->
+            <p class="text-sm text-red-600 select-text dark:text-red-400">
+              {problem.message}
+            </p>
+          {/if}
+
           {#if turn.outcome !== null}
-            <div class="flex items-center gap-3 text-xs opacity-40">
-              {#if text !== ""}
+            <div class="flex flex-wrap items-center gap-3 text-xs">
+              {#if text !== null && text !== ""}
                 <button
                   type="button"
-                  class="cursor-pointer rounded px-1 py-0.5 hover:bg-neutral-100
-                         dark:hover:bg-neutral-800"
+                  class="{FOOTER} opacity-40"
                   onclick={() => copyAnswer(at, text)}
                 >
                   {copied === at ? COPIED : "Copy answer"}
@@ -310,9 +428,57 @@
               {/if}
 
               {#if turn.outcome.status === "stopped"}
-                <span>Stopped</span>
+                <span class="opacity-40">Stopped</span>
+              {/if}
+
+              <!-- Offered on the last Turn alone: what is asked again is the
+                   Turn the Conversation ends on, and a button on an older one
+                   would quietly act somewhere else. -->
+              {#if last && problem}
+                {#if turn.outcome.status === "interrupted"}
+                  <button type="button" class={FOOTER} onclick={carryOn}>
+                    Continue
+                  </button>
+                {/if}
+
+                <button type="button" class={FOOTER} onclick={() => askAgain()}>
+                  Try again
+                </button>
+
+                <select
+                  class="{FOOTER} max-w-40"
+                  value=""
+                  onchange={(event) => {
+                    const picked = event.currentTarget.value;
+                    event.currentTarget.value = "";
+                    if (picked !== "") askAgain(picked);
+                  }}
+                >
+                  <option value="">Ask another Model…</option>
+                  {#each switchable as model (model)}
+                    <option value={model}>{model}</option>
+                  {/each}
+                </select>
+
+                {#if problem.kind === "authentication"}
+                  <!-- The one failure the Conversation cannot fix: the key is
+                       wrong, and the fix is in that Provider's own settings. -->
+                  <button
+                    type="button"
+                    class={FOOTER}
+                    onclick={() => fix(problem.provider)}
+                  >
+                    Open {problem.provider}'s settings
+                  </button>
+                {/if}
               {/if}
             </div>
+
+            {#if last && unreachableSettings}
+              <p class="text-xs text-red-600 dark:text-red-400">
+                {unreachableSettings}
+              </p>
+            {/if}
           {/if}
         {/if}
       </article>

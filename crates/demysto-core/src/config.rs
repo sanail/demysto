@@ -39,10 +39,27 @@ pub(crate) const MODEL_SETTING: &str = "default_model";
 pub(crate) const VISION_SETTING: &str = "default_vision_model";
 /// What the settings call the Hotkey that opens the Palette.
 pub(crate) const PALETTE_SETTING: &str = "palette_hotkey";
+/// And the length past which a Selection is worth a word before it is paid for.
+pub(crate) const LARGE_SELECTION_SETTING: &str = "large_selection";
+
+/// How long a Selection has to be, in characters, before Demysto says so —
+/// where the settings state nothing.
+///
+/// Counted in characters rather than tokens because a token count is a
+/// Provider's arithmetic and this warning has to be composed before anything is
+/// sent. Set high enough that an ordinary paragraph, page or article passes
+/// without a word, and low enough to catch the select-all this exists for (user
+/// story 48).
+pub const DEFAULT_LARGE_SELECTION: u64 = 20_000;
 
 /// Where the preamble names every preset there is, filled in from the presets
 /// themselves so that adding one cannot leave the file describing the old set.
 const PRESETS: &str = "{presets}";
+
+/// Where the preamble states the length Demysto warns at, filled in for the
+/// same reason: a number written into the prose would be a number to keep in
+/// step with the one the code uses.
+const LARGE_SELECTION: &str = "{large_selection}";
 
 /// The prose a fresh installation is met by: what the file is, and what each
 /// field in the example under it means.
@@ -83,7 +100,12 @@ const PREAMBLE: &str = r#"# Demysto's settings.
 # for the one Demysto comes with. It is written as its modifiers and then one
 # key — "Ctrl+Alt+Space" — and a key that types nothing, such as F13, may stand
 # on its own. Settings records one for you if you would rather press it than
-# spell it."#;
+# spell it.
+#
+# `large_selection` is how many characters a Selection may hold before Demysto
+# says so in the Conversation. Nothing is ever cut and nothing is ever refused:
+# it is there so that an accidental select-all is not silently paid for. Leave
+# it out for {large_selection}, or set it to 0 to be told nothing."#;
 
 /// What the user is asked to uncomment.
 ///
@@ -133,7 +155,9 @@ fn template() -> String {
         Spec { name, .. } => format!("#   {name}"),
     });
 
-    let preamble = PREAMBLE.replace(PRESETS, &named.join("\n"));
+    let preamble = PREAMBLE
+        .replace(PRESETS, &named.join("\n"))
+        .replace(LARGE_SELECTION, &DEFAULT_LARGE_SELECTION.to_string());
 
     format!("{preamble}\n\nversion = {VERSION}\n\n{example}")
 }
@@ -152,6 +176,9 @@ pub(crate) struct Config {
     /// Selection is an image. Separate because the cheap everyday Model
     /// usually cannot see.
     pub(crate) default_vision_model: Option<String>,
+    /// How many characters a Selection may hold before Demysto says so, as the
+    /// file states it. `None` where it states nothing, which is the default.
+    pub(crate) large_selection: Option<u64>,
 }
 
 /// A configured LLM endpoint, and the Models it offers.
@@ -176,7 +203,7 @@ pub(crate) struct Provider {
 ///
 /// Deliberately without a derived `Debug`, for the reason [`Provider`] has a
 /// hand-written one: a key that can be printed is a key that ends up in a panic
-/// message or, once ticket 11 has them, a log.
+/// message or a log — see ADR-0010, which is why no key is printable.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Key {
     /// The key to send, and which of the three sources it came out of.
@@ -232,8 +259,7 @@ impl fmt::Debug for ProviderEntry {
 
 impl fmt::Debug for Provider {
     /// Written out rather than derived, so that the key cannot arrive somewhere
-    /// nobody meant to send it through a panic message or, once ticket 11 has
-    /// them, a log. ADR-0002 leaves it readable on disk by its owner; that is
+    /// nobody meant to send it through a panic message or a log. ADR-0002 leaves it readable on disk by its owner; that is
     /// the whole of what it leaves readable.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Provider")
@@ -264,6 +290,17 @@ impl Config {
             .iter()
             .find(|model| model.id == id)
             .map(|model| (provider, model))
+    }
+
+    /// The length a Selection is warned about past, in characters. `None` where
+    /// the user turned the warning off by stating zero — which is the one way
+    /// to be told nothing, because a warning that blocks nothing is not worth a
+    /// second setting to enable it.
+    pub(crate) fn large_selection(&self) -> Option<u64> {
+        match self.large_selection.unwrap_or(DEFAULT_LARGE_SELECTION) {
+            0 => None,
+            characters => Some(characters),
+        }
     }
 
     /// Every Model configured, across every Provider, in the order the file
@@ -448,6 +485,7 @@ pub(crate) fn resolve(path: &Path, file: File, env: &Environment) -> Result<Conf
         providers,
         default_model: file.default_model,
         default_vision_model: file.default_vision_model,
+        large_selection: file.large_selection,
     })
 }
 
@@ -468,6 +506,9 @@ pub(crate) struct File {
     /// give. It is a field only because the file denies unknown ones, and a
     /// file stating a Hotkey has to stay a file Demysto can read.
     pub(crate) palette_hotkey: Option<String>,
+    /// How many characters a Selection may hold before Demysto says so, `None`
+    /// where the file states nothing and [`DEFAULT_LARGE_SELECTION`] decides.
+    pub(crate) large_selection: Option<u64>,
 }
 
 fn first_version() -> u32 {

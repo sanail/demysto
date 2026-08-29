@@ -4,7 +4,9 @@
 //! lives in `demysto-core`, which knows nothing about Tauri; see ADR-0001.
 
 mod commands;
+mod folder;
 mod hotkey;
+mod notify;
 mod palette;
 mod result;
 mod settings;
@@ -18,8 +20,11 @@ pub fn run() {
     let config_dir = match demysto_core::config_dir() {
         Ok(config_dir) => config_dir,
         Err(error) => {
-            // Ticket 11 owns making this visible: a windowed build has no stderr,
-            // so a user launching from Finder or Explorer sees nothing at all.
+            // The one failure with nowhere to be reported: there is no
+            // configuration directory, so there is no log folder inside it
+            // either, and a windowed build has no stderr for a user launching
+            // from Finder or Explorer. What can be done is done — the message
+            // names the variable that fixes it — and the process stops.
             eprintln!("Demysto cannot start: {error}");
             std::process::exit(1);
         }
@@ -35,7 +40,8 @@ pub fn run() {
             .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
                 palette::reveal(app);
             }))
-            .plugin(hotkey::plugin());
+            .plugin(hotkey::plugin())
+            .plugin(tauri_plugin_notification::init());
     }
 
     #[cfg(target_os = "macos")]
@@ -56,10 +62,10 @@ pub fn run() {
 
             // Claimed from the catalogue, so that an Action already carrying a
             // Hotkey answers to it from the first keypress rather than from the
-            // first save. Ticket 11 owns making the report visible without a
-            // window; until then the Settings window shows these same sentences
-            // whenever it is opened, because it claims the set again as it reads
-            // the catalogue.
+            // first save. What could not be claimed goes to the log, which is
+            // where a report with no window to appear on belongs: the Settings
+            // window shows these same sentences whenever it is opened, because
+            // it claims the set again as it reads the catalogue.
             let demysto = app.state::<Demysto>();
             let palette = demysto.palette_hotkey();
 
@@ -68,7 +74,7 @@ pub fn run() {
                 palette.as_deref(),
                 &demysto.catalogue().actions,
             ) {
-                eprintln!("{said}");
+                demysto.note(&said);
             }
 
             #[cfg(target_os = "macos")]
@@ -99,6 +105,11 @@ pub fn run() {
             commands::run,
             commands::follow_up,
             commands::stop,
+            commands::retry,
+            commands::continue_answer,
+            commands::models,
+            commands::open_logs,
+            commands::open_settings,
             commands::conversation,
             commands::conversations,
             commands::show_conversation,

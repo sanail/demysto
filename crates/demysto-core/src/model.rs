@@ -26,6 +26,12 @@ use crate::selection::Kind;
 /// to take over an answer.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Endpoint {
+    /// What the user calls this Provider in their settings file.
+    ///
+    /// Carried so that a refused key can name the Provider whose settings fix
+    /// it: the base URL is what a message about reaching an address should say,
+    /// and the name is what the window opens a section by.
+    pub(crate) provider: String,
     pub(crate) base_url: String,
     /// `None` for a service that has no key to send — see [`key_for`].
     pub(crate) api_key: Option<String>,
@@ -43,10 +49,10 @@ pub(crate) struct Resolved {
 impl fmt::Debug for Endpoint {
     /// Written out rather than derived, for the reason [`Provider`]'s own is:
     /// this is the one place the key sits unwrapped, and a key that can be
-    /// printed is a key that reaches a panic message or, once ticket 11 has
-    /// them, a log.
+    /// printed is a key that reaches a panic message or a log (ADR-0010).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Endpoint")
+            .field("provider", &self.provider)
             .field("base_url", &self.base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "<not shown>"))
             .finish()
@@ -74,7 +80,7 @@ pub(crate) fn resolve(
     let (provider, model) = chosen(config, binding, kind)?;
 
     Ok(Resolved {
-        endpoint: endpoint_for(&provider.base_url, &provider.key)?,
+        endpoint: endpoint_for(&provider.name, &provider.base_url, &provider.key)?,
         model: model.id.clone(),
     })
 }
@@ -85,8 +91,13 @@ pub(crate) fn resolve(
 /// Takes the two fields it reaches a Provider by rather than the Provider, so
 /// that the settings window can ask this of a Provider that is still being
 /// typed — one that has no Models yet, and is in no file.
-pub(crate) fn endpoint_for(base_url: &str, key: &Key) -> Result<Endpoint, RunError> {
+pub(crate) fn endpoint_for(
+    provider: &str,
+    base_url: &str,
+    key: &Key,
+) -> Result<Endpoint, RunError> {
     Ok(Endpoint {
+        provider: provider.to_owned(),
         base_url: base_url.to_owned(),
         api_key: key_for(key)?.map(ToOwned::to_owned),
     })
@@ -104,7 +115,9 @@ pub(crate) fn key_for(key: &Key) -> Result<Option<&str>, RunError> {
     match key {
         Key::Found { key, .. } => Ok(Some(key)),
         Key::NotNeeded => Ok(None),
-        Key::Missing(missing) => Err(RunError::Configuration(missing.clone())),
+        Key::Missing(missing) => Err(RunError::Configuration {
+            message: missing.clone(),
+        }),
     }
 }
 
@@ -164,29 +177,35 @@ fn offered(config: &Config) -> String {
 }
 
 fn bound_to_nothing(config: &Config, name: &str) -> RunError {
-    RunError::Configuration(format!(
+    RunError::Configuration {
+        message: format!(
         "This Action is bound to the Model \"{name}\", and no Provider in {} offers one by that \
          name. {}",
         config.path.display(),
         offered(config)
-    ))
+    ),
+    }
 }
 
 fn nominates_nothing(config: &Config, setting: &str, name: &str) -> RunError {
-    RunError::Configuration(format!(
-        "{setting} in {} names the Model \"{name}\", and no Provider there offers one by that \
+    RunError::Configuration {
+        message: format!(
+            "{setting} in {} names the Model \"{name}\", and no Provider there offers one by that \
          name. {}",
-        config.path.display(),
-        offered(config)
-    ))
+            config.path.display(),
+            offered(config)
+        ),
+    }
 }
 
 fn nothing_nominated(config: &Config) -> RunError {
-    RunError::Configuration(format!(
-        "No {MODEL_SETTING} is nominated in {}. {}",
-        config.path.display(),
-        offered(config)
-    ))
+    RunError::Configuration {
+        message: format!(
+            "No {MODEL_SETTING} is nominated in {}. {}",
+            config.path.display(),
+            offered(config)
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -253,6 +272,7 @@ mod tests {
             providers,
             default_model: default.map(ToOwned::to_owned),
             default_vision_model: vision.map(ToOwned::to_owned),
+            large_selection: None,
         }
     }
 
@@ -298,7 +318,7 @@ mod tests {
         let error = resolve(config, binding, kind).expect_err("the chain should not resolve");
 
         assert!(
-            matches!(error, RunError::Configuration(_)),
+            matches!(error, RunError::Configuration { message: _ }),
             "a setting is what would fix it: {error:?}"
         );
 

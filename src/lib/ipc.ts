@@ -5,6 +5,12 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 export type Status = {
   version: string;
   config_dir: string;
+  /**
+   * How long a Selection may be before Demysto says so, where the settings
+   * state nothing — so that the window can name it rather than repeat a number
+   * of its own.
+   */
+  large_selection_default: number;
 };
 
 /** Mirrors `demysto_core::Selection`. */
@@ -85,23 +91,43 @@ export function onCapture(
   );
 }
 
-/** Mirrors `demysto_core::RunError`. */
-export type RunError = {
-  kind:
-    | "configuration"
-    | "nothing_to_run"
-    | "no_such_action"
-    | "unreachable"
-    | "provider"
-    | "malformed";
-  message: string;
-};
+/**
+ * Mirrors `demysto_core::RunError`: why a Turn produced no answer, or stopped
+ * producing one.
+ *
+ * The kinds exist so that this window can offer a different affordance per
+ * kind — the message is composed in the backend and shown as it is.
+ */
+export type RunError =
+  /** The Provider refused the credentials, and named itself so this can link there. */
+  | { kind: "authentication"; message: string; provider: string }
+  /**
+   * The Provider's answer was not the contract's shape. `reason` is what was
+   * wrong with it without the quotation of what arrived that `message` carries
+   * — it is what the log is given, and this window shows the message.
+   */
+  | { kind: "malformed"; message: string; reason: string }
+  | {
+      kind:
+        | "configuration"
+        | "nothing_to_run"
+        | "no_such_action"
+        | "unreachable"
+        | "timed_out"
+        | "provider";
+      message: string;
+    };
 
 /** Mirrors `demysto_core::RunOutcome`. */
 export type RunOutcome =
   | { status: "answered"; detail: string }
   /** The user stopped it, keeping whatever had already arrived. */
   | { status: "stopped"; detail: string }
+  /**
+   * The answer began and then broke off. What arrived is kept, and the Model
+   * can be asked for the rest of it.
+   */
+  | { status: "interrupted"; detail: { text: string; error: RunError } }
   | { status: "failed"; detail: RunError };
 
 /** Mirrors `demysto_core::Turn`. */
@@ -121,6 +147,13 @@ export type Conversation = {
   /** The Action the opening Run ran, `null` when it was not one Demysto has. */
   action: Action | null;
   turns: Turn[];
+  /** The Model this Conversation was switched to, `null` while it has not been. */
+  model: string | null;
+  /**
+   * What the user was told about the Selection before anything was sent — that
+   * it is unusually large. `null` when there was nothing to say.
+   */
+  warning: string | null;
 };
 
 /** Mirrors `demysto_core::Summary`: one line of the list of Conversations. */
@@ -158,6 +191,55 @@ export function followUp(question: string): Promise<void> {
 /** Stops the Turn under way, keeping what has already arrived. */
 export function stop(): Promise<void> {
   return invoke<void>("stop");
+}
+
+/**
+ * Asks the last Turn of the Conversation again, optionally of another Model.
+ *
+ * The retry and the Model switch are one call because switching a Model without
+ * asking anything would leave the user looking at the same failure. A Model
+ * named here stands for the rest of the Conversation.
+ *
+ * Answers for the reason [`run`] does: the reply arrives through the events.
+ */
+export function retry(model?: string): Promise<void> {
+  return invoke<void>("retry", { model: model ?? null });
+}
+
+/** Asks the Model for the rest of an answer that broke off part-way. */
+export function continueAnswer(): Promise<void> {
+  return invoke<void>("continue_answer");
+}
+
+/** Every Model configured, by the name a Conversation is switched to. */
+export function models(): Promise<string[]> {
+  return invoke<string[]>("models");
+}
+
+/**
+ * Brings Settings up, at one Provider where one is named — which is how a
+ * refused key is fixed from where it is reported.
+ */
+export function openSettings(provider?: string): Promise<void> {
+  return invoke<void>("open_settings", { provider: provider ?? null });
+}
+
+/**
+ * Every Provider Settings should open at, as the backend asks for one.
+ */
+export function onProviderWanted(
+  handle: (provider: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("settings://provider", (event) => handle(event.payload));
+}
+
+/**
+ * Opens the folder Demysto writes its logs in, so that a bug report can carry
+ * them. Rejects with a whole sentence when the file manager could not be
+ * reached.
+ */
+export function openLogs(): Promise<void> {
+  return invoke<void>("open_logs");
 }
 
 /**
@@ -262,6 +344,12 @@ export type Settings = {
   default_vision_model: string | null;
   /** The Hotkey that opens the Palette, `null` for the one Demysto comes with. */
   palette_hotkey: string | null;
+  /**
+   * How many characters a Selection may hold before Demysto says so, `null`
+   * where the file states nothing and `Status.large_selection_default` decides.
+   * Zero is a user who would rather not be told.
+   */
+  large_selection: number | null;
 };
 
 /** Mirrors `demysto_core::KeyEdit`: what a save does to a Provider's key. */
@@ -288,6 +376,8 @@ export type Edit = {
   default_model: string | null;
   default_vision_model: string | null;
   palette_hotkey: string | null;
+  /** `null` takes the setting out of the file; zero is being told nothing. */
+  large_selection: number | null;
 };
 
 /**

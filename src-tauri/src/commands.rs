@@ -112,6 +112,43 @@ pub fn stop(demysto: State<'_, Demysto>) {
     demysto.stop();
 }
 
+/// Asks the last Turn of the Conversation on screen again, optionally of
+/// another Model — the retry and the Model switch a failed Turn is offered.
+///
+/// Returns for the reason [`run`] does: the answer reaches the window as it
+/// arrives rather than as this call's result.
+#[tauri::command]
+pub fn retry<R: Runtime>(app: AppHandle<R>, model: Option<String>) {
+    crate::result::retry(&app, model);
+}
+
+/// Asks the Model for the rest of an answer that broke off part-way.
+#[tauri::command]
+pub fn continue_answer<R: Runtime>(app: AppHandle<R>) {
+    crate::result::continue_answer(&app);
+}
+
+/// Every Model configured, by the name one is switched to, so that the
+/// Conversation window can offer somewhere else to ask.
+#[tauri::command]
+pub fn models(demysto: State<'_, Demysto>) -> Vec<String> {
+    demysto.models()
+}
+
+/// Brings Settings up, at one Provider where one is named — which is how a
+/// refused key is fixed from where it is reported.
+#[tauri::command]
+pub fn open_settings<R: Runtime>(app: AppHandle<R>, provider: Option<String>) {
+    crate::settings::reveal_at(&app, provider);
+}
+
+/// Opens the folder Demysto writes its logs in, so that a bug report can carry
+/// them.
+#[tauri::command]
+pub fn open_logs(demysto: State<'_, Demysto>) -> Result<(), String> {
+    crate::folder::open(&demysto.logs_dir())
+}
+
 /// The Conversation the window is showing, for one that mounted after the Turn
 /// it is showing began.
 #[tauri::command]

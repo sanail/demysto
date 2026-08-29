@@ -19,6 +19,7 @@ mod desktop;
 mod files;
 mod hotkey;
 mod language;
+mod log;
 mod model;
 mod paths;
 mod provider;
@@ -31,7 +32,7 @@ mod stream;
 pub use action::{Action, Parameter};
 pub use capture::{Capture, CaptureError, CaptureOutcome, Captured};
 pub use catalogue::{ActionEdit, ActionError, ActionStanding, Catalogue, DefinedAction};
-pub use config::ConfigError;
+pub use config::{ConfigError, DEFAULT_LARGE_SELECTION};
 pub use conversation::{Conversation, Summary, Turn};
 pub use paths::{config_dir, ConfigDirError, CONFIG_DIR_ENV};
 pub use run::{RunError, RunOutcome};
@@ -80,6 +81,13 @@ pub struct Demysto {
     /// rather than a constant so that the suite can take the waiting out of it,
     /// the way it takes it out of a Capture.
     throttle: Duration,
+    /// How long a Provider has to answer before Demysto stops waiting. A field
+    /// for the reason the throttle is one: a timeout nobody can reach in a test
+    /// is a timeout nobody has tested.
+    timeout: Duration,
+    /// Where this session says what it did, for a bug report to carry. What it
+    /// records and what it deliberately does not is `log`'s.
+    log: log::Log,
 }
 
 /// What one Turn asks, before anything has been put to a Provider: which Model
@@ -95,6 +103,20 @@ struct Asking {
     /// that can see.
     kind: Kind,
     prompt: String,
+    /// What already arrived for this Turn, when it is being continued after a
+    /// stream broke; empty for every Turn asked for the first time.
+    delivered: String,
+}
+
+impl From<conversation::Asked> for Asking {
+    fn from(asked: conversation::Asked) -> Self {
+        Self {
+            binding: asked.binding,
+            kind: asked.kind,
+            prompt: asked.prompt,
+            delivered: asked.delivered,
+        }
+    }
 }
 
 /// The keys a Hotkey may be on its own, because they type nothing.
@@ -113,6 +135,25 @@ pub struct Status {
     pub version: String,
     /// Where this instance reads and writes its configuration.
     pub config_dir: PathBuf,
+    /// How long a Selection may be before Demysto says so, where the settings
+    /// state nothing. Reported so that the window can say what leaving the
+    /// field blank means rather than repeat a number of its own.
+    pub large_selection_default: u64,
+}
+
+/// A count with its thousands marked off, because the number in a warning about
+/// size is the whole of what the warning says and "43120" is not a size anybody
+/// reads at a glance.
+fn grouped(count: u64) -> String {
+    let digits = count.to_string();
+
+    digits
+        .as_bytes()
+        .rchunks(3)
+        .rev()
+        .map(|group| String::from_utf8_lossy(group).into_owned())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 impl Demysto {
@@ -139,16 +180,22 @@ impl Demysto {
         // key nobody can reason about (the spec's *Core modules*).
         let env = Environment::snapshot();
 
+        let version = version.into();
+        let log = log::Log::new(&config_dir);
+        log.started(&version, &config_dir);
+
         Self {
             config: RwLock::new(config::load(&config_dir, &env)),
             env,
             config_dir,
-            version: version.into(),
+            version,
             capture,
             last_capture: Mutex::new(None),
             store: Mutex::new(Store::new()),
             stopping: Mutex::new(None),
             throttle: stream::THROTTLE,
+            timeout: provider::REQUEST_TIMEOUT,
+            log,
         }
     }
 
@@ -158,6 +205,21 @@ impl Demysto {
     fn unthrottled(mut self) -> Self {
         self.throttle = Duration::ZERO;
         self
+    }
+
+    /// The same facade that gives up on a Provider almost at once, so that the
+    /// suite can reach the timeout without waiting two minutes for it.
+    #[cfg(test)]
+    fn impatient(mut self) -> Self {
+        self.timeout = Duration::from_millis(200);
+        self
+    }
+
+    /// Re-reads the settings the way saving them does, so that the suite can
+    /// change them under a Conversation as the settings window does.
+    #[cfg(test)]
+    fn settings_changed(&self) {
+        *self.config.write().unwrap() = config::load(&self.config_dir, &self.env);
     }
 
     pub fn config_dir(&self) -> &Path {
@@ -328,10 +390,9 @@ impl Demysto {
     /// said about it so far travel as the Turns before this one, which is what
     /// makes a follow-up cost nothing but typing.
     pub fn follow_up(&self, question: &str, showing: impl FnMut(&str)) -> RunOutcome {
-        // A follow-up goes to the Model the Action that opened the Conversation
-        // resolves to, on the Selection that Conversation is about: switching
-        // Model mid-Conversation is ticket 11's, alongside the retry it belongs
-        // with.
+        // A follow-up goes to the Model the Conversation resolves to, on the
+        // Selection it is about — which is the Action's binding until a retry
+        // switched it, and that Model from then on.
         let (id, asking) = {
             let mut store = self.store.lock().unwrap();
             let Some(conversation) = store.follow_up(question) else {
@@ -344,6 +405,7 @@ impl Demysto {
                     binding: conversation.binding().map(ToOwned::to_owned),
                     kind: conversation.kind(),
                     prompt: question.to_owned(),
+                    delivered: String::new(),
                 },
             )
         };
@@ -352,6 +414,86 @@ impl Demysto {
         self.store.lock().unwrap().answered(id, outcome.clone());
 
         outcome
+    }
+
+    /// Asks the last Turn of the Conversation on screen again, optionally
+    /// somewhere else.
+    ///
+    /// `model` is the Model to switch this Conversation to, `None` for trying
+    /// again with nothing changed — the two affordances a failed Turn is
+    /// offered (user stories 20 and 44), which are one operation because
+    /// switching a Model without asking anything would leave the user looking
+    /// at the same failure.
+    ///
+    /// The Turn is asked again rather than added to: a retry is the same
+    /// question, and a Conversation that accumulated one copy of it per attempt
+    /// would send every failed attempt as context for the next.
+    pub fn retry(&self, model: Option<&str>, showing: impl FnMut(&str)) -> RunOutcome {
+        // Bound rather than passed straight in, so that the store is let go of
+        // before the Turn is asked: a temporary guard would live to the end of
+        // the whole statement, and the asking takes the same lock.
+        let asked = self.store.lock().unwrap().retrying(model);
+
+        self.again(asked, showing)
+    }
+
+    /// Asks the Model for the rest of an answer that broke off part-way (user
+    /// story 46).
+    ///
+    /// What already arrived is put back to the Model as its own words, and what
+    /// comes back is added to it, so that the Turn ends up holding one answer.
+    pub fn continue_answer(&self, showing: impl FnMut(&str)) -> RunOutcome {
+        let asked = self.store.lock().unwrap().continuing();
+
+        self.again(asked, showing)
+    }
+
+    /// Whether the Conversation on screen has a Turn to try again or carry on,
+    /// so that the window can show that it is under way before it is.
+    ///
+    /// Answers with whether there was one, the way [`Self::about_to_follow_up`]
+    /// does.
+    pub fn about_to_retry(&self) -> bool {
+        self.store
+            .lock()
+            .unwrap()
+            .showing()
+            .and_then(|showing| showing.turns.last())
+            .is_some_and(|turn| turn.outcome.is_some())
+    }
+
+    /// Asks a Turn the store has put back to being asked, however it came to be
+    /// one: a retry, or a continuation.
+    fn again(&self, asked: Option<conversation::Asked>, showing: impl FnMut(&str)) -> RunOutcome {
+        let Some(asked) = asked else {
+            return RunOutcome::Failed(run::nothing_to_retry());
+        };
+
+        let id = asked.id;
+        let outcome = self.ask(id, asked.into(), showing);
+
+        self.store.lock().unwrap().answered(id, outcome.clone());
+
+        outcome
+    }
+
+    /// Every Model configured, by the name one is switched to, so that the
+    /// Conversation window can offer somewhere else to ask (user story 20).
+    pub fn models(&self) -> Vec<String> {
+        self.models_configured()
+    }
+
+    /// Where this session's log files are, for the button in Settings that
+    /// opens the folder (user story 63).
+    pub fn logs_dir(&self) -> PathBuf {
+        self.log.dir().to_owned()
+    }
+
+    /// Records something the interface would otherwise only have said on a
+    /// window that may never be opened — a Hotkey nobody could claim, an
+    /// Action file nobody could read.
+    pub fn note(&self, line: &str) {
+        self.log.said(line);
     }
 
     /// Opens the Conversation a Run of `action` fills, on what was captured,
@@ -363,10 +505,48 @@ impl Demysto {
             .and_then(CaptureOutcome::selection)
             .cloned();
 
-        self.store
-            .lock()
-            .unwrap()
-            .open(catalogue::named(&self.config_dir, action), selection)
+        // Composed here rather than where the request is made, because here is
+        // before: the interface declares the Run, shows the window, and only
+        // then runs it, so a warning put on the Conversation now is on screen
+        // while the Model is still being asked — which is the whole of what
+        // "before you spend tokens on it" can mean for something that is not
+        // going to block (user story 48).
+        let warning = selection
+            .as_ref()
+            .and_then(|selection| self.warning(selection));
+
+        self.store.lock().unwrap().open(
+            catalogue::named(&self.config_dir, action),
+            selection,
+            warning,
+        )
+    }
+
+    /// What the user is told about a Selection large enough to be worth knowing
+    /// about before it is paid for. `None` for one that is not, and for a user
+    /// who has turned the warning off.
+    ///
+    /// It warns and does not refuse. Nothing is cut and nothing is split — the
+    /// spec puts both out of scope for v1 — so the only honest thing to do with
+    /// a large Selection is send it and say that it was large.
+    fn warning(&self, selection: &Selection) -> Option<String> {
+        let held = self.config.read().unwrap();
+        let config = held.as_ref().ok()?;
+
+        let at = config.large_selection()?;
+        let characters = selection.as_text().chars().count() as u64;
+
+        (characters > at).then(|| {
+            format!(
+                "This Selection is {} characters long, which is over the {} that \
+                 {} in {} is set to. It was sent whole — nothing was cut — so it costs what \
+                 that costs.",
+                grouped(characters),
+                grouped(at),
+                config::LARGE_SELECTION_SETTING,
+                config.path.display(),
+            )
+        })
     }
 
     /// Asks the Turn that opens a Conversation, which the Action asks on the
@@ -397,6 +577,7 @@ impl Demysto {
                 binding: action.model.clone(),
                 kind: selection.kind(),
                 prompt: action.prompt(selection, parameters),
+                delivered: String::new(),
             },
             showing,
         )
@@ -405,19 +586,39 @@ impl Demysto {
     /// Puts the Conversation to the Model `asking` resolves to, with its prompt
     /// as what the Turn now being asked sends.
     fn ask(&self, id: u64, asking: Asking, mut showing: impl FnMut(&str)) -> RunOutcome {
-        // Resolved before the Turn is recorded as asked: a Run that has nowhere
-        // to go has not asked anything, and the settings are the only place the
-        // answer to that is. Everything the request needs comes out of them
-        // here, and the lock goes with it: a Provider has two minutes to answer,
-        // and saving the settings must not be two minutes of a frozen window.
-        let resolved = match self.resolving(&asking) {
-            Ok(resolved) => resolved,
-            Err(error) => return RunOutcome::Failed(error),
+        // Recorded before anything is resolved, so that a Turn which never
+        // reached a Provider is still a Turn — one the user can try again once
+        // they have fixed what stopped it (user story 44). Nothing is sent by
+        // recording it; what a Turn holds and what a Turn cost are separate
+        // facts, and only the second needs the settings to be right.
+        let Asking {
+            binding,
+            kind,
+            prompt,
+            delivered,
+        } = asking;
+
+        let Some(said) = self.store.lock().unwrap().asking(id, prompt) else {
+            return RunOutcome::stopped_short(delivered, run::no_conversation());
         };
 
-        let Some(said) = self.store.lock().unwrap().asking(id, asking.prompt) else {
-            return RunOutcome::Failed(run::no_conversation());
+        // Everything the request needs comes out of the settings here, and the
+        // lock goes with it: a Provider has two minutes to answer, and saving
+        // the settings must not be two minutes of a frozen window.
+        let resolved = match self.resolving(binding.as_deref(), kind) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                self.log.failed(&error);
+
+                // What a continuation was already carrying survives a Provider
+                // it could not reach: the settings changing under an answer
+                // that broke off is no reason to lose the half of it that did
+                // arrive.
+                return RunOutcome::stopped_short(delivered, error);
+            }
         };
+
+        self.log.asking(&resolved, said.len());
 
         // Installed before the request and taken down after it, so that Stop
         // between two Runs stops neither — and released before the waiting
@@ -426,8 +627,8 @@ impl Demysto {
         let stopping = Stopping::default();
         *self.stopping.lock().unwrap() = Some(stopping.clone());
 
-        let mut assembly = Assembly::new(self.throttle);
-        let asked = provider::answer(&resolved, &said, &stopping, |fragment| {
+        let mut assembly = Assembly::continuing(self.throttle, delivered);
+        let asked = provider::answer(&resolved, &said, self.timeout, &stopping, |fragment| {
             if let Some(answer) = assembly.push(fragment) {
                 showing(&answer);
             }
@@ -435,19 +636,29 @@ impl Demysto {
 
         *self.stopping.lock().unwrap() = None;
 
-        match asked {
-            Err(error) => RunOutcome::Failed(error),
+        let outcome = match asked {
+            // What arrived before it broke is the user's, and is offered the
+            // rest of itself rather than thrown away (user story 46). Nothing
+            // having arrived leaves nothing to keep, and that is a plain
+            // failure with a retry on it.
+            Err(error) => RunOutcome::stopped_short(assembly.text(), error),
             Ok(()) if stopping.stopped() => RunOutcome::Stopped(assembly.text()),
             Ok(()) => RunOutcome::Answered(assembly.text()),
-        }
+        };
+
+        self.log.answered(&outcome);
+
+        outcome
     }
 
     /// Which Model this Turn goes to, and how to reach it — taken out of the
     /// settings so that the request can be made without holding them.
-    fn resolving(&self, asking: &Asking) -> Result<model::Resolved, RunError> {
+    fn resolving(&self, binding: Option<&str>, kind: Kind) -> Result<model::Resolved, RunError> {
         match self.config.read().unwrap().as_ref() {
-            Err(error) => Err(RunError::Configuration(error.to_string())),
-            Ok(config) => model::resolve(config, asking.binding.as_deref(), asking.kind),
+            Err(error) => Err(RunError::Configuration {
+                message: error.to_string(),
+            }),
+            Ok(config) => model::resolve(config, binding, kind),
         }
     }
 
@@ -528,7 +739,19 @@ impl Demysto {
                 continue;
             };
 
-            if let Err(RunError::Provider(message)) = self.verify(provider, &model.id) {
+            // Both ways a Provider can refuse a key: one that says the key is
+            // wrong, and one that says the request is. Only the first is
+            // reliably an authentication failure, and both are the Provider
+            // declining what was typed rather than the network declining to
+            // carry it.
+            let refused = match self.verify(provider, &model.id) {
+                Err(RunError::Provider { message } | RunError::Authentication { message, .. }) => {
+                    Some(message)
+                }
+                _ => None,
+            };
+
+            if let Some(message) = refused {
                 return Err(ConfigError::Refused(format!(
                     "The Provider \"{}\" did not accept this key, so nothing was saved. \
                      {message}",
@@ -553,7 +776,10 @@ impl Demysto {
     /// moment to want the list is while configuring a Provider that has not
     /// been saved yet.
     pub fn models_offered_by(&self, provider: &ProviderEdit) -> Result<Vec<String>, RunError> {
-        provider::models(&settings::endpoint(&self.config_dir, &self.env, provider)?)
+        provider::models(
+            &settings::endpoint(&self.config_dir, &self.env, provider)?,
+            self.timeout,
+        )
     }
 
     /// Whether a Provider accepts a key, asked of the Provider itself (user
@@ -565,6 +791,7 @@ impl Demysto {
         provider::verify(
             &settings::endpoint(&self.config_dir, &self.env, provider)?,
             model,
+            self.timeout,
         )
     }
 
@@ -572,6 +799,7 @@ impl Demysto {
         Status {
             version: self.version.clone(),
             config_dir: self.config_dir.clone(),
+            large_selection_default: DEFAULT_LARGE_SELECTION,
         }
     }
 }
@@ -614,6 +842,13 @@ mod tests {
         /// that are about what the clock holds back rather than what arrives.
         fn throttled(mut self) -> Self {
             self.demysto.throttle = stream::THROTTLE;
+            self
+        }
+
+        /// The same Demysto that gives up on a Provider almost at once, for the
+        /// tests that are about what happens when one never answers.
+        fn impatient(mut self) -> Self {
+            self.demysto = self.demysto.impatient();
             self
         }
     }
@@ -1036,7 +1271,7 @@ mod tests {
     }
 
     #[test]
-    fn a_provider_that_refuses_says_so_in_its_own_words() {
+    fn a_provider_that_refuses_the_key_says_so_in_its_own_words_and_names_itself() {
         let mut server = Server::new();
         let _endpoint = server
             .mock("POST", "/v1/chat/completions")
@@ -1044,14 +1279,41 @@ mod tests {
             .with_body(json!({ "error": { "message": "Incorrect API key provided" } }).to_string())
             .create();
 
-        let RunOutcome::Failed(RunError::Provider(message)) =
+        let RunOutcome::Failed(RunError::Authentication { message, provider }) =
             run(&ready_to_run(&server, "a paragraph"))
         else {
-            panic!("a refusal should be reported as one");
+            panic!("a refused key should be reported as one");
         };
 
         assert!(message.contains("Incorrect API key provided"), "{message}");
         assert!(message.contains("401"), "{message}");
+
+        // Which Provider, so that the window can offer the settings that fix it
+        // rather than the settings in general (user story 45).
+        assert_eq!(provider, "a provider");
+    }
+
+    #[test]
+    fn a_key_the_provider_is_not_allowed_to_use_here_is_a_refused_key_too() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(403)
+            .with_body(
+                json!({ "error": { "message": "Your account is not permitted" } }).to_string(),
+            )
+            .create();
+
+        let RunOutcome::Failed(RunError::Authentication { message, .. }) =
+            run(&ready_to_run(&server, "a paragraph"))
+        else {
+            panic!("a forbidden request should be reported as a refused key");
+        };
+
+        assert!(
+            message.contains("Your account is not permitted"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -1063,7 +1325,10 @@ mod tests {
             .with_body("<html>Bad Gateway</html>")
             .create();
 
-        let RunOutcome::Failed(RunError::Provider(message)) =
+        // A Provider's own fault rather than the key's, and reported as the
+        // kind it is: nothing in Settings would fix a server that is unwell,
+        // so this is the failure that is offered a retry and not a route there.
+        let RunOutcome::Failed(RunError::Provider { message }) =
             run(&ready_to_run(&server, "a paragraph"))
         else {
             panic!("a refusal should be reported as one");
@@ -1217,7 +1482,7 @@ mod tests {
 
         assert!(matches!(
             run(&ready_to_run(&server, "a paragraph")),
-            RunOutcome::Failed(RunError::Malformed(_))
+            RunOutcome::Failed(RunError::Malformed { .. })
         ));
     }
 
@@ -1231,7 +1496,7 @@ mod tests {
 
         assert!(matches!(
             run(&ready_to_run(&server, "a paragraph")),
-            RunOutcome::Failed(RunError::Malformed(_))
+            RunOutcome::Failed(RunError::Malformed { .. })
         ));
     }
 
@@ -1247,7 +1512,7 @@ mod tests {
 
         assert!(matches!(
             run(&ready_to_run(&server, "a paragraph")),
-            RunOutcome::Failed(RunError::Malformed(_))
+            RunOutcome::Failed(RunError::Malformed { .. })
         ));
     }
 
@@ -1257,7 +1522,7 @@ mod tests {
         let demysto = demysto_asking(fake::over(&desktop), "http://127.0.0.1:1/v1");
         demysto.capture();
 
-        let RunOutcome::Failed(RunError::Unreachable(message)) = run(&demysto) else {
+        let RunOutcome::Failed(RunError::Unreachable { message }) = run(&demysto) else {
             panic!("an endpoint that never answered should be reported as unreachable");
         };
 
@@ -1274,7 +1539,7 @@ mod tests {
 
         assert!(matches!(
             run(&demysto),
-            RunOutcome::Failed(RunError::NothingToRun(_))
+            RunOutcome::Failed(RunError::NothingToRun { message: _ })
         ));
     }
 
@@ -1284,7 +1549,7 @@ mod tests {
         let demysto = demysto(fake::over(&desktop));
         demysto.capture();
 
-        let RunOutcome::Failed(RunError::Configuration(message)) = run(&demysto) else {
+        let RunOutcome::Failed(RunError::Configuration { message }) = run(&demysto) else {
             panic!("a Run with nothing configured should say what to configure");
         };
 
@@ -1481,7 +1746,8 @@ mod tests {
         let demysto = demysto_asking(fake::over(&desktop), "http://127.0.0.1:1/v1");
         demysto.capture();
 
-        let RunOutcome::Failed(RunError::NoSuchAction(message)) = running(&demysto, "explan", &[])
+        let RunOutcome::Failed(RunError::NoSuchAction { message }) =
+            running(&demysto, "explan", &[])
         else {
             panic!("an Action Demysto does not have should be reported as one");
         };
@@ -1739,14 +2005,14 @@ mod tests {
         following_up(&demysto, "and then?");
 
         // A failure is an entry in the Conversation rather than something that
-        // replaces it, per the spec's *Errors*. Ticket 11 gives it a retry.
+        // replaces it, per the spec's *Errors*, and the retry hangs off it.
         let turns = turns(&demysto);
 
         assert_eq!(turns.len(), 2);
         assert!(
             turns.iter().all(|(_, outcome)| matches!(
                 outcome,
-                Some(RunOutcome::Failed(RunError::Provider(_)))
+                Some(RunOutcome::Failed(RunError::Provider { message: _ }))
             )),
             "{turns:?}"
         );
@@ -1761,7 +2027,7 @@ mod tests {
 
         assert!(matches!(
             following_up(&demysto, "and then?"),
-            RunOutcome::Failed(RunError::NothingToRun(_))
+            RunOutcome::Failed(RunError::NothingToRun { message: _ })
         ));
     }
 
@@ -1851,7 +2117,7 @@ mod tests {
             )
         );
 
-        let RunOutcome::Failed(RunError::Configuration(message)) =
+        let RunOutcome::Failed(RunError::Configuration { message }) =
             run(&ready_with(&settings, "a paragraph"))
         else {
             panic!("a Default Model naming nothing should fail for want of a setting");
@@ -1868,7 +2134,7 @@ mod tests {
                         [[providers]]\nname = \"mine\"\nbase_url = \"http://127.0.0.1:1/v1\"\n\
                         models = [{ id = \"a-model\" }]\n";
 
-        let RunOutcome::Failed(RunError::Configuration(message)) =
+        let RunOutcome::Failed(RunError::Configuration { message }) =
             run(&ready_with(settings, "a paragraph"))
         else {
             panic!("a Provider with no key should fail for want of one");
@@ -1965,7 +2231,8 @@ mod tests {
         let demysto = ready_to_run(&server, "a paragraph");
 
         // Neither a base URL nor a preset to take one from: nothing to ask.
-        let Err(RunError::Configuration(message)) = demysto.models_offered_by(&drafted("imagined"))
+        let Err(RunError::Configuration { message }) =
+            demysto.models_offered_by(&drafted("imagined"))
         else {
             panic!("a Provider that answers nowhere should fail for want of a setting");
         };
@@ -2002,6 +2269,7 @@ mod tests {
             default_model: default.map(ToOwned::to_owned),
             default_vision_model: None,
             palette_hotkey: None,
+            large_selection: None,
         }
     }
 
@@ -2113,6 +2381,7 @@ mod tests {
             default_model: Some("openai/gpt-4o-mini".to_owned()),
             default_vision_model: Some("openai/gpt-4o".to_owned()),
             palette_hotkey: Some("Ctrl+Alt+Space".to_owned()),
+            large_selection: Some(1_000),
         };
 
         let written = saved(&demysto, &edit);
@@ -2136,6 +2405,7 @@ mod tests {
             Some("MY_OWN_KEY")
         );
         assert_eq!(written.providers[0].models, edit.providers[0].models);
+        assert_eq!(written.large_selection, Some(1_000));
         assert_eq!(
             written.providers[1].base_url.as_deref(),
             Some("http://localhost:9999/v1")
@@ -2721,7 +2991,8 @@ mod tests {
             ..drafted("a provider")
         };
 
-        let Err(RunError::Provider(message)) = demysto.verify(&typed, "a-model") else {
+        let Err(RunError::Authentication { message, .. }) = demysto.verify(&typed, "a-model")
+        else {
             panic!("a key the Provider refused should be reported as its refusal");
         };
 
@@ -3432,7 +3703,7 @@ mod tests {
         );
         demysto.delete_action("rewrite-plainly").unwrap();
 
-        let RunOutcome::Failed(RunError::NoSuchAction(message)) =
+        let RunOutcome::Failed(RunError::NoSuchAction { message }) =
             running(&demysto, "rewrite-plainly", &[])
         else {
             panic!("an Action that has been deleted should be reported as one Demysto lacks");
@@ -3459,6 +3730,7 @@ mod tests {
                 default_model: Some(String::new()),
                 default_vision_model: Some("   ".to_owned()),
                 palette_hotkey: Some("   ".to_owned()),
+                large_selection: None,
             },
         );
 
@@ -3588,5 +3860,676 @@ mod tests {
         let next = Demysto::with_capture(dir.path(), "1.2.3", fake::over(&desktop));
 
         assert!(next.conversations().is_empty());
+    }
+
+    // Errors, interruption and logs.
+
+    /// What a raw server answers one request with.
+    enum Says {
+        /// These bytes, and then the connection closed. Written without a
+        /// `Content-Length` and without chunking, so the body ends where the
+        /// connection does — which is how a stream that was cut short reaches
+        /// the reader as one.
+        This(String),
+        /// Nothing at all, holding the connection open past anything a test
+        /// waits for.
+        Nothing,
+        /// These bytes, and then silence: a stream that started and stopped
+        /// without ever closing, which is what a Provider that has gone away
+        /// mid-answer looks like from here.
+        ThenNothing(String),
+    }
+
+    /// A server that answers each connection with exactly what it was told to,
+    /// and remembers what was asked of it.
+    ///
+    /// Here rather than through the mock server because the two failures this
+    /// is for are ones a well-behaved HTTP library will not produce on request:
+    /// a stream that stops in the middle of an answer, and an endpoint that
+    /// accepts a connection and then says nothing.
+    struct Raw {
+        base_url: String,
+        asked: Arc<Mutex<Vec<String>>>,
+    }
+
+    fn raw(script: Vec<Says>) -> Raw {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let recording = Arc::clone(&asked);
+
+        std::thread::spawn(move || {
+            for (connection, says) in listener.incoming().zip(script) {
+                let Ok(mut connection) = connection else {
+                    return;
+                };
+
+                // Read what came in, so that the client's own write finishes,
+                // and keep the body: what a continuation sends is exactly what
+                // this is here to assert.
+                let mut request = [0; 16 * 1024];
+                let read = connection.read(&mut request).unwrap_or(0);
+                recording
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&request[..read]).into_owned());
+
+                match says {
+                    Says::This(body) => {
+                        let _ = connection.write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n{body}"
+                            )
+                            .as_bytes(),
+                        );
+                    }
+                    // Held rather than closed: a connection that closes is an
+                    // answer of a kind, and this is the endpoint that gives none.
+                    Says::Nothing => std::thread::sleep(Duration::from_secs(2)),
+                    Says::ThenNothing(body) => {
+                        let _ = connection.write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n{body}"
+                            )
+                            .as_bytes(),
+                        );
+                        let _ = connection.flush();
+                        std::thread::sleep(Duration::from_secs(2));
+                    }
+                }
+            }
+        });
+
+        Raw { base_url, asked }
+    }
+
+    impl Raw {
+        /// What each request carried, in the order they arrived.
+        fn asked(&self) -> Vec<String> {
+            self.asked.lock().unwrap().clone()
+        }
+    }
+
+    /// Two fragments of an answer, and then the connection closed without the
+    /// contract's full stop: a stream that broke mid-sentence.
+    fn cut_off(fragments: &[&str]) -> Says {
+        Says::This(
+            fragments
+                .iter()
+                .map(|fragment| json!({ "choices": [{ "delta": { "content": fragment } }] }))
+                .map(|event| format!("data: {event}\n\n"))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn a_stream_that_breaks_part_way_keeps_what_it_delivered() {
+        let server = raw(vec![cut_off(&["The first half", " of an answer"])]);
+        let demysto = ready_with(&one_provider(&server.base_url), "a paragraph");
+
+        let RunOutcome::Interrupted { text, error } = run(&demysto) else {
+            panic!("a stream that broke should keep what arrived");
+        };
+
+        assert_eq!(text, "The first half of an answer");
+        assert!(
+            error.message().contains("before the answer was finished"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn what_a_broken_stream_delivered_is_on_screen_while_it_is_still_arriving() {
+        let server = raw(vec![cut_off(&["The first half", " of an answer"])]);
+        let demysto = ready_with(&one_provider(&server.base_url), "a paragraph");
+
+        let (shown, _) = watching(&demysto);
+
+        assert_eq!(
+            shown.last().map(String::as_str),
+            Some("The first half of an answer")
+        );
+    }
+
+    #[test]
+    fn a_stream_that_ends_tidily_and_says_nothing_is_still_no_answer() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(format!(
+                "data: {}\n\ndata: [DONE]\n\n",
+                json!({ "choices": [{ "delta": { "role": "assistant" } }] })
+            ))
+            .create();
+
+        // The contract's full stop is not the same as an answer: a stream of
+        // the event that opens one and nothing else has told the user nothing.
+        assert!(matches!(
+            run(&ready_to_run(&server, "a paragraph")),
+            RunOutcome::Failed(RunError::Malformed { .. })
+        ));
+    }
+
+    #[test]
+    fn a_stream_that_breaks_before_the_first_word_is_a_failure_with_nothing_to_keep() {
+        let server = raw(vec![Says::This(String::new())]);
+        let demysto = ready_with(&one_provider(&server.base_url), "a paragraph");
+
+        // Nothing to keep and nothing to carry on from, so it is the failure
+        // with a retry on it rather than the answer with the rest to come.
+        assert!(
+            matches!(
+                run(&demysto),
+                RunOutcome::Failed(RunError::Malformed { .. })
+            ),
+            "an empty stream should be reported as one"
+        );
+    }
+
+    #[test]
+    fn a_broken_answer_can_be_carried_on_and_ends_up_one_answer() {
+        let server = raw(vec![
+            cut_off(&["The first half"]),
+            Says::This(answering(" and the rest of it.")),
+        ]);
+        let demysto = ready_with(&one_provider(&server.base_url), "a paragraph");
+
+        run(&demysto);
+        let outcome = demysto.continue_answer(|_| {});
+
+        assert_eq!(
+            outcome,
+            RunOutcome::Answered("The first half and the rest of it.".to_owned())
+        );
+
+        // One Turn, not two: the user asked one question and is reading one
+        // answer to it.
+        assert_eq!(turns(&demysto).len(), 1);
+    }
+
+    #[test]
+    fn carrying_on_puts_what_already_arrived_back_to_the_model() {
+        let server = raw(vec![
+            cut_off(&["The first half"]),
+            Says::This(answering(" and the rest.")),
+        ]);
+        let demysto = ready_with(&one_provider(&server.base_url), "a paragraph");
+
+        run(&demysto);
+        demysto.continue_answer(|_| {});
+
+        let carrying_on = server.asked().pop().expect("a second request went out");
+
+        assert!(carrying_on.contains("The first half"), "{carrying_on}");
+        assert!(
+            carrying_on.contains("Carry on from exactly where"),
+            "{carrying_on}"
+        );
+    }
+
+    #[test]
+    fn there_is_nothing_to_carry_on_from_an_answer_that_finished() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("a whole answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        run(&demysto);
+
+        assert!(matches!(
+            demysto.continue_answer(|_| {}),
+            RunOutcome::Failed(RunError::NothingToRun { .. })
+        ));
+    }
+
+    #[test]
+    fn a_model_that_says_it_has_finished_has_finished_however_the_socket_ends() {
+        // Several OpenAI-compatible servers close the connection instead of
+        // sending the sentinel. Without the Model's own full stop being read as
+        // one, every answer from those would be reported as having broken off,
+        // with an offer to carry on from a reply that was already complete.
+        let server = raw(vec![Says::This(format!(
+            "data: {}\n\ndata: {}\n\n",
+            json!({ "choices": [{ "delta": { "content": "A whole answer." } }] }),
+            json!({ "choices": [{ "delta": {}, "finish_reason": "stop" }] })
+        ))]);
+        let demysto = ready_with(&one_provider(&server.base_url), "a paragraph");
+
+        assert_eq!(
+            run(&demysto),
+            RunOutcome::Answered("A whole answer.".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_continuation_that_never_reaches_a_provider_keeps_what_already_arrived() {
+        let server = raw(vec![cut_off(&["The first half"])]);
+        let demysto = ready_with(&one_provider(&server.base_url), "a paragraph");
+
+        run(&demysto);
+
+        // The settings change under the broken answer, the way they do when
+        // somebody opens Settings to fix the Provider that broke it and takes
+        // the wrong Model out. The continuation now fails before anything is
+        // sent.
+        std::fs::write(
+            demysto.config_dir().join(config::FILE_NAME),
+            format!(
+                "version = 1\n\ndefault_model = \"a provider/absent\"\n\n{}",
+                provider("a provider", &server.base_url, "a-key", "a-model")
+            ),
+        )
+        .unwrap();
+        demysto.settings_changed();
+
+        let RunOutcome::Interrupted { text, error } = demysto.continue_answer(|_| {}) else {
+            panic!("a continuation that never left the machine should keep what arrived");
+        };
+
+        assert_eq!(text, "The first half");
+        assert!(matches!(error, RunError::Configuration { .. }), "{error:?}");
+
+        // And the Conversation keeps it too, so that the offer to carry on is
+        // still there once the settings are right.
+        assert!(matches!(
+            showing(&demysto).turns[0].outcome,
+            Some(RunOutcome::Interrupted { .. })
+        ));
+    }
+
+    #[test]
+    fn nothing_a_malformed_answer_quoted_back_reaches_the_log() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body("data: {\"choices\": [{\"delta\": {\"content\": \"a secret\"}}] oops\n\n")
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        let outcome = run(&demysto);
+
+        // The user is shown what arrived, because seeing it is how they place
+        // the fault; the log is not, because what arrived is the Model's own
+        // words and a log outlives the session (ADR-0010).
+        assert!(
+            outcome
+                .error()
+                .is_some_and(|error| error.message().contains("a secret")),
+            "{outcome:?}"
+        );
+        assert!(
+            !logged(&demysto).contains("a secret"),
+            "{}",
+            logged(&demysto)
+        );
+        assert!(
+            logged(&demysto).contains("failed: "),
+            "{}",
+            logged(&demysto)
+        );
+    }
+
+    #[test]
+    fn a_provider_that_answers_nothing_at_all_is_a_timeout_and_not_a_dead_address() {
+        let server = raw(vec![Says::Nothing]);
+        let demysto = ready_with(&one_provider(&server.base_url), "a paragraph").impatient();
+
+        let RunOutcome::Failed(RunError::TimedOut { message }) = run(&demysto) else {
+            panic!("a Provider that never answers should time out");
+        };
+
+        assert!(message.contains("stopped waiting"), "{message}");
+    }
+
+    #[test]
+    fn a_provider_that_goes_quiet_mid_answer_times_out_and_keeps_what_it_said() {
+        let Says::This(started) = cut_off(&["The first half"]) else {
+            unreachable!("cut_off answers with bytes to send")
+        };
+
+        let server = raw(vec![Says::ThenNothing(started)]);
+        let demysto = ready_with(&one_provider(&server.base_url), "a paragraph").impatient();
+
+        let RunOutcome::Interrupted { text, error } = run(&demysto) else {
+            panic!("a stream that went quiet should keep what arrived");
+        };
+
+        assert_eq!(text, "The first half");
+        assert!(
+            matches!(error, RunError::TimedOut { .. }),
+            "a Provider that stopped speaking is a timeout, not a dead address: {error:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_turn_is_asked_again_rather_than_asked_beside() {
+        let mut server = Server::new();
+        let refusing = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(500)
+            .with_body("<html>Bad Gateway</html>")
+            .expect(1)
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        assert!(matches!(run(&demysto), RunOutcome::Failed(_)));
+        refusing.assert();
+
+        let _answering = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer at last"))
+            .create();
+
+        assert_eq!(
+            demysto.retry(None, |_| {}),
+            RunOutcome::Answered("an answer at last".to_owned())
+        );
+
+        // The retry is the Turn, not a Turn beside it: a Conversation that
+        // accumulated an entry per attempt would send every failure as context
+        // for the next one.
+        assert_eq!(turns(&demysto), [(None, answered("an answer at last"))]);
+    }
+
+    #[test]
+    fn a_turn_that_never_reached_a_provider_can_still_be_asked_again() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        // A settings file naming a Default Model no Provider offers: the Run
+        // fails before anything is sent, which is the failure most worth being
+        // able to try again after fixing it.
+        let demysto = ready_with(
+            &format!(
+                "default_model = \"a provider/absent\"\n\n{}",
+                provider(
+                    "a provider",
+                    &format!("{}/v1", server.url()),
+                    "a-key",
+                    "a-model"
+                )
+            ),
+            "a paragraph",
+        );
+
+        assert!(matches!(
+            run(&demysto),
+            RunOutcome::Failed(RunError::Configuration { .. })
+        ));
+
+        // What the Palette collected is not asked for again: the Turn kept what
+        // it was going to send.
+        let outcome = demysto.retry(Some("a provider/a-model"), |_| {});
+
+        assert_eq!(outcome, RunOutcome::Answered("an answer".to_owned()));
+    }
+
+    #[test]
+    fn a_turn_asked_again_can_be_asked_of_another_model() {
+        let mut server = Server::new();
+        let _refusing = server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(Matcher::PartialJson(json!({ "model": "cheap" })))
+            .with_status(500)
+            .with_body("no")
+            .create();
+
+        let capable = server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(Matcher::PartialJson(json!({ "model": "capable" })))
+            .with_body(answering("a better answer"))
+            .expect(1)
+            .create();
+
+        let demysto = ready_with(
+            &format!(
+                "default_model = \"a provider/cheap\"\n\n[[providers]]\nname = \"a provider\"\n\
+                 base_url = \"{}/v1\"\napi_key = \"a-key\"\n\
+                 models = [{{ id = \"cheap\" }}, {{ id = \"capable\" }}]\n",
+                server.url()
+            ),
+            "a paragraph",
+        );
+
+        assert!(matches!(run(&demysto), RunOutcome::Failed(_)));
+
+        assert_eq!(
+            demysto.retry(Some("a provider/capable"), |_| {}),
+            RunOutcome::Answered("a better answer".to_owned())
+        );
+        capable.assert();
+    }
+
+    #[test]
+    fn a_model_switched_to_is_where_the_rest_of_the_conversation_goes() {
+        let mut server = Server::new();
+        let _refusing = server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(Matcher::PartialJson(json!({ "model": "cheap" })))
+            .with_status(500)
+            .with_body("no")
+            .create();
+
+        let _capable = server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(Matcher::PartialJson(json!({ "model": "capable" })))
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_with(
+            &format!(
+                "default_model = \"a provider/cheap\"\n\n[[providers]]\nname = \"a provider\"\n\
+                 base_url = \"{}/v1\"\napi_key = \"a-key\"\n\
+                 models = [{{ id = \"cheap\" }}, {{ id = \"capable\" }}]\n",
+                server.url()
+            ),
+            "a paragraph",
+        );
+
+        run(&demysto);
+        demysto.retry(Some("a provider/capable"), |_| {});
+
+        // The switch is a decision about the Conversation, so the follow-up
+        // does not quietly go back to the Model that failed.
+        assert_eq!(
+            following_up(&demysto, "and this?"),
+            RunOutcome::Answered("an answer".to_owned())
+        );
+    }
+
+    #[test]
+    fn there_is_nothing_to_try_again_before_anything_has_been_asked() {
+        let demysto = demysto(fake::over(&Arc::new(FakeDesktop::new(None, None))));
+
+        assert!(matches!(
+            demysto.retry(None, |_| {}),
+            RunOutcome::Failed(RunError::NothingToRun { .. })
+        ));
+    }
+
+    #[test]
+    fn the_models_a_conversation_can_be_switched_to_are_the_ones_configured() {
+        let demysto = ready_with(
+            "[[providers]]\nname = \"a provider\"\nbase_url = \"https://example.com/v1\"\n\
+             api_key = \"a-key\"\nmodels = [{ id = \"cheap\" }, { id = \"capable\" }]\n",
+            "a paragraph",
+        );
+
+        assert_eq!(demysto.models(), ["a provider/cheap", "a provider/capable"]);
+    }
+
+    #[test]
+    fn a_selection_larger_than_the_settings_allow_is_warned_about_and_still_sent() {
+        let mut server = Server::new();
+        let selection = "word ".repeat(300);
+        let endpoint = asked_for(&mut server, vec![Matcher::Regex("word word".to_owned())]);
+
+        let demysto = ready_with(
+            &format!(
+                "large_selection = 100\n{}",
+                one_provider(&format!("{}/v1", server.url()))
+            ),
+            &selection,
+        );
+
+        assert_eq!(run(&demysto), RunOutcome::Answered("an answer".to_owned()));
+
+        // Sent whole: the warning is a warning, and nothing about it blocks or
+        // truncates (user story 48).
+        endpoint.assert();
+
+        let warning = showing(&demysto)
+            .warning
+            .expect("a Selection over the size should be warned about");
+
+        assert!(warning.contains("1,500 characters"), "{warning}");
+        assert!(warning.contains("100"), "{warning}");
+        assert!(warning.contains("large_selection"), "{warning}");
+    }
+
+    #[test]
+    fn the_warning_is_on_the_conversation_before_the_run_that_fills_it() {
+        let demysto = ready_with(
+            &format!(
+                "large_selection = 10\n{}",
+                one_provider("https://example.com/v1")
+            ),
+            "a Selection well over ten characters",
+        );
+
+        // The interface declares the Run, shows the window, and only then runs
+        // it: the warning has to be there for the window that loads in between.
+        demysto.about_to_run("explain");
+
+        assert!(showing(&demysto).warning.is_some());
+    }
+
+    #[test]
+    fn a_selection_the_settings_are_happy_with_is_not_warned_about() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        run(&demysto);
+
+        assert_eq!(showing(&demysto).warning, None);
+    }
+
+    #[test]
+    fn a_size_of_zero_is_a_user_who_would_rather_not_be_told() {
+        let demysto = ready_with(
+            &format!(
+                "large_selection = 0\n{}",
+                one_provider("https://example.com/v1")
+            ),
+            &"word ".repeat(10_000),
+        );
+
+        demysto.about_to_run("explain");
+
+        assert_eq!(showing(&demysto).warning, None);
+    }
+
+    #[test]
+    fn a_follow_up_is_not_warned_about_the_selection_a_second_time() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_with(
+            &format!(
+                "large_selection = 10\n{}",
+                one_provider(&format!("{}/v1", server.url()))
+            ),
+            "a Selection well over ten characters",
+        );
+
+        run(&demysto);
+        let said_once = showing(&demysto).warning;
+        following_up(&demysto, "and this?");
+
+        // The Selection did not travel again and did not change, so neither did
+        // what there is to say about it.
+        assert_eq!(showing(&demysto).warning, said_once);
+        assert_eq!(turns(&demysto).len(), 2);
+    }
+
+    /// Everything this session wrote to its log.
+    fn logged(demysto: &Demysto) -> String {
+        std::fs::read_to_string(demysto.logs_dir().join("demysto.log")).unwrap_or_default()
+    }
+
+    #[test]
+    fn what_a_run_did_is_in_the_log_a_bug_report_can_carry() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        run(&demysto);
+
+        let written = logged(&demysto);
+
+        assert!(written.contains("Demysto 1.2.3 started"), "{written}");
+        assert!(written.contains("asking a-model"), "{written}");
+        assert!(written.contains("answered, 9 characters"), "{written}");
+    }
+
+    #[test]
+    fn what_went_wrong_is_in_the_log_in_the_words_the_user_was_shown() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(401)
+            .with_body(json!({ "error": { "message": "Incorrect API key provided" } }).to_string())
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        run(&demysto);
+
+        assert!(
+            logged(&demysto).contains("Incorrect API key provided"),
+            "{}",
+            logged(&demysto)
+        );
+    }
+
+    #[test]
+    fn nothing_the_user_was_looking_at_reaches_the_log() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("the Higgs boson is a particle"))
+            .create();
+
+        let demysto = ready_with(
+            &one_provider(&format!("{}/v1", server.url())),
+            "a sentence nobody else should read",
+        );
+        run(&demysto);
+        following_up(&demysto, "a question nobody else should read either");
+
+        // The one promise a log written beside somebody's keys has to keep:
+        // it records what happened, never what it was about (ADR-0010).
+        let written = logged(&demysto);
+
+        assert!(!written.contains("nobody else should read"), "{written}");
+        assert!(!written.contains("Higgs"), "{written}");
+        assert!(!written.contains("a-key"), "{written}");
     }
 }

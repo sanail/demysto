@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import {
     catalogue as catalogued,
     deleteAction,
     dismiss,
     hotkeys as allowed,
+    onProviderWanted,
+    openLogs,
     presets as offeredPresets,
     providerModels,
     saveAction,
@@ -25,6 +27,7 @@
     type Settings,
   } from "../lib/ipc";
   import { combination, reading } from "../lib/hotkey";
+  import type { UnlistenFn } from "@tauri-apps/api/event";
 
   /** How long the window says a save landed. */
   const ACKNOWLEDGED = 1600;
@@ -96,6 +99,21 @@
   let recording = $state<"palette" | "action" | null>(null);
   /** The Hotkey that opens the Palette, empty for the one Demysto comes with. */
   let paletteHotkey = $state("");
+  /**
+   * How many characters a Selection may hold before Demysto says so.
+   *
+   * `null` is the file stating nothing, which leaves Demysto's own figure
+   * deciding; zero is somebody who would rather not be told at all.
+   */
+  let largeSelection = $state<number | null>(null);
+  /** Demysto's own figure, so that the field can say what leaving it empty means. */
+  let largeSelectionDefault = $state(0);
+  /** Where the logs are, and what went wrong opening the folder. */
+  let logsProblem = $state<string | null>(null);
+  /** The Provider the window was opened at, so that it can be shown as such. */
+  let wanted = $state<string | null>(null);
+  /** The listener that carries that name, for as long as this window lives. */
+  let listening: Promise<UnlistenFn> | null = null;
   /** What opens the Palette when nothing states otherwise, as it is read. */
   let paletteDefault = $state("");
   /** The keys a Hotkey may be on its own — the backend decides which. */
@@ -152,7 +170,17 @@
 
   onMount(async () => {
     presets = await offeredPresets();
-    where = (await status()).config_dir;
+
+    const reported = await status();
+    where = reported.config_dir;
+    largeSelectionDefault = reported.large_selection_default;
+
+    // A refused key is reported in the Conversation and fixed here, so the
+    // window is told which Provider it was opened for.
+    listening = onProviderWanted((provider) => {
+      wanted = provider;
+      settle(provider);
+    });
 
     const may = await allowed();
     paletteDefault = may.palette_default;
@@ -169,6 +197,31 @@
     read = true;
   });
 
+  // Taken down in its own hook rather than by returning one, because the mount
+  // above waits on the backend and Svelte takes a cleanup only from one that
+  // does not.
+  onDestroy(() => listening?.then((off) => off()));
+
+  /** Brings the Provider this window was opened for into view. */
+  async function settle(provider: string) {
+    await tick();
+
+    document
+      .querySelector(`[data-provider="${CSS.escape(provider)}"]`)
+      ?.scrollIntoView({ block: "center" });
+  }
+
+  /** Opens the folder the logs are written in, so a bug report can carry them. */
+  async function showLogs() {
+    logsProblem = null;
+
+    try {
+      await openLogs();
+    } catch (error) {
+      logsProblem = saidBy(error);
+    }
+  }
+
   /** Takes the settings as the file holds them as the state of this window. */
   function show(settings: Settings) {
     savedSettings = settings;
@@ -176,6 +229,7 @@
     defaultModel = settings.default_model ?? "";
     defaultVisionModel = settings.default_vision_model ?? "";
     paletteHotkey = settings.palette_hotkey ?? "";
+    largeSelection = settings.large_selection;
   }
 
   /** Takes the catalogue as the directory holds it as the state of this window. */
@@ -372,6 +426,10 @@
         default_model: defaultModel,
         default_vision_model: defaultVisionModel,
         palette_hotkey: paletteHotkey,
+        // A blank field is the setting taken out of the file, which is not the
+        // same as a zero somebody typed: one leaves Demysto's own figure
+        // deciding, the other asks to be told nothing.
+        large_selection: stated(largeSelection),
       }));
 
       // Asked for again because reading the catalogue is what claims the
@@ -388,6 +446,20 @@
     } finally {
       saving = false;
     }
+  }
+
+  /**
+   * A count as the file states it: what was typed, or nothing at all when the
+   * field was left empty or filled with something that is not a count.
+   *
+   * A negative number is nothing rather than a refusal: the field is a number
+   * of characters, and there is no reading of "-5 characters" worth writing
+   * into somebody's settings or stopping their save over.
+   */
+  function stated(held: number | null): number | null {
+    return held === null || !Number.isFinite(held) || held < 0
+      ? null
+      : Math.floor(held);
   }
 
   /**
@@ -604,9 +676,15 @@
       </div>
 
       {#each drafts as draft, at (at)}
+        <!-- Named on the element, so that a window opened for one Provider —
+             which is what a refused key does — can bring it into view and say
+             which one it came here for. -->
         <article
-          class="flex flex-col gap-3 rounded-md border border-neutral-200 p-3
-                 dark:border-neutral-700"
+          data-provider={draft.was ?? draft.name}
+          class="flex flex-col gap-3 rounded-md border p-3
+                 {(draft.was ?? draft.name) === wanted
+            ? 'border-red-400 dark:border-red-500'
+            : 'border-neutral-200 dark:border-neutral-700'}"
         >
           <div class="grid grid-cols-2 gap-3">
             <label class="flex flex-col gap-1">
@@ -822,6 +900,26 @@
           </select>
         </label>
       </div>
+
+      <label class="flex flex-col gap-1">
+        <span class="text-xs opacity-60">
+          Warn above — how many characters a Selection may hold before Demysto
+          says so
+        </span>
+        <input
+          type="number"
+          min="0"
+          bind:value={largeSelection}
+          placeholder={`${largeSelectionDefault} — what Demysto comes with`}
+          class="{FIELD} max-w-64"
+        />
+        <span class="text-xs opacity-50">
+          Nothing is ever cut and nothing is ever refused: the warning is there
+          so that an accidental select-all is not silently paid for. Leave the
+          field empty for Demysto's own figure, or set it to 0 to be told
+          nothing.
+        </span>
+      </label>
     </section>
     {/if}
 
@@ -879,6 +977,28 @@
       {#each unclaimedHotkeys as said (said)}
         <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
       {/each}
+    </section>
+
+    <section class="flex flex-col gap-3">
+      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
+        Logs
+      </h2>
+
+      <p class="text-xs opacity-50">
+        Demysto keeps a local log of what it did — which Action, which Model,
+        what went wrong — and never of what you were looking at or what a Model
+        said. Nothing is sent anywhere. Attach these to a bug report.
+      </p>
+
+      <div>
+        <button type="button" class={BUTTON} onclick={showLogs}>
+          Open the log folder
+        </button>
+      </div>
+
+      {#if logsProblem}
+        <p class="text-xs text-red-600 dark:text-red-400">{logsProblem}</p>
+      {/if}
     </section>
 
     <section class="flex flex-col gap-3">

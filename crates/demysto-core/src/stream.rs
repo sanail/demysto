@@ -49,6 +49,16 @@ impl Assembly {
         }
     }
 
+    /// An assembly already holding what an interrupted Turn delivered, so that
+    /// what the Model adds reads as the rest of one answer rather than as a
+    /// second one (user story 46).
+    pub(crate) fn continuing(throttle: Duration, delivered: String) -> Self {
+        Self {
+            text: delivered,
+            ..Self::new(throttle)
+        }
+    }
+
     /// Adds a fragment, and answers with the whole answer so far, render-ready,
     /// when enough time has passed to be worth showing it.
     ///

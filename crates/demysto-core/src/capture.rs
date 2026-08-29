@@ -30,7 +30,7 @@ pub enum Captured {
 /// What a Capture produced, failure included.
 ///
 /// A failure is a state the Palette shows rather than an error that stops it:
-/// the window still opens and says what went wrong. Ticket 11 gives it the
+/// the window still opens and says what went wrong. The window gives it the
 /// retry and the route into Settings.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "status", content = "detail", rename_all = "snake_case")]

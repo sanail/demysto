@@ -23,6 +23,16 @@ const ABOUT: usize = 80;
 const USER: &str = "user";
 const ASSISTANT: &str = "assistant";
 
+/// What a continuation asks for, after the answer so far has been put back to
+/// the Model as its own words.
+///
+/// A message rather than a bare assistant turn left hanging: the contract has
+/// no prefill in it, and a Provider handed a Conversation ending mid-sentence
+/// is entitled to start a new paragraph. Asking in words is the one thing every
+/// service implementing this contract understands the same way.
+const CARRY_ON: &str = "That answer was cut off before it finished. Carry on from exactly where \
+                        it stops, and do not repeat any of it.";
+
 /// One Run of an Action plus the follow-up Turns taken on the same Selection.
 ///
 /// The unit the result window shows and the unit this session's history is
@@ -37,6 +47,19 @@ pub struct Conversation {
     pub action: Option<Action>,
     /// Every Turn taken so far, oldest first.
     pub turns: Vec<Turn>,
+    /// The Model the user switched this Conversation to, `None` while it is
+    /// still going to whatever the Action resolves to. Set from the window when
+    /// a failed Turn is tried again somewhere else (user story 20), and it
+    /// stands for every Turn after it: the switch is a decision about this
+    /// Conversation, not about one Turn of it.
+    pub model: Option<String>,
+    /// What the user was told about the Selection before anything was sent —
+    /// that it is unusually large, today. `None` when there was nothing to say.
+    ///
+    /// On the Conversation rather than on a Turn because it is about the
+    /// Selection, which every Turn shares: a follow-up does not send it again
+    /// and is not warned about it again.
+    pub warning: Option<String>,
     /// What every Turn in it is about. Held because the list shows it and
     /// because a Run declared before it happens has already been told it; what
     /// the Model is sent is the Turns, not this.
@@ -56,8 +79,16 @@ pub struct Turn {
     /// What was actually sent for it. The prompt an Action assembles around a
     /// Selection is far longer than anything worth putting on screen, and it is
     /// the next Turn's context rather than the window's business.
+    ///
+    /// Recorded before the Turn goes anywhere, so that a Turn that failed can
+    /// be asked again without the Palette that composed it.
     #[serde(skip)]
     prompt: String,
+    /// What arrived for this Turn before it was interrupted, while it is being
+    /// continued. Empty otherwise — including after the continuation lands,
+    /// which puts the whole of it in the outcome.
+    #[serde(skip)]
+    delivered: String,
 }
 
 /// One line of the list of this session's Conversations.
@@ -70,6 +101,20 @@ pub struct Summary {
     /// The opening words of what it is about, so that two Runs of one Action
     /// are not two identical lines.
     pub about: String,
+}
+
+/// Everything the Turn now being asked needs in order to be put to a Provider,
+/// taken out of the store rather than composed by the caller.
+///
+/// A retry and a continuation both ask a Turn that already exists, so neither
+/// has an Action or a Palette to take any of this from.
+pub(crate) struct Asked {
+    pub(crate) id: u64,
+    pub(crate) binding: Option<String>,
+    pub(crate) kind: Kind,
+    pub(crate) prompt: String,
+    /// What already arrived for this Turn, for a continuation; empty otherwise.
+    pub(crate) delivered: String,
 }
 
 /// This session's Conversations, and which of them the window is showing.
@@ -101,13 +146,20 @@ impl Store {
     /// The interface declares a Run before it shows the window, and the Run
     /// declares it again for a caller that did not: the second finds the
     /// Conversation the first opened rather than leaving an empty one behind.
-    pub(crate) fn open(&mut self, action: Option<Action>, selection: Option<Selection>) -> u64 {
+    pub(crate) fn open(
+        &mut self,
+        action: Option<Action>,
+        selection: Option<Selection>,
+        warning: Option<String>,
+    ) -> u64 {
         if !self.held.front().is_some_and(Conversation::unanswered) {
             self.opened += 1;
             self.held.push_front(Conversation {
                 id: self.opened,
                 action: None,
                 turns: vec![Turn::opening()],
+                model: None,
+                warning: None,
                 selection: None,
             });
 
@@ -123,6 +175,7 @@ impl Store {
 
         opening.action = action;
         opening.selection = selection;
+        opening.warning = warning;
         self.showing = Some(opening.id);
 
         opening.id
@@ -161,10 +214,66 @@ impl Store {
     }
 
     /// Records what the Turn now being asked produced.
+    ///
+    /// What a continuation was carrying is let go of here: the outcome holds
+    /// the whole answer, the part that arrived first included, and two copies
+    /// of it would be two places for it to differ.
     pub(crate) fn answered(&mut self, id: u64, outcome: RunOutcome) {
         if let Some(turn) = self.held_mut(id).and_then(|held| held.turns.last_mut()) {
             turn.outcome = Some(outcome);
+            turn.delivered = String::new();
         }
+    }
+
+    /// Puts the last Turn of the Conversation on screen back to being asked, so
+    /// that it can be sent a second time — the retry a failed Turn is offered
+    /// (user story 44), and the Model switch that goes with it (user story 20).
+    ///
+    /// `model` is the Model the user picked, `None` for trying again with
+    /// nothing changed. A Model picked here stands for the rest of the
+    /// Conversation, not for this Turn alone.
+    ///
+    /// `None` where there is nothing to try again: no Conversation on screen, or
+    /// one whose last Turn is still being answered.
+    pub(crate) fn retrying(&mut self, model: Option<&str>) -> Option<Asked> {
+        let showing = self.showing_mut()?;
+
+        // Asked before the Model is switched, so that a retry with nothing to
+        // retry changes nothing: switching the Conversation to a Model and then
+        // not asking it anything would leave the window saying one thing and
+        // the next Turn doing another.
+        let turn = showing.turns.last_mut()?;
+        turn.outcome.as_ref()?;
+
+        turn.outcome = None;
+        turn.delivered = String::new();
+
+        if let Some(model) = model {
+            showing.model = Some(model.to_owned());
+        }
+
+        Some(showing.asked())
+    }
+
+    /// Puts the last Turn of the Conversation on screen back to being asked,
+    /// keeping what already arrived for it, so that the Model can be asked for
+    /// the rest (user story 46).
+    ///
+    /// `None` where the last Turn is not one that broke off part-way — there is
+    /// nothing to continue from anything that finished, and nothing to continue
+    /// at all where nothing arrived.
+    pub(crate) fn continuing(&mut self) -> Option<Asked> {
+        let showing = self.showing_mut()?;
+        let turn = showing.turns.last_mut()?;
+
+        let RunOutcome::Interrupted { text, .. } = turn.outcome.as_ref()? else {
+            return None;
+        };
+
+        turn.delivered = text.clone();
+        turn.outcome = None;
+
+        Some(showing.asked())
     }
 
     /// The Conversation the result window is showing.
@@ -203,13 +312,32 @@ impl Store {
 }
 
 impl Conversation {
-    /// The Model the Action that opened this Conversation bound, which every
-    /// Turn in it goes to. `None` when it bound none, and the two defaults
-    /// decide.
+    /// The Model every Turn in this Conversation goes to: the one the user
+    /// switched it to, else the one the Action that opened it bound. `None`
+    /// when neither named one, and the two defaults decide.
     pub(crate) fn binding(&self) -> Option<&str> {
-        self.action
-            .as_ref()
-            .and_then(|action| action.model.as_deref())
+        self.model.as_deref().or_else(|| {
+            self.action
+                .as_ref()
+                .and_then(|action| action.model.as_deref())
+        })
+    }
+
+    /// Everything the Turn now being asked needs in order to be asked, taken
+    /// off the Conversation it belongs to.
+    fn asked(&self) -> Asked {
+        let turn = self
+            .turns
+            .last()
+            .expect("a Conversation asked in holds a Turn");
+
+        Asked {
+            id: self.id,
+            binding: self.binding().map(ToOwned::to_owned),
+            kind: self.kind(),
+            prompt: turn.prompt.clone(),
+            delivered: turn.delivered.clone(),
+        }
     }
 
     /// What every Turn in this Conversation is about, which is what decides
@@ -242,7 +370,8 @@ impl Conversation {
     /// failed before it assembled a prompt has none, and an empty message is
     /// not something to put to a Provider.
     fn said(&self) -> Vec<(&'static str, String)> {
-        self.turns
+        let mut said: Vec<(&'static str, String)> = self
+            .turns
             .iter()
             .flat_map(|turn| {
                 let asked = (!turn.prompt.is_empty()).then(|| (USER, turn.prompt.clone()));
@@ -250,7 +379,20 @@ impl Conversation {
 
                 asked.into_iter().chain(replied)
             })
-            .collect()
+            .collect();
+
+        // A Turn being continued ends the Conversation on what the Model got
+        // through before the stream broke, which is not a question — so it is
+        // followed by the one that asks for the rest.
+        if self
+            .turns
+            .last()
+            .is_some_and(|turn| turn.outcome.is_none() && !turn.delivered.is_empty())
+        {
+            said.push((USER, CARRY_ON.to_owned()));
+        }
+
+        said
     }
 
     /// This Conversation as one line of the list of them.
@@ -275,6 +417,7 @@ impl Turn {
             question: None,
             outcome: None,
             prompt: String::new(),
+            delivered: String::new(),
         }
     }
 
@@ -285,6 +428,7 @@ impl Turn {
             question: Some(question.to_owned()),
             outcome: None,
             prompt: question.to_owned(),
+            delivered: String::new(),
         }
     }
 
@@ -293,16 +437,17 @@ impl Turn {
         self.outcome.is_none() && self.question.as_deref() == Some(question)
     }
 
-    /// What the Model said, where it said anything: an answer, or as much of
-    /// one as had arrived when the user stopped it. A failure is not something
-    /// the Model said.
+    /// What the Model said, where it said anything: an answer, as much of one
+    /// as had arrived when the user stopped it or when the stream broke, or —
+    /// for a Turn now being continued — as much as arrived before it did. A
+    /// failure is not something the Model said.
     fn replied(&self) -> Option<&str> {
-        let said = match self.outcome.as_ref()? {
-            RunOutcome::Answered(text) | RunOutcome::Stopped(text) => text,
-            RunOutcome::Failed(_) => return None,
+        let said = match self.outcome.as_ref() {
+            Some(outcome) => outcome.text().unwrap_or_default(),
+            None => self.delivered.as_str(),
         };
 
-        (!said.is_empty()).then_some(said.as_str())
+        (!said.is_empty()).then_some(said)
     }
 }
 

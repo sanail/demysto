@@ -41,6 +41,10 @@ pub struct Settings {
     /// for the reason `DefinedAction::hotkey` is: whether a combination can be
     /// claimed is a question only the desktop can answer.
     pub palette_hotkey: Option<String>,
+    /// How many characters a Selection may hold before Demysto says so, `None`
+    /// where the file states nothing and Demysto's own figure decides — which
+    /// [`crate::Status`] reports, so that the window can name it.
+    pub large_selection: Option<u64>,
 }
 
 /// One Provider as the file states it — with where its key is, and not the key.
@@ -94,6 +98,11 @@ pub struct Edit {
     pub default_model: Option<String>,
     pub default_vision_model: Option<String>,
     pub palette_hotkey: Option<String>,
+    /// `None` takes the setting out of the file and leaves Demysto's own figure
+    /// deciding; zero is the user asking to be told nothing, which is a
+    /// different thing and is written.
+    #[serde(default)]
+    pub large_selection: Option<u64>,
 }
 
 /// One Provider as the window would have it.
@@ -137,7 +146,7 @@ impl fmt::Debug for KeyEdit {
     /// Written out rather than derived, for the reason `config::Provider`'s own
     /// is: this is the one type in the crate that carries a key on its way in
     /// from the window, and a key that can be printed is a key that reaches a
-    /// panic message or, once ticket 11 has them, a log. [`ProviderEdit`] and
+    /// panic message or a log (ADR-0010). [`ProviderEdit`] and
     /// [`Edit`] derive theirs, which is safe because this one does not.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -217,6 +226,7 @@ pub(crate) fn read(config_dir: &Path, env: &Environment) -> Result<Settings, Con
         // Hotkey stated by hand as " F13" would read back looking right and
         // then refuse to be claimed, for a reason nothing on screen could show.
         palette_hotkey: config::stated(file.palette_hotkey),
+        large_selection: file.large_selection,
     })
 }
 
@@ -277,7 +287,9 @@ pub(crate) fn endpoint(
     env: &Environment,
     draft: &ProviderEdit,
 ) -> Result<Endpoint, RunError> {
-    let configuration = |error: ConfigError| RunError::Configuration(error.to_string());
+    let configuration = |error: ConfigError| RunError::Configuration {
+        message: error.to_string(),
+    };
 
     let (path, text) = config::read(config_dir).map_err(configuration)?;
     let held = config::parse(&path, &text).map_err(configuration)?;
@@ -296,6 +308,7 @@ pub(crate) fn endpoint(
     let entry = entry(draft, stored).map_err(configuration)?;
 
     model::endpoint_for(
+        &draft.name,
         &config::base_url(&entry, &path).map_err(configuration)?,
         &config::resolve_key(&entry, env, &path),
     )
@@ -409,6 +422,7 @@ fn rewritten(text: &str, edit: &Edit, path: &Path) -> Result<String, ConfigError
         config::PALETTE_SETTING,
         edit.palette_hotkey.as_deref(),
     );
+    counting(root, config::LARGE_SELECTION_SETTING, edit.large_selection);
 
     let held = root
         .get("providers")
@@ -494,6 +508,20 @@ fn models(models: &[ConfiguredModel]) -> Array {
 fn stating(table: &mut Table, key: &str, held: Option<&str>) {
     match held.map(str::trim).filter(|held| !held.is_empty()) {
         Some(held) => table[key] = value(held),
+        None => {
+            table.remove(key);
+        }
+    }
+}
+
+/// Writes a count somebody stated, and takes it out where they stated nothing.
+///
+/// Unlike [`stating`], zero is a value: a Selection warning turned off is the
+/// user saying something, and a field emptied is the user saying nothing and
+/// leaving Demysto's own figure to decide.
+fn counting(table: &mut Table, key: &str, held: Option<u64>) {
+    match held {
+        Some(held) => table[key] = value(i64::try_from(held).unwrap_or(i64::MAX)),
         None => {
             table.remove(key);
         }

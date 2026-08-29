@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
-use demysto_core::Demysto;
+use demysto_core::{Demysto, RunOutcome};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
 
@@ -61,6 +61,43 @@ pub fn run<R: Runtime>(app: &AppHandle<R>, action: String, parameters: BTreeMap<
     });
 }
 
+/// Asks the last Turn of the Conversation on screen again, optionally somewhere
+/// else — the retry and the Model switch a failed Turn is offered.
+pub fn retry<R: Runtime>(app: &AppHandle<R>, model: Option<String>) {
+    again(app, move |demysto| {
+        demysto.retry(model.as_deref(), streaming)
+    });
+}
+
+/// Asks the Model for the rest of an answer that broke off part-way.
+pub fn continue_answer<R: Runtime>(app: &AppHandle<R>) {
+    again(app, |demysto| demysto.continue_answer(streaming));
+}
+
+/// Asks a Turn the Conversation already holds, however it came to be asked
+/// again. The window is up and holding the focus, so nothing is revealed and
+/// nothing is hidden — only the Turn is new.
+fn again<R: Runtime>(
+    app: &AppHandle<R>,
+    ask: impl FnOnce(&Demysto) -> RunOutcome + Send + 'static,
+) {
+    off_thread(app, move |app, window| {
+        let demysto = app.state::<Demysto>();
+
+        // Told before the Turn goes out, so that the window replaces the
+        // failure with "asking" rather than leaving it there until an answer
+        // arrives. Nothing to ask again is nothing to say, for the reason a
+        // follow-up with no Conversation says nothing.
+        if !demysto.about_to_retry() {
+            return;
+        }
+
+        let _ = window.emit(RUNNING_EVENT, ());
+
+        ask(&demysto);
+    });
+}
+
 /// Runs one Action on a Selection captured for it, with no Palette anywhere on
 /// the path.
 ///
@@ -84,7 +121,13 @@ pub fn straight_to<R: Runtime>(app: &AppHandle<R>, action: String) {
         // the foreground application.
         app.state::<Demysto>().capture();
 
-        opening(app, window, &action, &BTreeMap::new());
+        let outcome = opening(app, window, &action, &BTreeMap::new());
+
+        // The one path that can fail with nothing on screen to say so: this
+        // one puts up the Conversation window itself, and a Run that fails
+        // while that window is not in front of the user would be a Hotkey that
+        // silently did nothing (user story 47).
+        crate::notify::a_failure_nobody_can_see(app, &outcome);
     });
 }
 
@@ -97,7 +140,7 @@ fn opening<R: Runtime>(
     window: &WebviewWindow<R>,
     action: &str,
     parameters: &BTreeMap<String, String>,
-) {
+) -> RunOutcome {
     // Declared before the window is shown rather than when the Run begins: a
     // window loading for this Run asks the core what it is looking at, and the
     // question before this one is what it must not come up holding — neither
@@ -111,7 +154,7 @@ fn opening<R: Runtime>(
     let _ = window.emit(RUNNING_EVENT, ());
     reveal(window);
 
-    demysto.run(action, parameters, streaming);
+    demysto.run(action, parameters, streaming)
 }
 
 /// Takes the Palette off the screen, which every Run does before it puts a
