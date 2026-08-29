@@ -37,6 +37,8 @@ const SEPARATOR: char = '/';
 pub(crate) const MODEL_SETTING: &str = "default_model";
 /// And the one an image Selection resolves to first.
 pub(crate) const VISION_SETTING: &str = "default_vision_model";
+/// What the settings call the Hotkey that opens the Palette.
+pub(crate) const PALETTE_SETTING: &str = "palette_hotkey";
 
 /// Where the preamble names every preset there is, filled in from the presets
 /// themselves so that adding one cannot leave the file describing the old set.
@@ -75,7 +77,13 @@ const PREAMBLE: &str = r#"# Demysto's settings.
 #
 # A Model is named "<provider>/<model>" wherever one is nominated or bound.
 # `default_model` is what an Action binding no Model of its own resolves to, and
-# `default_vision_model` is what one resolves to for an image."#;
+# `default_vision_model` is what one resolves to for an image.
+#
+# `palette_hotkey` is the key combination that opens the Palette. Leave it out
+# for the one Demysto comes with. It is written as its modifiers and then one
+# key — "Ctrl+Alt+Space" — and a key that types nothing, such as F13, may stand
+# on its own. Settings records one for you if you would rather press it than
+# spell it."#;
 
 /// What the user is asked to uncomment.
 ///
@@ -454,6 +462,12 @@ pub(crate) struct File {
     pub(crate) providers: Vec<ProviderEntry>,
     pub(crate) default_model: Option<String>,
     pub(crate) default_vision_model: Option<String>,
+    /// The Hotkey that opens the Palette, `None` for the one Demysto comes
+    /// with. Declared here and resolved nowhere: nothing in this crate runs on
+    /// it, and whether a combination can be claimed is the desktop's answer to
+    /// give. It is a field only because the file denies unknown ones, and a
+    /// file stating a Hotkey has to stay a file Demysto can read.
+    pub(crate) palette_hotkey: Option<String>,
 }
 
 fn first_version() -> u32 {
@@ -1400,6 +1414,25 @@ models = [{ id = \"deepseek-chat\" }]
         // Silently ignoring `api_kye` would leave the user staring at a file
         // that plainly holds their key and a Demysto that cannot find it.
         let misspelled = file_only().replace("api_key =", "api_kye =");
+
+        assert!(matches!(
+            error(&misspelled, &Environment::default()),
+            ConfigError::Malformed(_)
+        ));
+    }
+
+    #[test]
+    fn a_settings_file_that_states_a_palette_hotkey_still_loads() {
+        // The file denies unknown fields, so a Hotkey stated here is either a
+        // field this build declares or a file nobody can read.
+        let stating = format!("palette_hotkey = \"F13\"\n{}", file_only());
+
+        config(&stating, &Environment::default());
+    }
+
+    #[test]
+    fn a_misspelled_palette_hotkey_is_reported_rather_than_ignored() {
+        let misspelled = format!("palette_hotkeys = \"F13\"\n{}", file_only());
 
         assert!(matches!(
             error(&misspelled, &Environment::default()),

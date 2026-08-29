@@ -260,6 +260,8 @@ export type Settings = {
   providers: ConfiguredProvider[];
   default_model: string | null;
   default_vision_model: string | null;
+  /** The Hotkey that opens the Palette, `null` for the one Demysto comes with. */
+  palette_hotkey: string | null;
 };
 
 /** Mirrors `demysto_core::KeyEdit`: what a save does to a Provider's key. */
@@ -285,7 +287,28 @@ export type Edit = {
   providers: ProviderEdit[];
   default_model: string | null;
   default_vision_model: string | null;
+  palette_hotkey: string | null;
 };
+
+/**
+ * Mirrors the backend's `Hotkeys`: the two things about Hotkeys this window
+ * cannot work out for itself.
+ */
+export type Hotkeys = {
+  /** The Palette's Hotkey where the settings state none, as it is read. */
+  palette_default: string;
+  /** The keys a Hotkey may be on its own, because they type nothing. */
+  no_modifier_needed: string[];
+};
+
+/**
+ * What a Hotkey may be, asked of the backend because the backend decides it:
+ * which keys need no modifier, and what opens the Palette when nothing states
+ * otherwise.
+ */
+export function hotkeys(): Promise<Hotkeys> {
+  return invoke<Hotkeys>("hotkeys");
+}
 
 /** Mirrors `demysto_core::Preset`. */
 export type Preset = {

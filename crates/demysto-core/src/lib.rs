@@ -17,6 +17,7 @@ mod config;
 mod conversation;
 mod desktop;
 mod files;
+mod hotkey;
 mod language;
 mod model;
 mod paths;
@@ -94,6 +95,15 @@ struct Asking {
     /// that can see.
     kind: Kind,
     prompt: String,
+}
+
+/// The keys a Hotkey may be on its own, because they type nothing.
+///
+/// A free function as well as a method on the facade: the shell claims Hotkeys
+/// before it has one to ask, and its own suite checks this list against the
+/// parser that has to read it.
+pub fn keys_that_need_no_modifier() -> Vec<&'static str> {
+    hotkey::keys_that_need_no_modifier()
 }
 
 /// What the application can report about itself before anything is configured.
@@ -439,6 +449,34 @@ impl Demysto {
             Err(error) => Err(RunError::Configuration(error.to_string())),
             Ok(config) => model::resolve(config, asking.binding.as_deref(), asking.kind),
         }
+    }
+
+    /// The Hotkey the settings state for the Palette, `None` where they state
+    /// none or could not be read at all.
+    ///
+    /// Every way of failing answers `None`, which is the whole point of asking
+    /// here rather than through [`Self::settings`]: a settings file nobody can
+    /// parse must not cost somebody the Hotkey the tool opens with. What it
+    /// costs them is the Hotkey they chose, and the shell says so.
+    ///
+    /// Read from the file rather than taken from what Demysto is running on,
+    /// for the reason the Actions are read from disk every time — and because
+    /// what Demysto is running on is an error until a Provider is configured,
+    /// which would lose a Hotkey stated by somebody who has not got that far.
+    pub fn palette_hotkey(&self) -> Option<String> {
+        let (path, text) = config::read(&self.config_dir).ok()?;
+
+        config::stated(config::parse(&path, &text).ok()?.palette_hotkey)
+    }
+
+    /// The keys a Hotkey may be on its own, for the window that records one.
+    pub fn keys_that_need_no_modifier(&self) -> Vec<&'static str> {
+        keys_that_need_no_modifier()
+    }
+
+    /// Whether a Hotkey stating this key and nothing else is one to claim.
+    pub fn needs_no_modifier(&self, key: &str) -> bool {
+        hotkey::needs_no_modifier(key)
     }
 
     /// The settings as the file now holds them, for the window that edits it.
@@ -1963,6 +2001,7 @@ mod tests {
             providers,
             default_model: default.map(ToOwned::to_owned),
             default_vision_model: None,
+            palette_hotkey: None,
         }
     }
 
@@ -2073,6 +2112,7 @@ mod tests {
             ],
             default_model: Some("openai/gpt-4o-mini".to_owned()),
             default_vision_model: Some("openai/gpt-4o".to_owned()),
+            palette_hotkey: Some("Ctrl+Alt+Space".to_owned()),
         };
 
         let written = saved(&demysto, &edit);
@@ -2298,6 +2338,184 @@ mod tests {
         assert!(!prose.is_empty(), "the template should explain itself");
         for line in prose {
             assert!(after.contains(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn the_palette_hotkey_the_interface_writes_is_the_one_it_reads_back() {
+        let demysto = unconfigured("a paragraph");
+
+        let written = saved(
+            &demysto,
+            &Edit {
+                palette_hotkey: Some("Ctrl+Alt+P".to_owned()),
+                ..edited(Vec::new(), None)
+            },
+        );
+
+        assert_eq!(written.palette_hotkey.as_deref(), Some("Ctrl+Alt+P"));
+        // What the save answered with came from reading the file back, and
+        // asking again reads it again.
+        assert_eq!(demysto.settings().unwrap(), written);
+    }
+
+    #[test]
+    fn a_palette_hotkey_nobody_could_claim_is_still_written() {
+        // The core does not judge a Hotkey, and must not start: whether a
+        // combination parses is the desktop's answer, and a check here would be
+        // a second opinion that could disagree with the one that matters. What
+        // it costs somebody is a sentence in the window, not a refused save.
+        let demysto = unconfigured("a paragraph");
+
+        let written = saved(
+            &demysto,
+            &Edit {
+                palette_hotkey: Some("not a hotkey at all".to_owned()),
+                ..edited(Vec::new(), None)
+            },
+        );
+
+        assert_eq!(
+            written.palette_hotkey.as_deref(),
+            Some("not a hotkey at all")
+        );
+    }
+
+    #[test]
+    fn a_blank_palette_hotkey_is_one_nobody_stated() {
+        // Absence rather than emptiness: `palette_hotkey = ""` is a combination
+        // that could never be claimed, so it would report itself on every start
+        // — where the user only meant to go back to the built-in one.
+        let demysto = unconfigured("a paragraph");
+
+        let written = saved(
+            &demysto,
+            &Edit {
+                palette_hotkey: Some("   ".to_owned()),
+                ..edited(Vec::new(), None)
+            },
+        );
+
+        assert_eq!(written.palette_hotkey, None);
+        assert!(
+            !stated_in(&settings_file(&demysto)).contains("palette_hotkey"),
+            "{}",
+            settings_file(&demysto)
+        );
+    }
+
+    #[test]
+    fn a_palette_hotkey_stated_by_hand_is_read_as_it_was_written() {
+        // Trimmed, because the Hotkey parser will not trim it: " F13" would
+        // otherwise read back looking right and refuse to be claimed, for a
+        // reason nothing on screen could show.
+        let demysto = unconfigured("a paragraph");
+        let path = demysto.config_dir().join(config::FILE_NAME);
+
+        std::fs::write(&path, "palette_hotkey = \"  F13  \"\n").unwrap();
+
+        assert_eq!(
+            demysto.settings().unwrap().palette_hotkey.as_deref(),
+            Some("F13")
+        );
+        assert_eq!(demysto.palette_hotkey().as_deref(), Some("F13"));
+    }
+
+    #[test]
+    fn a_palette_hotkey_can_be_set_without_disturbing_what_is_written_around_it() {
+        // Adding a root key is the one edit that could move somebody's own
+        // comment away from the line it was written about, and the test that
+        // guards the preamble never adds one.
+        let demysto = unconfigured("a paragraph");
+        let path = demysto.config_dir().join(config::FILE_NAME);
+        let mine = "# the cheap one, for everything that is not hard";
+
+        std::fs::write(&path, format!("{mine}\ndefault_model = \"local/qwen3\"\n")).unwrap();
+
+        // A keyless preset, so that saving asks no Provider anything.
+        let local = ProviderEdit {
+            preset: Some("ollama".to_owned()),
+            models: vec![offering("qwen3", false)],
+            ..drafted("local")
+        };
+
+        saved(
+            &demysto,
+            &Edit {
+                palette_hotkey: Some("F13".to_owned()),
+                ..edited(vec![local], Some("local/qwen3"))
+            },
+        );
+
+        let after = settings_file(&demysto);
+        let lines: Vec<&str> = after.lines().collect();
+        let at = lines.iter().position(|line| *line == mine).expect(&after);
+
+        assert!(
+            lines[at + 1].starts_with("default_model"),
+            "the comment should still sit above what it was written about: {after}"
+        );
+        assert!(after.contains("palette_hotkey = \"F13\""), "{after}");
+    }
+
+    #[test]
+    fn a_key_that_types_nothing_needs_no_modifier() {
+        let demysto = unconfigured("a paragraph");
+
+        for key in [
+            "Pause",
+            "PrintScreen",
+            "ScrollLock",
+            "F13",
+            "F24",
+            "AudioVolumeMute",
+            "MediaPlayPause",
+            "MediaTrackPrevious",
+        ] {
+            assert!(demysto.needs_no_modifier(key), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_key_that_types_something_still_needs_a_modifier() {
+        // F12 beside F13 is the boundary somebody will widen by accident: the
+        // ordinary function row is bound by applications, and claiming one
+        // takes it from every one of them.
+        let demysto = unconfigured("a paragraph");
+
+        for key in [
+            "KeyE",
+            "Digit1",
+            "F1",
+            "F12",
+            "Escape",
+            "Space",
+            "Enter",
+            "Tab",
+            "Backspace",
+            "Delete",
+            "Insert",
+            "ArrowUp",
+            "Home",
+            "PageDown",
+            "Comma",
+        ] {
+            assert!(!demysto.needs_no_modifier(key), "{key}");
+        }
+    }
+
+    #[test]
+    fn every_key_that_needs_no_modifier_is_one_a_hotkey_could_be_written_with() {
+        let demysto = unconfigured("a paragraph");
+        let keys = demysto.keys_that_need_no_modifier();
+
+        for key in &keys {
+            assert!(!key.is_empty());
+            // A `+` is what separates a Hotkey's parts, on both sides of the
+            // bridge: one inside a key would be read as two.
+            assert!(!key.contains('+'), "{key}");
+            assert!(!key.contains(char::is_whitespace), "{key}");
+            assert_eq!(keys.iter().filter(|held| *held == key).count(), 1, "{key}");
         }
     }
 
@@ -3240,6 +3458,7 @@ mod tests {
                 }],
                 default_model: Some(String::new()),
                 default_vision_model: Some("   ".to_owned()),
+                palette_hotkey: Some("   ".to_owned()),
             },
         );
 

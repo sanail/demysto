@@ -34,15 +34,38 @@ pub struct Catalogue {
 /// The three commands that produce a catalogue all go through here, so that the
 /// Hotkeys follow the directory rather than the last save: an Action that
 /// arrived as a file somebody sent answers to its Hotkey once the window that
-/// writes Actions has been opened, without a restart.
+/// writes Actions has been opened, without a restart. The Palette's own stated
+/// Hotkey is read here for the same reason, so that one edited by hand follows
+/// the file exactly as an Action's does.
 ///
 /// The Palette's own `actions` deliberately does not claim, though it reads the
 /// same directory: it runs on the Hotkey path itself, and giving up every Hotkey
-/// to take them again is not something to do while one is being answered.
+/// to take them again is not something to do while one is being answered. This
+/// is reached only from the window that writes Actions, so the settings file it
+/// reads is not read on any path a keypress takes.
 fn catalogued<R: Runtime>(app: &AppHandle<R>, defined: demysto_core::Catalogue) -> Catalogue {
-    let unclaimed = crate::hotkey::claim(app, &defined.actions);
+    let palette = app.state::<Demysto>().palette_hotkey();
+    let unclaimed = crate::hotkey::claim(app, palette.as_deref(), &defined.actions);
 
     Catalogue { defined, unclaimed }
+}
+
+/// What the window that records a Hotkey has to know and cannot work out.
+#[derive(serde::Serialize)]
+pub struct Hotkeys {
+    /// The Palette's Hotkey where the settings state none, as the user reads it.
+    palette_default: &'static str,
+    /// The keys a Hotkey may be on its own, because they type nothing.
+    no_modifier_needed: Vec<&'static str>,
+}
+
+/// The two things about Hotkeys the window cannot answer for itself.
+#[tauri::command]
+pub fn hotkeys(demysto: State<'_, Demysto>) -> Hotkeys {
+    Hotkeys {
+        palette_default: crate::hotkey::PALETTE,
+        no_modifier_needed: demysto.keys_that_need_no_modifier(),
+    }
 }
 
 #[tauri::command]
@@ -156,6 +179,9 @@ pub fn settings(demysto: State<'_, Demysto>) -> Result<Settings, ConfigError> {
 ///
 /// Off the drawing thread like the two below it: a save puts every key typed
 /// into the window to its Provider before writing anything.
+///
+/// A Palette Hotkey saved here is not claimed here: the window asks for the
+/// catalogue afterwards, and claiming is what reading the catalogue does.
 #[tauri::command]
 pub async fn save_settings<R: Runtime>(
     app: AppHandle<R>,

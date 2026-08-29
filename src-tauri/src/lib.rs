@@ -60,7 +60,14 @@ pub fn run() {
             // window; until then the Settings window shows these same sentences
             // whenever it is opened, because it claims the set again as it reads
             // the catalogue.
-            for said in hotkey::claim(app.handle(), &app.state::<Demysto>().catalogue().actions) {
+            let demysto = app.state::<Demysto>();
+            let palette = demysto.palette_hotkey();
+
+            for said in hotkey::claim(
+                app.handle(),
+                palette.as_deref(),
+                &demysto.catalogue().actions,
+            ) {
                 eprintln!("{said}");
             }
 
@@ -97,6 +104,7 @@ pub fn run() {
             commands::show_conversation,
             commands::show_answers_on,
             commands::catalogue,
+            commands::hotkeys,
             commands::save_action,
             commands::delete_action,
             commands::settings,

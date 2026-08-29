@@ -8,37 +8,46 @@
 
 use std::sync::Mutex;
 
-use demysto_core::DefinedAction;
+use demysto_core::{DefinedAction, Demysto};
 use tauri::plugin::TauriPlugin;
-use tauri::{AppHandle, Runtime};
-use tauri_plugin_global_shortcut::{
-    Code, GlobalShortcut, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
-};
+use tauri::{AppHandle, Manager, Runtime};
+use tauri_plugin_global_shortcut::{GlobalShortcut, GlobalShortcutExt, Shortcut, ShortcutState};
 
-/// The Palette's Hotkey as the user reads it, which is how the report below
-/// names it. Written out rather than composed from [`for_palette`], whose own
-/// `Display` is the one the parser speaks — `shift+super+Space` is not a
-/// sentence to show anybody. The two are one line apart so that they stay one
-/// Hotkey.
-const PALETTE: &str = if cfg!(target_os = "macos") {
+/// The Hotkey that opens the Palette where the settings state none.
+///
+/// `Cmd+Shift+Space` on macOS and `Ctrl+Shift+Space` elsewhere: a key away from
+/// the one Spotlight and its equivalents already own, and taken by nothing on a
+/// stock system.
+///
+/// One string, which is the value, the sentence and what the window shows.
+/// Written the way the user reads it and parsed on the way to being claimed —
+/// the parser is not fussy about case and takes `Cmd` and `Ctrl` — because a
+/// `Shortcut`'s own `Display` is the parser's dialect, and `shift+super+Space`
+/// is not a Hotkey to show anybody.
+pub(crate) const PALETTE: &str = if cfg!(target_os = "macos") {
     "Cmd+Shift+Space"
 } else {
     "Ctrl+Shift+Space"
 };
 
-/// The Hotkey that opens the Palette.
-///
-/// `Cmd+Shift+Space` on macOS and `Ctrl+Shift+Space` elsewhere: a key away from
-/// the one Spotlight and its equivalents already own, and taken by nothing on a
-/// stock system.
-fn for_palette() -> Shortcut {
-    let platform = if cfg!(target_os = "macos") {
-        Modifiers::SUPER
-    } else {
-        Modifiers::CONTROL
-    };
+/// The Palette's Hotkey where the settings state none.
+fn built_in_palette() -> Shortcut {
+    PALETTE
+        .parse()
+        .expect("the Palette's own Hotkey should be one Demysto can parse")
+}
 
-    Shortcut::new(Some(platform | Modifiers::SHIFT), Code::Space)
+/// Whether a Hotkey stating one key and no modifier is one to claim.
+///
+/// A Hotkey is claimed from the whole operating system, so one key on its own
+/// answers to that key everywhere the user types. The core holds the few keys
+/// that costs nothing — see `demysto_core`'s `hotkey` module for which, and for
+/// why the neighbours are not among them.
+fn claimable_alone<R: Runtime>(app: &AppHandle<R>, hotkey: &Shortcut) -> bool {
+    !hotkey.mods.is_empty()
+        || app
+            .state::<Demysto>()
+            .needs_no_modifier(&hotkey.key.to_string())
 }
 
 /// What a Hotkey Demysto has claimed does when it is pressed.
@@ -124,7 +133,17 @@ fn bound(pressed: &Shortcut) -> Option<Bound> {
 /// directory as a file somebody sent, which is the whole point of one file each
 /// — and the operating system is the only authority on whether another
 /// application got there first.
-pub fn claim<R: Runtime>(app: &AppHandle<R>, actions: &[DefinedAction]) -> Vec<String> {
+///
+/// `palette` is the Hotkey the settings state for the Palette, `None` for the
+/// one Demysto comes with. It is claimed first, which means changing it can take
+/// a Hotkey away from an Action stating the same combination — the Action is
+/// told so in the report, and the window shows the report the moment the
+/// settings are saved.
+pub fn claim<R: Runtime>(
+    app: &AppHandle<R>,
+    palette: Option<&str>,
+    actions: &[DefinedAction],
+) -> Vec<String> {
     // One at a time: two of these interleaving would each give up what the
     // other had just taken, and leave the set Demysto believes it holds
     // describing neither.
@@ -145,25 +164,14 @@ pub fn claim<R: Runtime>(app: &AppHandle<R>, actions: &[DefinedAction]) -> Vec<S
     // The Palette's first, so that an Action stating it finds it taken rather
     // than taking it: the Hotkey the whole tool opens with is not something a
     // stray Action file gets to quietly take.
-    match hotkeys.register(for_palette()) {
-        Ok(()) => claimed.push(Claim {
-            hotkey: for_palette(),
-            bound: Bound::Palette,
-            holder: "the Palette".to_owned(),
-        }),
-        Err(error) => unclaimed.push(format!(
-            "Demysto could not claim {PALETTE}, the Hotkey that opens the Palette: {error}. \
-             Another application may already have it. The tray menu reaches everything the \
-             Hotkey does."
-        )),
-    }
+    unclaimed.append(&mut palettes(app, hotkeys, &mut claimed, palette));
 
     for action in actions {
         let Some(stated) = action.hotkey.as_deref() else {
             continue;
         };
 
-        if let Err(said) = claiming(hotkeys, &mut claimed, action, stated) {
+        if let Err(said) = claiming(app, hotkeys, &mut claimed, action, stated) {
             unclaimed.push(said);
         }
     }
@@ -173,8 +181,88 @@ pub fn claim<R: Runtime>(app: &AppHandle<R>, actions: &[DefinedAction]) -> Vec<S
     unclaimed
 }
 
+/// Claims the Palette's Hotkey: the one the settings state, or the one Demysto
+/// comes with where they state none — or where the one they state cannot be had.
+///
+/// Every way the stated one can fail falls back rather than leaving the Palette
+/// with no Hotkey at all, and every sentence it produces names what is answering
+/// instead. A Palette somebody cannot open is the tool not starting, and being
+/// told which key opens it is the difference between a setting that went wrong
+/// and a tool that appears to be broken.
+fn palettes<R: Runtime>(
+    app: &AppHandle<R>,
+    hotkeys: &GlobalShortcut<R>,
+    claimed: &mut Vec<Claim>,
+    stated: Option<&str>,
+) -> Vec<String> {
+    let mut said = Vec::new();
+
+    // The Hotkey that was registered, not the one that was asked for: on the
+    // way through a fallback the two differ, and a Claim holding the one nobody
+    // registered would never match the key actually pressed — the Palette would
+    // stop opening while the report said everything was well.
+    let claim = |claimed: &mut Vec<Claim>, hotkey| {
+        claimed.push(Claim {
+            hotkey,
+            bound: Bound::Palette,
+            holder: "the Palette".to_owned(),
+        })
+    };
+
+    if let Some(stated) = stated {
+        match wanted(app, hotkeys, stated) {
+            Ok(hotkey) => {
+                claim(claimed, hotkey);
+                return said;
+            }
+            Err(why) => said.push(format!("{why} Demysto is using {PALETTE} instead.")),
+        }
+    }
+
+    match hotkeys.register(built_in_palette()) {
+        Ok(()) => claim(claimed, built_in_palette()),
+        Err(error) => said.push(format!(
+            "Demysto could not claim {PALETTE}, the Hotkey that opens the Palette: {error}. \
+             Another application may already have it. The tray menu reaches everything the \
+             Hotkey does."
+        )),
+    }
+
+    said
+}
+
+/// Claims the Hotkey the settings state for the Palette, or says why not.
+fn wanted<R: Runtime>(
+    app: &AppHandle<R>,
+    hotkeys: &GlobalShortcut<R>,
+    stated: &str,
+) -> Result<Shortcut, String> {
+    let Ok(hotkey) = stated.parse::<Shortcut>() else {
+        return Err(format!(
+            "The settings state the Hotkey \"{stated}\" for the Palette, which is not a \
+             combination Demysto understands."
+        ));
+    };
+
+    if !claimable_alone(app, &hotkey) {
+        return Err(format!(
+            "The settings state the Hotkey \"{stated}\" for the Palette, which is one key that \
+             types something. A Hotkey is claimed everywhere, so a key on its own has to be one \
+             that reaches nothing you were typing into."
+        ));
+    }
+
+    hotkeys.register(hotkey).map(|()| hotkey).map_err(|error| {
+        format!(
+            "The settings state the Hotkey \"{stated}\" for the Palette, and Demysto could not \
+             claim it: {error}. Another application may already have it."
+        )
+    })
+}
+
 /// Claims one Action's Hotkey, or says in a whole sentence why it could not be.
 fn claiming<R: Runtime>(
+    app: &AppHandle<R>,
     hotkeys: &GlobalShortcut<R>,
     claimed: &mut Vec<Claim>,
     action: &DefinedAction,
@@ -190,15 +278,12 @@ fn claiming<R: Runtime>(
         ));
     };
 
-    // A Hotkey is global, so one with no modifier answers to that key
-    // everywhere the user types — which is a way to lose the letter R rather
-    // than to bind an Action. The window that records one will not offer this;
-    // a file written by hand can still ask for it.
-    if hotkey.mods.is_empty() {
+    if !claimable_alone(app, &hotkey) {
         return Err(format!(
-            "{name} states the Hotkey \"{stated}\", which is one key on its own. A Hotkey is \
-             claimed everywhere, so it needs at least one modifier — otherwise that key would \
-             stop reaching whatever you were typing into."
+            "{name} states the Hotkey \"{stated}\", which is one key that types something. A \
+             Hotkey is claimed everywhere, so a key on its own has to be one that reaches \
+             nothing you were typing into — Pause, ScrollLock, PrintScreen, F13 and above, or \
+             a volume or media key. Anything else needs a modifier."
         ));
     }
 
@@ -228,4 +313,40 @@ fn claiming<R: Runtime>(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    //! The one thing in this module worth testing without a desktop: that the
+    //! two halves of the list agree.
+    //!
+    //! `demysto_core` decides which keys a Hotkey may be on its own, and names
+    //! them the way the W3C does — which is what a browser reports a keypress as.
+    //! This module claims them through a parser that has its own idea of what a
+    //! key is called. Nothing but this catches a name the core states and the
+    //! parser has never heard of, and what it would cost is a Hotkey the window
+    //! offers to record and the claim then quietly refuses.
+
+    use super::*;
+
+    #[test]
+    fn every_key_the_core_allows_alone_is_one_the_parser_knows() {
+        for key in demysto_core::keys_that_need_no_modifier() {
+            let hotkey: Shortcut = key
+                .parse()
+                .unwrap_or_else(|_| panic!("{key} should be a Hotkey the parser reads"));
+
+            assert!(hotkey.mods.is_empty(), "{key}");
+            assert_eq!(hotkey.key.to_string(), key);
+        }
+    }
+
+    #[test]
+    fn the_palettes_own_hotkey_is_one_the_parser_knows() {
+        // `built_in_palette` unwraps this, and it is the Hotkey the whole tool
+        // opens with.
+        let hotkey = built_in_palette();
+
+        assert!(!hotkey.mods.is_empty());
+    }
 }

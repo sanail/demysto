@@ -4,6 +4,7 @@
     catalogue as catalogued,
     deleteAction,
     dismiss,
+    hotkeys as allowed,
     presets as offeredPresets,
     providerModels,
     saveAction,
@@ -88,11 +89,17 @@
   let unclaimedHotkeys = $state<string[]>([]);
   let editing = $state<Editing | null>(null);
   /**
-   * Whether a Hotkey is being recorded, which is what takes every keypress away
-   * from the window: the combination somebody wants is quite likely one that
-   * already means something here.
+   * Which Hotkey field is being recorded into, `null` for neither. While one is,
+   * every keypress belongs to it rather than to the window: the combination
+   * somebody wants is quite likely one that already means something here.
    */
-  let recording = $state(false);
+  let recording = $state<"palette" | "action" | null>(null);
+  /** The Hotkey that opens the Palette, empty for the one Demysto comes with. */
+  let paletteHotkey = $state("");
+  /** What opens the Palette when nothing states otherwise, as it is read. */
+  let paletteDefault = $state("");
+  /** The keys a Hotkey may be on its own — the backend decides which. */
+  let bareKeys = $state<ReadonlySet<string>>(new Set());
   /** What went wrong with the last Action saved, in the backend's own words. */
   let actionProblem = $state<string | null>(null);
   let actionSaving = $state(false);
@@ -127,6 +134,16 @@
     "outline-none focus:border-neutral-500 dark:border-neutral-700 " +
     "dark:focus:border-neutral-500";
 
+  /**
+   * What both Hotkey fields say about what may be recorded. One sentence rather
+   * than two, because it is one rule — and honest about which keys are worth
+   * trying: an operating system answers to its own volume and media keys long
+   * before Demysto sees them.
+   */
+  const HOTKEY_RULE =
+    "Hold at least one modifier, or press a key that types nothing on its own — " +
+    "F13 and above are the ones most keyboards can send.";
+
   const BUTTON =
     "cursor-pointer rounded border border-neutral-300 px-2 py-1 text-xs " +
     "hover:bg-neutral-100 disabled:cursor-default disabled:opacity-40 " +
@@ -136,6 +153,11 @@
   onMount(async () => {
     presets = await offeredPresets();
     where = (await status()).config_dir;
+
+    const may = await allowed();
+    paletteDefault = may.palette_default;
+    bareKeys = new Set(may.no_modifier_needed);
+
     held(await catalogued());
 
     try {
@@ -153,14 +175,8 @@
     drafts = settings.providers.map(drafted);
     defaultModel = settings.default_model ?? "";
     defaultVisionModel = settings.default_vision_model ?? "";
+    paletteHotkey = settings.palette_hotkey ?? "";
   }
-
-  /**
-   * Everything the backend has to say about the Actions, which is one list to
-   * the reader: a file nobody could parse and a Hotkey nobody could claim are
-   * both something wrong with an Action, said in a whole sentence.
-   */
-  const wrongWithActions = $derived([...unreadableActions, ...unclaimedHotkeys]);
 
   /** Takes the catalogue as the directory holds it as the state of this window. */
   function held(catalogue: Catalogue) {
@@ -355,7 +371,15 @@
         providers: drafts.map(edited),
         default_model: defaultModel,
         default_vision_model: defaultVisionModel,
+        palette_hotkey: paletteHotkey,
       }));
+
+      // Asked for again because reading the catalogue is what claims the
+      // Hotkeys: without this the Palette would answer to its old combination
+      // until something else happened to read it. It also brings back the
+      // sentences, which is how somebody learns that the Palette has just taken
+      // a Hotkey an Action was using.
+      held(await catalogued());
 
       saved = true;
       setTimeout(() => (saved = false), ACKNOWLEDGED);
@@ -380,7 +404,7 @@
   /** What an Action being written starts as. */
   function write() {
     actionProblem = null;
-    recording = false;
+    recording = null;
     editing = {
       standing: null,
       draft: {
@@ -405,7 +429,7 @@
    */
   function change(action: DefinedAction) {
     actionProblem = null;
-    recording = false;
+    recording = null;
     editing = {
       standing: action.standing,
       draft: {
@@ -423,13 +447,19 @@
   /** Takes the Hotkey off this Action, which is the only way to have none. */
   function unbind() {
     if (editing) editing.draft.hotkey = null;
-    recording = false;
+    recording = null;
+  }
+
+  /** Takes the Palette back to the Hotkey Demysto comes with. */
+  function unbindPalette() {
+    paletteHotkey = "";
+    recording = null;
   }
 
   /** Leaves the Action being edited, whatever was being done to it. */
   function stopEditing() {
     editing = null;
-    recording = false;
+    recording = null;
   }
 
   function declare() {
@@ -490,7 +520,7 @@
     // While a Hotkey is being recorded every keypress is the Hotkey, including
     // the ones this window would otherwise act on: the combination the user
     // wants is quite likely one that already means something here.
-    if (recording) {
+    if (recording !== null) {
       event.preventDefault();
       record(event);
       return;
@@ -518,20 +548,25 @@
    * stopping there would bind half of what they meant.
    */
   function record(event: KeyboardEvent) {
+    const pressed = combination(event, bareKeys);
+
     // Escape on its own is the way out, and is why the recording does not need
     // a Cancel button of its own. Escape with a modifier is a combination like
     // any other.
-    if (event.code === "Escape" && !combination(event)) {
-      recording = false;
+    if (event.code === "Escape" && !pressed) {
+      recording = null;
       return;
     }
 
-    const pressed = combination(event);
+    if (!pressed) return;
 
-    if (!pressed || !editing) return;
+    if (recording === "palette") {
+      paletteHotkey = pressed;
+    } else if (editing) {
+      editing.draft.hotkey = pressed;
+    }
 
-    editing.draft.hotkey = pressed;
-    recording = false;
+    recording = null;
   }
 </script>
 
@@ -791,6 +826,62 @@
     {/if}
 
     <section class="flex flex-col gap-3">
+      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
+        Hotkeys
+      </h2>
+
+      {#if !unreadable}
+        <div class="flex flex-col gap-1">
+          <span class="text-xs opacity-60">
+            The Palette — what opens it over whatever you are reading
+          </span>
+          <div class="flex items-center gap-2">
+            <span
+              class="{FIELD} flex-1 truncate {paletteHotkey ||
+              recording === 'palette'
+                ? ''
+                : 'opacity-40'}"
+            >
+              {#if recording === "palette"}
+                Press a combination… Esc to stop
+              {:else if paletteHotkey}
+                {reading(paletteHotkey)}
+              {:else}
+                {reading(paletteDefault)} — what Demysto comes with
+              {/if}
+            </span>
+
+            <button
+              type="button"
+              class={BUTTON}
+              disabled={recording !== null}
+              onclick={() => (recording = "palette")}
+            >
+              Record
+            </button>
+
+            <button
+              type="button"
+              class={BUTTON}
+              disabled={!paletteHotkey}
+              onclick={unbindPalette}
+            >
+              Clear
+            </button>
+          </div>
+          <span class="text-xs opacity-50">
+            {HOTKEY_RULE} Saved by the Save button below, and answered to as soon
+            as it is.
+          </span>
+        </div>
+      {/if}
+
+      {#each unclaimedHotkeys as said (said)}
+        <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
+      {/each}
+    </section>
+
+    <section class="flex flex-col gap-3">
       <div class="flex items-baseline justify-between gap-3">
         <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
           Actions
@@ -807,7 +898,7 @@
         An Action is saved on its own, not by the Save button below.
       </p>
 
-      {#each wrongWithActions as said (said)}
+      {#each unreadableActions as said (said)}
         <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
       {/each}
 
@@ -892,11 +983,12 @@
             </span>
             <div class="flex items-center gap-2">
               <span
-                class="{FIELD} flex-1 truncate {editing.draft.hotkey || recording
+                class="{FIELD} flex-1 truncate {editing.draft.hotkey ||
+                recording === 'action'
                   ? ''
                   : 'opacity-40'}"
               >
-                {#if recording}
+                {#if recording === "action"}
                   Press a combination… Esc to stop
                 {:else if editing.draft.hotkey}
                   {reading(editing.draft.hotkey)}
@@ -908,8 +1000,8 @@
               <button
                 type="button"
                 class={BUTTON}
-                disabled={recording}
-                onclick={() => (recording = true)}
+                disabled={recording !== null}
+                onclick={() => (recording = "action")}
               >
                 Record
               </button>
@@ -924,9 +1016,8 @@
               </button>
             </div>
             <span class="text-xs opacity-50">
-              Hold at least one modifier: a Hotkey is global, so a bare key would
-              answer everywhere you type. Parameters are not asked for on this
-              path — each takes what it offers.
+              {HOTKEY_RULE} Parameters are not asked for on this path — each takes
+              what it offers.
             </span>
           </div>
 

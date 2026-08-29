@@ -36,6 +36,11 @@ pub struct Settings {
     pub default_model: Option<String>,
     /// And the one an image resolves to first.
     pub default_vision_model: Option<String>,
+    /// The Hotkey that opens the Palette, `None` for the one Demysto comes
+    /// with. Carried as the text it was written as, and judged nowhere here,
+    /// for the reason `DefinedAction::hotkey` is: whether a combination can be
+    /// claimed is a question only the desktop can answer.
+    pub palette_hotkey: Option<String>,
 }
 
 /// One Provider as the file states it — with where its key is, and not the key.
@@ -88,6 +93,7 @@ pub struct Edit {
     pub providers: Vec<ProviderEdit>,
     pub default_model: Option<String>,
     pub default_vision_model: Option<String>,
+    pub palette_hotkey: Option<String>,
 }
 
 /// One Provider as the window would have it.
@@ -206,6 +212,11 @@ pub(crate) fn read(config_dir: &Path, env: &Environment) -> Result<Settings, Con
         providers,
         default_model: file.default_model,
         default_vision_model: file.default_vision_model,
+        // Trimmed on the way out, unlike the two above it, because this is the
+        // one field that goes to a parser which will not trim it for itself: a
+        // Hotkey stated by hand as " F13" would read back looking right and
+        // then refuse to be claimed, for a reason nothing on screen could show.
+        palette_hotkey: config::stated(file.palette_hotkey),
     })
 }
 
@@ -387,11 +398,16 @@ fn rewritten(text: &str, edit: &Edit, path: &Path) -> Result<String, ConfigError
     document["version"] = value(i64::from(config::VERSION));
 
     let root = document.as_table_mut();
-    stating(root, "default_model", edit.default_model.as_deref());
+    stating(root, config::MODEL_SETTING, edit.default_model.as_deref());
     stating(
         root,
-        "default_vision_model",
+        config::VISION_SETTING,
         edit.default_vision_model.as_deref(),
+    );
+    stating(
+        root,
+        config::PALETTE_SETTING,
+        edit.palette_hotkey.as_deref(),
     );
 
     let held = root

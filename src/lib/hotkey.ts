@@ -54,18 +54,24 @@ const SPELLINGS: Record<string, (typeof MODIFIERS)[number]> = {
 /**
  * The combination just pressed, or `null` while it is not one yet.
  *
- * `null` rather than a Hotkey for a key held on its own: a global Hotkey with no
- * modifier would answer to that key everywhere in the operating system, which is
- * a way to lose the letter E rather than to bind an Action.
+ * `null` rather than a Hotkey for a key held on its own, unless it is one of
+ * `alone`: a Hotkey is claimed everywhere, so binding a bare letter is a way to
+ * lose that letter rather than to bind an Action. Which keys escape that is the
+ * backend's answer — see its `hotkey` module — and it is passed in rather than
+ * held here so that there is no moment where this has been asked and not yet
+ * told.
  */
-export function combination(event: KeyboardEvent): string | null {
+export function combination(
+  event: KeyboardEvent,
+  alone: ReadonlySet<string>,
+): string | null {
   // A press with no code behind it is not a key anything could be claimed on:
   // some input methods send one while they are composing.
   if (!event.code || MODIFIER_KEYS.test(event.code)) return null;
 
   const held = MODIFIERS.filter((modifier) => event[modifier.flag]);
 
-  if (held.length === 0) return null;
+  if (held.length === 0 && !alone.has(event.code)) return null;
 
   // The physical key rather than the character it produces: Option+E is a
   // combination, and on macOS the character it produces is an accent.
