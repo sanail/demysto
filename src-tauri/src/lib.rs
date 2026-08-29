@@ -53,7 +53,16 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             tray::build(app)?;
-            hotkey::register(app.handle());
+
+            // Claimed from the catalogue, so that an Action already carrying a
+            // Hotkey answers to it from the first keypress rather than from the
+            // first save. Ticket 11 owns making the report visible without a
+            // window; until then the Settings window shows these same sentences
+            // whenever it is opened, because it claims the set again as it reads
+            // the catalogue.
+            for said in hotkey::claim(app.handle(), &app.state::<Demysto>().catalogue().actions) {
+                eprintln!("{said}");
+            }
 
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window(palette::LABEL) {

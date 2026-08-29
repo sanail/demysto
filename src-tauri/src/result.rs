@@ -56,28 +56,73 @@ pub fn show_answers_on(channel: Channel<String>) {
 /// Runs one Action over the last Capture, in a Conversation of its own.
 pub fn run<R: Runtime>(app: &AppHandle<R>, action: String, parameters: BTreeMap<String, String>) {
     off_thread(app, move |app, window| {
-        // The Palette has done its part. Hidden here rather than by the window
-        // that is about to take the focus from it, so that it goes even if
-        // showing the Conversation window turns out to fail.
-        if let Some(palette) = app.get_webview_window(crate::palette::LABEL) {
-            let _ = palette.hide();
-        }
-
-        // Declared before the window is shown rather than when the Run begins:
-        // a window loading for this Run asks the core what it is looking at,
-        // and the question before this one is what it must not come up holding
-        // — neither that question's answer nor its name.
-        let demysto = app.state::<Demysto>();
-        demysto.about_to_run(&action);
-
-        // Shown before the answer exists, and told that one is on its way: the
-        // user should see something immediately rather than after however long
-        // the Model takes.
-        let _ = window.emit(RUNNING_EVENT, ());
-        reveal(window);
-
-        demysto.run(&action, &parameters, streaming);
+        dismiss_palette(app);
+        opening(app, window, &action, &parameters);
     });
+}
+
+/// Runs one Action on a Selection captured for it, with no Palette anywhere on
+/// the path.
+///
+/// What an Action's own Hotkey does (user story 6): select, press, read. The
+/// Capture happens here because on the other path it happens in `palette::open`,
+/// and this one never goes near the Palette.
+///
+/// Nothing is collected for the Parameters the Action declares. The Palette is
+/// where they are asked for, and it is precisely what the user bound this Hotkey
+/// to skip — so each Parameter takes what it offers, which is why a built-in's
+/// default is chosen to be the answer somebody would have typed.
+pub fn straight_to<R: Runtime>(app: &AppHandle<R>, action: String) {
+    off_thread(app, move |app, window| {
+        // Before the Capture, so that a copy keystroke meant for the application
+        // the user is reading is not answered by a window of Demysto's own.
+        dismiss_palette(app);
+
+        // Also before the Conversation window is shown, for the reason
+        // `palette::open` captures before it shows the Palette: the copy
+        // keystroke only reaches what the user is reading while that is still
+        // the foreground application.
+        app.state::<Demysto>().capture();
+
+        opening(app, window, &action, &BTreeMap::new());
+    });
+}
+
+/// Puts the Conversation window up for the Run about to begin, and runs it.
+///
+/// Both paths into a Run end here; what differs is where the Selection came
+/// from, and that is settled before this is called.
+fn opening<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &WebviewWindow<R>,
+    action: &str,
+    parameters: &BTreeMap<String, String>,
+) {
+    // Declared before the window is shown rather than when the Run begins: a
+    // window loading for this Run asks the core what it is looking at, and the
+    // question before this one is what it must not come up holding — neither
+    // that question's answer nor its name.
+    let demysto = app.state::<Demysto>();
+    demysto.about_to_run(action);
+
+    // Shown before the answer exists, and told that one is on its way: the user
+    // should see something immediately rather than after however long the Model
+    // takes.
+    let _ = window.emit(RUNNING_EVENT, ());
+    reveal(window);
+
+    demysto.run(action, parameters, streaming);
+}
+
+/// Takes the Palette off the screen, which every Run does before it puts a
+/// Conversation there.
+///
+/// Here rather than in the window that is about to take the focus from it, so
+/// that it goes even if showing the Conversation window turns out to fail.
+fn dismiss_palette<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(palette) = app.get_webview_window(crate::palette::LABEL) {
+        let _ = palette.hide();
+    }
 }
 
 /// Asks a follow-up in the Conversation the window is showing.

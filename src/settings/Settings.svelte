@@ -23,6 +23,7 @@
     type ProviderEdit,
     type Settings,
   } from "../lib/ipc";
+  import { combination, reading } from "../lib/hotkey";
 
   /** How long the window says a save landed. */
   const ACKNOWLEDGED = 1600;
@@ -78,7 +79,20 @@
   /** The Actions as the directory holds them, and what could not be read. */
   let actions = $state<DefinedAction[]>([]);
   let unreadableActions = $state<string[]>([]);
+  /**
+   * The Hotkeys stated by an Action and not answered to, in the backend's own
+   * sentences — one another application already has, one two Actions both ask
+   * for, one that is not a combination at all. Read back with the catalogue
+   * every time, because claiming them is what asking for the catalogue does.
+   */
+  let unclaimedHotkeys = $state<string[]>([]);
   let editing = $state<Editing | null>(null);
+  /**
+   * Whether a Hotkey is being recorded, which is what takes every keypress away
+   * from the window: the combination somebody wants is quite likely one that
+   * already means something here.
+   */
+  let recording = $state(false);
   /** What went wrong with the last Action saved, in the backend's own words. */
   let actionProblem = $state<string | null>(null);
   let actionSaving = $state(false);
@@ -141,10 +155,18 @@
     defaultVisionModel = settings.default_vision_model ?? "";
   }
 
+  /**
+   * Everything the backend has to say about the Actions, which is one list to
+   * the reader: a file nobody could parse and a Hotkey nobody could claim are
+   * both something wrong with an Action, said in a whole sentence.
+   */
+  const wrongWithActions = $derived([...unreadableActions, ...unclaimedHotkeys]);
+
   /** Takes the catalogue as the directory holds it as the state of this window. */
   function held(catalogue: Catalogue) {
     actions = catalogue.actions;
     unreadableActions = catalogue.unreadable;
+    unclaimedHotkeys = catalogue.unclaimed;
   }
 
   function drafted(provider: ConfiguredProvider): Draft {
@@ -358,6 +380,7 @@
   /** What an Action being written starts as. */
   function write() {
     actionProblem = null;
+    recording = false;
     editing = {
       standing: null,
       draft: {
@@ -382,6 +405,7 @@
    */
   function change(action: DefinedAction) {
     actionProblem = null;
+    recording = false;
     editing = {
       standing: action.standing,
       draft: {
@@ -394,6 +418,18 @@
         accepts: action.accepts,
       },
     };
+  }
+
+  /** Takes the Hotkey off this Action, which is the only way to have none. */
+  function unbind() {
+    if (editing) editing.draft.hotkey = null;
+    recording = false;
+  }
+
+  /** Leaves the Action being edited, whatever was being done to it. */
+  function stopEditing() {
+    editing = null;
+    recording = false;
   }
 
   function declare() {
@@ -416,7 +452,7 @@
       // directory reads back, and an Override that changed nothing leaves no
       // file at all.
       held(await saveAction(editing.draft));
-      editing = null;
+      stopEditing();
     } catch (error) {
       actionProblem = saidBy(error);
     } finally {
@@ -431,7 +467,7 @@
 
     try {
       held(await deleteAction(action.id));
-      if (editing?.draft.id === action.id) editing = null;
+      if (editing?.draft.id === action.id) stopEditing();
     } catch (error) {
       actionProblem = saidBy(error);
     }
@@ -451,6 +487,15 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
+    // While a Hotkey is being recorded every keypress is the Hotkey, including
+    // the ones this window would otherwise act on: the combination the user
+    // wants is quite likely one that already means something here.
+    if (recording) {
+      event.preventDefault();
+      record(event);
+      return;
+    }
+
     if (event.key !== "Escape") return;
 
     event.preventDefault();
@@ -458,11 +503,35 @@
     // Escape leaves what it is in: an Action being edited first, and the window
     // only once there is nothing left to back out of.
     if (editing) {
-      editing = null;
+      stopEditing();
       return;
     }
 
     dismiss();
+  }
+
+  /**
+   * Takes one keypress as the Hotkey being bound.
+   *
+   * A press that is not a combination yet — a modifier on its own, or a key
+   * held without one — leaves the recording open: the user is mid-reach, and
+   * stopping there would bind half of what they meant.
+   */
+  function record(event: KeyboardEvent) {
+    // Escape on its own is the way out, and is why the recording does not need
+    // a Cancel button of its own. Escape with a modifier is a combination like
+    // any other.
+    if (event.code === "Escape" && !combination(event)) {
+      recording = false;
+      return;
+    }
+
+    const pressed = combination(event);
+
+    if (!pressed || !editing) return;
+
+    editing.draft.hotkey = pressed;
+    recording = false;
   }
 </script>
 
@@ -738,7 +807,7 @@
         An Action is saved on its own, not by the Save button below.
       </p>
 
-      {#each unreadableActions as said (said)}
+      {#each wrongWithActions as said (said)}
         <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
       {/each}
 
@@ -754,6 +823,12 @@
 
             {#if standing(action)}
               <span class="text-xs opacity-40">{standing(action)}</span>
+            {/if}
+
+            {#if action.hotkey}
+              <span class="truncate text-xs opacity-40">
+                {reading(action.hotkey)}
+              </span>
             {/if}
 
             {#if action.model}
@@ -808,6 +883,51 @@
                 {/each}
               </select>
             </label>
+          </div>
+
+          <div class="flex flex-col gap-1">
+            <span class="text-xs opacity-60">
+              Hotkey — runs this Action on what you have selected, with no
+              Palette in the way
+            </span>
+            <div class="flex items-center gap-2">
+              <span
+                class="{FIELD} flex-1 truncate {editing.draft.hotkey || recording
+                  ? ''
+                  : 'opacity-40'}"
+              >
+                {#if recording}
+                  Press a combination… Esc to stop
+                {:else if editing.draft.hotkey}
+                  {reading(editing.draft.hotkey)}
+                {:else}
+                  None — this Action is reached through the Palette
+                {/if}
+              </span>
+
+              <button
+                type="button"
+                class={BUTTON}
+                disabled={recording}
+                onclick={() => (recording = true)}
+              >
+                Record
+              </button>
+
+              <button
+                type="button"
+                class={BUTTON}
+                disabled={!editing.draft.hotkey}
+                onclick={unbind}
+              >
+                Clear
+              </button>
+            </div>
+            <span class="text-xs opacity-50">
+              Hold at least one modifier: a Hotkey is global, so a bare key would
+              answer everywhere you type. Parameters are not asked for on this
+              path — each takes what it offers.
+            </span>
           </div>
 
           <label class="flex flex-col gap-1">
@@ -887,11 +1007,7 @@
             >
               {actionSaving ? "Saving\u2026" : "Save this Action"}
             </button>
-            <button
-              type="button"
-              class={BUTTON}
-              onclick={() => (editing = null)}
-            >
+            <button type="button" class={BUTTON} onclick={stopEditing}>
               Cancel
             </button>
             {#if editing.standing === "overridden"}

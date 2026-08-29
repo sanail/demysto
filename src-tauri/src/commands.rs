@@ -7,11 +7,43 @@
 use std::collections::BTreeMap;
 
 use demysto_core::{
-    Action, ActionEdit, ActionError, CaptureOutcome, Catalogue, ConfigError, Conversation, Demysto,
-    Edit, Preset, ProviderEdit, RunError, Settings, Status, Summary,
+    Action, ActionEdit, ActionError, CaptureOutcome, ConfigError, Conversation, Demysto, Edit,
+    Preset, ProviderEdit, RunError, Settings, Status, Summary,
 };
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
+
+/// The catalogue as the window that writes Actions sees it: what the core holds,
+/// plus what came of claiming the Hotkeys the Actions in it state.
+///
+/// The two travel together because they are read together — that window is where
+/// a Hotkey is bound, so it is where one that could not be claimed has to be
+/// reported. Flattened, so that the window sees one shape with one more field on
+/// it rather than a catalogue inside a wrapper.
+#[derive(serde::Serialize)]
+pub struct Catalogue {
+    #[serde(flatten)]
+    defined: demysto_core::Catalogue,
+    /// The stated Hotkeys Demysto does not answer to, in whole sentences —
+    /// alongside `unreadable`, which the catalogue carries for the same reason.
+    unclaimed: Vec<String>,
+}
+
+/// Claims the Hotkeys a catalogue states, and hands both to the window.
+///
+/// The three commands that produce a catalogue all go through here, so that the
+/// Hotkeys follow the directory rather than the last save: an Action that
+/// arrived as a file somebody sent answers to its Hotkey once the window that
+/// writes Actions has been opened, without a restart.
+///
+/// The Palette's own `actions` deliberately does not claim, though it reads the
+/// same directory: it runs on the Hotkey path itself, and giving up every Hotkey
+/// to take them again is not something to do while one is being answered.
+fn catalogued<R: Runtime>(app: &AppHandle<R>, defined: demysto_core::Catalogue) -> Catalogue {
+    let unclaimed = crate::hotkey::claim(app, &defined.actions);
+
+    Catalogue { defined, unclaimed }
+}
 
 #[tauri::command]
 pub fn status(demysto: State<'_, Demysto>) -> Status {
@@ -83,27 +115,34 @@ pub fn show_answers_on(channel: Channel<String>) {
 }
 
 /// Every Action there is, with everything about it, for the window that writes
-/// them.
+/// them — and, because reading the directory is also when the Hotkeys in it are
+/// claimed, what could not be claimed.
 #[tauri::command]
-pub fn catalogue(demysto: State<'_, Demysto>) -> Catalogue {
-    demysto.catalogue()
+pub fn catalogue<R: Runtime>(app: AppHandle<R>) -> Catalogue {
+    let defined = app.state::<Demysto>().catalogue();
+
+    catalogued(&app, defined)
 }
 
 /// Writes one Action, and answers with the catalogue as the directory then
 /// holds it.
 #[tauri::command]
-pub fn save_action(
-    demysto: State<'_, Demysto>,
+pub fn save_action<R: Runtime>(
+    app: AppHandle<R>,
     edit: ActionEdit,
 ) -> Result<Catalogue, ActionError> {
-    demysto.save_action(&edit)
+    let defined = app.state::<Demysto>().save_action(&edit)?;
+
+    Ok(catalogued(&app, defined))
 }
 
 /// Deletes an Action of the user's own, or removes the Override over a built-in
 /// and leaves the built-in.
 #[tauri::command]
-pub fn delete_action(demysto: State<'_, Demysto>, id: String) -> Result<Catalogue, ActionError> {
-    demysto.delete_action(&id)
+pub fn delete_action<R: Runtime>(app: AppHandle<R>, id: String) -> Result<Catalogue, ActionError> {
+    let defined = app.state::<Demysto>().delete_action(&id)?;
+
+    Ok(catalogued(&app, defined))
 }
 
 /// The settings as the file now holds them, for the window that edits it.

@@ -313,7 +313,7 @@ export type DefinedAction = {
   template: string;
   parameters: Parameter[];
   model: string | null;
-  /** The Hotkey that runs it without the Palette — ticket 10 registers it. */
+  /** The Hotkey that runs it without the Palette, `null` for one that has none. */
   hotkey: string | null;
   accepts: Kind[];
   standing: ActionStanding;
@@ -321,11 +321,20 @@ export type DefinedAction = {
   path: string | null;
 };
 
-/** Mirrors `demysto_core::Catalogue`. */
+/**
+ * Mirrors the backend's `Actions`: `demysto_core::Catalogue`, flattened, plus
+ * what came of claiming the Hotkeys the Actions in it state.
+ */
 export type Catalogue = {
   actions: DefinedAction[];
   /** What went wrong with the files that are not in it, in whole sentences. */
   unreadable: string[];
+  /**
+   * The stated Hotkeys Demysto does not answer to, in whole sentences: one
+   * another application already has, one two Actions both ask for, one written
+   * as something that is not a combination at all.
+   */
+  unclaimed: string[];
 };
 
 /** Mirrors `demysto_core::ActionEdit`: what the window saves for one Action. */
@@ -346,7 +355,10 @@ export type ActionError = {
   message: string;
 };
 
-/** Every Action there is, with everything about it. */
+/**
+ * Every Action there is, with everything about it — and, because asking claims
+ * the Hotkeys they state, what could not be claimed.
+ */
 export function catalogue(): Promise<Catalogue> {
   return invoke<Catalogue>("catalogue");
 }

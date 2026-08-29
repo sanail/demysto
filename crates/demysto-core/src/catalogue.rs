@@ -75,7 +75,8 @@ pub struct Catalogue {
 pub struct DefinedAction {
     /// What this Action is asked for by, and what its file is called. Fixed
     /// when the Action is created and unchanged by renaming it, because an
-    /// Override is keyed on it and — once ticket 10 lands — so is a Hotkey.
+    /// Override is keyed on it, a Hotkey is bound to it, and neither should
+    /// follow a renaming.
     pub id: String,
     pub name: String,
     /// What it says to the Model, with `{{selection}}` and the rest standing in
@@ -85,9 +86,11 @@ pub struct DefinedAction {
     /// The Model it runs on whatever the defaults say, `None` when it takes
     /// whichever Model resolution arrives at.
     pub model: Option<String>,
-    /// The Hotkey that runs it without the Palette. Carried through a save
-    /// rather than offered by the window: registering one is ticket 10's, and
-    /// a file that already names one must not lose it to a save made here.
+    /// The Hotkey that runs it without the Palette, `None` for an Action
+    /// reached through the Palette like any other. Carried as the text it was
+    /// written as: whether a combination can be claimed is a question only the
+    /// desktop can answer, so the shell reads this and reports what it could
+    /// not claim.
     pub hotkey: Option<String>,
     /// The Selection kinds it will run on. Text is the only one v1 captures;
     /// the field is here because the file states it and a save must not flatten

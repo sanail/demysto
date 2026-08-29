@@ -3025,9 +3025,9 @@ mod tests {
                     default: "a child".to_owned(),
                 }],
                 model: None,
-                // Carried through a save rather than offered by the window:
-                // registering one is ticket 10's, and a file that names one
-                // must not lose it to a save made here.
+                // Written as it was stated: what a combination means, and
+                // whether anything else has it, is the desktop's answer to give
+                // and the shell's to ask for.
                 hotkey: Some("Ctrl+Alt+R".to_owned()),
                 accepts: vec![Kind::Text],
                 standing: ActionStanding::Authored,
