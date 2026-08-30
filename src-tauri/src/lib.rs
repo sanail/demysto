@@ -8,6 +8,10 @@ mod commands;
 mod dock;
 mod folder;
 mod hotkey;
+/// Строка меню: она есть только на macOS и только ради клавишных
+/// эквивалентов — см. модуль.
+#[cfg(target_os = "macos")]
+mod menu;
 mod notify;
 mod palette;
 /// The Hotkey on Wayland.
@@ -67,6 +71,11 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             tray::build(app)?;
+
+            // После трея и до всего остального: без пункта меню с `Cmd+C`
+            // выделение в окне Conversation некуда забрать (user story 15).
+            #[cfg(target_os = "macos")]
+            menu::build(app)?;
 
             // Claimed from the catalogue, so that an Action already carrying a
             // Hotkey answers to it from the first keypress rather than from the
