@@ -31,6 +31,7 @@ pub fn action_of(id: &str) -> Option<&str> {
 }
 
 /// One Hotkey Demysto asks the portal for.
+#[derive(Clone, PartialEq, Eq)]
 pub struct Wanted {
     /// What the portal knows it by, and what comes back when it is pressed.
     pub id: String,
@@ -203,6 +204,22 @@ mod binding {
     /// the one from startup by the time anybody opens Settings to read it.
     static REPORT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
+    /// What was last asked of the portal, so that asking again for the same
+    /// thing can be recognised and skipped.
+    ///
+    /// The catalogue is read at startup and again by every window that lists
+    /// Actions, and reading it is what claims the Hotkeys in it — deliberately,
+    /// so that an Action which arrived as a file somebody sent answers to its
+    /// Hotkey without a restart. Everywhere else that costs a re-registration
+    /// nobody notices. Here it costs the user a second consent dialog stacked
+    /// on the first: the Settings window is created hidden at startup, its
+    /// webview asks for the catalogue about a second later, and the desktop
+    /// dutifully asks again about Hotkeys it is already asking about.
+    ///
+    /// So the guard is here rather than in `hotkey::claim`: this is the one
+    /// platform where asking twice is something the user has to answer twice.
+    static ASKED: Mutex<Option<Vec<Wanted>>> = Mutex::new(None);
+
     /// How the task holding the portal session open is told to let go, which is
     /// what a fresh set of Actions needs.
     ///
@@ -226,6 +243,19 @@ mod binding {
         pressed: impl Fn(&str) + Send + Sync + 'static,
         noted: impl Fn(&str) + Send + Sync + 'static,
     ) -> Vec<String> {
+        // Nothing has changed, so there is nothing to ask: the session already
+        // open holds exactly these Hotkeys, and giving it up to ask for them
+        // again would put a second dialog in front of the user for no gain.
+        let mut asked = ASKED.lock().unwrap_or_else(|held| held.into_inner());
+        if asked.as_deref() == Some(wanted.as_slice()) {
+            return REPORT
+                .lock()
+                .unwrap_or_else(|held| held.into_inner())
+                .clone();
+        }
+        *asked = Some(wanted.clone());
+        drop(asked);
+
         let mut stopping = STOPPING.lock().unwrap_or_else(|held| held.into_inner());
 
         // Before the new one is started, so that the portal is not left holding
