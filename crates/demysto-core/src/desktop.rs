@@ -6,7 +6,9 @@
 //! [`Desktop`] trait, which is what leaves everything built on top of them
 //! testable — see the spec's *Testing Decisions*. What is tested here are the
 //! two decisions that are not I/O: which Capture this session can perform, and
-//! which key the copy chord is sent as.
+//! which key the copy chord is sent as. Whether macOS has granted the
+//! Accessibility permission is asked of macOS, so the suite exercises it
+//! through the fake desktop instead.
 
 use std::ffi::OsStr;
 use std::time::Duration;
@@ -94,6 +96,58 @@ impl Desktop for SystemDesktop {
             .key(copy, Direction::Release)
             .map_err(|error| keystroke(&error.to_string()))
     }
+
+    fn permitted(&self) -> Result<(), CaptureError> {
+        accessibility()
+    }
+}
+
+/// What the user is told when macOS is withholding the Accessibility
+/// permission.
+///
+/// Names the pane rather than only the permission, so that the sentence and the
+/// button the interface puts beside it say the same thing — and so that the
+/// sentence is still followable for somebody who reads it in a notification,
+/// where there is no button.
+#[cfg(target_os = "macos")]
+const NO_ACCESSIBILITY: &str = "macOS is not letting Demysto read what you selected: Demysto \
+     needs the Accessibility permission. Open Privacy & Security → Accessibility and turn \
+     Demysto on. macOS withdraws it whenever the application changes, so this can come back \
+     after an update.";
+
+/// Whether macOS is letting Demysto type into another application.
+///
+/// `AXIsProcessTrusted` rather than the variant that offers to ask for the
+/// permission: this is called at every Capture, and a system dialog on every
+/// Hotkey press would be its own kind of broken. Walking the user to the
+/// permission is the first-run flow's, and is ticket 15's.
+#[cfg(target_os = "macos")]
+fn accessibility() -> Result<(), CaptureError> {
+    // Declared here rather than taken from a crate: one function with no
+    // arguments is the whole of Demysto's interest in the Accessibility API.
+    // It answers a `Boolean`, which is a byte and not a Rust `bool`.
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> std::ffi::c_uchar;
+    }
+
+    // SAFETY: no arguments, no pointers, and documented as callable from any
+    // thread — which matters, because a Capture is never on the main one.
+    let trusted = unsafe { AXIsProcessTrusted() } != 0;
+
+    match trusted {
+        true => Ok(()),
+        false => Err(CaptureError::Permission(NO_ACCESSIBILITY.to_owned())),
+    }
+}
+
+/// Nothing gates synthetic input on X11 or on Windows: what is typed there is
+/// typed. Wayland refuses it outright, and that is not a permission anybody can
+/// grant — it is a Capture Demysto does not attempt, and `for_platform` is
+/// where that is decided (ADR-0003).
+#[cfg(not(target_os = "macos"))]
+fn accessibility() -> Result<(), CaptureError> {
+    Ok(())
 }
 
 /// The letter half of the copy chord, as the key the user's fingers are on.
@@ -133,8 +187,9 @@ fn clipboard() -> Result<arboard::Clipboard, CaptureError> {
     arboard::Clipboard::new().map_err(|error| CaptureError::Clipboard(error.to_string()))
 }
 
-/// On macOS a refused keystroke is nearly always the Accessibility permission
-/// rather than anything about the key itself; ticket 12 owns saying so.
+/// A keystroke enigo itself refused, which is a different thing from one macOS
+/// would not have delivered — that is asked about first, in [`accessibility`],
+/// and reported as the permission it is.
 fn keystroke(message: &str) -> CaptureError {
     CaptureError::Keystroke(message.to_owned())
 }

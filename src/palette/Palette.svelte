@@ -6,11 +6,13 @@
     lastCapture,
     onCapture,
     onCapturing,
+    openAccessibility,
     run,
     type Action,
     type CaptureOutcome,
   } from "../lib/ipc";
   import { latest } from "../lib/latest.svelte";
+  import { sending } from "../lib/sending";
 
   const capture = latest<CaptureOutcome>({
     began: onCapturing,
@@ -42,6 +44,14 @@
   let answers = $state<Record<string, string>>({});
   /** Whichever field is on screen: there is never more than one. */
   let field = $state<HTMLInputElement | null>(null);
+
+  /** What stopped the user being sent somewhere, in the backend's own words. */
+  let unreachable = $state<string | null>(null);
+
+  /** Walks the user to the permission macOS is withholding (user story 55). */
+  async function grant() {
+    unreachable = await sending(openAccessibility);
+  }
 
   /** What both of those fields look like, which is the same. */
   const FIELD =
@@ -193,6 +203,25 @@
       <p class="text-sm text-red-600 dark:text-red-400">
         {outcome.detail.message}
       </p>
+
+      {#if outcome.detail.kind === "permission"}
+        <!-- The one Capture failure with somewhere to be sent: nothing about
+             this Palette can fix it, and the pane that can is one click away. -->
+        <div>
+          <button
+            type="button"
+            onclick={grant}
+            class="cursor-pointer rounded border border-neutral-300 px-2 py-1 text-xs
+                   hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          >
+            Open Accessibility settings
+          </button>
+        </div>
+
+        {#if unreachable}
+          <p class="text-xs text-red-600 dark:text-red-400">{unreachable}</p>
+        {/if}
+      {/if}
     {:else if !selection}
       <p class="text-sm opacity-60">
         Nothing is selected and the clipboard is empty. Select some text and

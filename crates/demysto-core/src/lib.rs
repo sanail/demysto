@@ -560,7 +560,7 @@ impl Demysto {
     ) -> RunOutcome {
         let captured = self.last_capture();
         let Some(selection) = captured.as_ref().and_then(CaptureOutcome::selection) else {
-            return RunOutcome::Failed(run::nothing_to_run());
+            return RunOutcome::Failed(run::nothing_captured(captured.as_ref()));
         };
 
         // The Palette offers only the Actions that accept what was captured, and
@@ -1144,6 +1144,96 @@ mod tests {
         assert_eq!(
             demysto(Box::new(Broken)).capture(),
             CaptureOutcome::Failed(CaptureError::Clipboard("no owner".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_desktop_withholding_the_permission_says_so_rather_than_finding_nothing() {
+        let desktop = Arc::new(
+            FakeDesktop::new(Some("copied a moment ago"), Some("a paragraph"))
+                .refusing_permission(),
+        );
+
+        // Not the clipboard it happens to be holding, and not "nothing was
+        // selected": there is a Selection, and the reason Demysto cannot have
+        // it is one the user can do something about.
+        assert_eq!(
+            demysto(fake::over(&desktop)).capture(),
+            CaptureOutcome::Failed(CaptureError::Permission(fake::REFUSED.to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_capture_the_permission_refuses_disturbs_nothing() {
+        let desktop = Arc::new(
+            FakeDesktop::new(Some("copied a moment ago"), Some("a paragraph"))
+                .refusing_permission(),
+        );
+
+        demysto(fake::over(&desktop)).capture();
+
+        assert_eq!(
+            desktop.clipboard_now(),
+            Some("copied a moment ago".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_permission_is_asked_about_at_every_capture() {
+        // macOS withdraws it whenever the binary's signature changes, so an
+        // answer held from startup is one that goes stale under a running
+        // Demysto (the spec's *Shell and platform*).
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+        let demysto = demysto(fake::over(&desktop));
+
+        demysto.capture();
+        demysto.capture();
+
+        assert_eq!(desktop.permission_checks(), 2);
+    }
+
+    #[test]
+    fn a_run_after_a_refused_permission_reports_the_permission() {
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")).refusing_permission());
+        let demysto = demysto(fake::over(&desktop));
+
+        demysto.capture();
+
+        // The path an Action's own Hotkey takes: nothing on screen said the
+        // Capture was refused, so the Conversation is where it has to be said —
+        // and "select some text and press the Hotkey again" would be advice
+        // that cannot work (user story 55).
+        assert_eq!(
+            demysto.run("explain", &BTreeMap::new(), |_| {}).error(),
+            Some(&RunError::Permission {
+                message: fake::REFUSED.to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn a_run_after_a_capture_that_simply_found_nothing_still_says_so() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = demysto(fake::over(&desktop));
+
+        demysto.capture();
+
+        assert!(matches!(
+            demysto.run("explain", &BTreeMap::new(), |_| {}).error(),
+            Some(RunError::NothingToRun { .. })
+        ));
+    }
+
+    #[test]
+    fn a_clipboard_only_session_needs_no_permission() {
+        // It types into nothing, so there is nothing for a desktop to withhold
+        // — which is the whole of Wayland's position (ADR-0003).
+        let desktop =
+            Arc::new(FakeDesktop::new(Some("copied by hand"), None).refusing_permission());
+
+        assert_eq!(
+            captured(&demysto(fake::clipboard_only_over(&desktop))),
+            Captured::Clipboard(Selection::text("copied by hand"))
         );
     }
 

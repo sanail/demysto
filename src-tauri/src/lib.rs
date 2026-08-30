@@ -3,7 +3,9 @@
 //! This crate owns windows, the tray, and the command bridge. The product logic
 //! lives in `demysto-core`, which knows nothing about Tauri; see ADR-0001.
 
+mod accessibility;
 mod commands;
+mod dock;
 mod folder;
 mod hotkey;
 mod notify;
@@ -52,9 +54,8 @@ pub fn run() {
     let app = builder
         .manage(Demysto::new(config_dir, env!("CARGO_PKG_VERSION")))
         .setup(|app| {
-            // Accessory while the Palette is all there is: a resident utility
-            // has no business in the dock. Ticket 12 makes this follow whether
-            // a Conversation or Settings window is open.
+            // Accessory to begin with, because at startup the Palette is all
+            // there is. From here the policy follows the windows; see `dock`.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
@@ -90,6 +91,11 @@ pub fn run() {
                 // deliberate act, and the tray menu is where it lives.
                 api.prevent_close();
                 let _ = window.hide();
+
+                dock::follows_the_windows(
+                    window.app_handle(),
+                    dock::Change::Hiding(window.label()),
+                );
             }
             // The Palette is not a window anybody should have to manage: losing
             // the focus is the same instruction as pressing Escape.
@@ -109,6 +115,7 @@ pub fn run() {
             commands::continue_answer,
             commands::models,
             commands::open_logs,
+            commands::open_accessibility,
             commands::open_settings,
             commands::conversation,
             commands::conversations,

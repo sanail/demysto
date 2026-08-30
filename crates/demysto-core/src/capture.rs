@@ -77,6 +77,14 @@ pub enum CaptureError {
     Clipboard(String),
     /// The copy keystroke could not be delivered to the foreground application.
     Keystroke(String),
+    /// The operating system is withholding the permission a Capture needs.
+    ///
+    /// Held apart from [`Self::Keystroke`] because what the user is owed
+    /// differs: a keystroke that failed is worth trying again, and this is not
+    /// worth trying again until they have granted something. Carries the whole
+    /// sentence, which names the permission and where it is granted, because
+    /// only the platform that has such a permission can say either.
+    Permission(String),
 }
 
 impl fmt::Display for CaptureError {
@@ -86,6 +94,7 @@ impl fmt::Display for CaptureError {
             Self::Keystroke(message) => {
                 write!(f, "the copy keystroke could not be sent: {message}")
             }
+            Self::Permission(message) => f.write_str(message),
         }
     }
 }
@@ -103,6 +112,16 @@ pub(crate) trait Desktop: Send + Sync {
 
     /// Sends the platform's copy keystroke to the foreground application.
     fn send_copy(&self) -> Result<(), CaptureError>;
+
+    /// Whether this desktop is letting Demysto type into another application
+    /// at all.
+    ///
+    /// Asked at every Capture rather than answered once at startup: macOS gates
+    /// synthetic input behind the Accessibility permission and withdraws it
+    /// whenever the binary's signature changes, so an answer held from startup
+    /// is an answer that goes stale under a running Demysto (the spec's *Shell
+    /// and platform*).
+    fn permitted(&self) -> Result<(), CaptureError>;
 }
 
 /// How long a Capture waits for the copied text to reach the clipboard.
@@ -148,6 +167,14 @@ impl<D: Desktop> DesktopCapture<D> {
 
 impl<D: Desktop> Capture for DesktopCapture<D> {
     fn capture(&self) -> Result<Captured, CaptureError> {
+        // Asked before the clipboard is touched, because without the permission
+        // the copy never reaches the application the user is reading and what
+        // follows is the fallback: the clipboard reported as though nothing had
+        // been selected. Which is the wrong sentence for a Selection that is
+        // sitting right there — and one no amount of pressing the Hotkey again
+        // will improve.
+        self.desktop.permitted()?;
+
         let before = self.desktop.clipboard_text()?;
 
         self.desktop.send_copy()?;
@@ -244,6 +271,9 @@ impl<D: Desktop> ClipboardCapture<D> {
 }
 
 impl<D: Desktop> Capture for ClipboardCapture<D> {
+    /// Nothing is asked of the desktop first: this Capture types into nothing,
+    /// so there is no permission it could be missing. Reading the clipboard is
+    /// something every session allows.
     fn capture(&self) -> Result<Captured, CaptureError> {
         Ok(fallback(&self.desktop.clipboard_text()?))
     }
@@ -259,6 +289,10 @@ pub(crate) mod fake {
 
     use super::{Capture, CaptureError, ClipboardCapture, Desktop, DesktopCapture, Settle};
 
+    /// What a desktop withholding the permission says, standing in for the
+    /// sentence the platform that has one writes — see `desktop`.
+    pub(crate) const REFUSED: &str = "the permission is not granted";
+
     /// A desktop whose foreground application holds `selection`, and which puts
     /// it on the clipboard `lands_after` reads after being sent a copy.
     #[derive(Default)]
@@ -268,6 +302,10 @@ pub(crate) mod fake {
         lands_after: u32,
         reads_since_copy: Mutex<Option<u32>>,
         refuses_writes: bool,
+        refuses_permission: bool,
+        /// How many times the permission has been asked about, so that a test
+        /// can see it is asked at every Capture rather than once.
+        permission_checks: Mutex<u32>,
     }
 
     impl FakeDesktop {
@@ -289,6 +327,17 @@ pub(crate) mod fake {
         pub(crate) fn refusing_to_restore(mut self) -> Self {
             self.refuses_writes = true;
             self
+        }
+
+        /// A desktop withholding the permission synthetic input needs, which is
+        /// what macOS looks like with Accessibility turned off.
+        pub(crate) fn refusing_permission(mut self) -> Self {
+            self.refuses_permission = true;
+            self
+        }
+
+        pub(crate) fn permission_checks(&self) -> u32 {
+            *self.permission_checks.lock().unwrap()
         }
 
         pub(crate) fn clipboard_now(&self) -> Option<String> {
@@ -323,6 +372,15 @@ pub(crate) mod fake {
             *self.reads_since_copy.lock().unwrap() = Some(0);
             Ok(())
         }
+
+        fn permitted(&self) -> Result<(), CaptureError> {
+            *self.permission_checks.lock().unwrap() += 1;
+
+            match self.refuses_permission {
+                true => Err(CaptureError::Permission(REFUSED.to_owned())),
+                false => Ok(()),
+            }
+        }
     }
 
     /// Shared so that a test can look at the clipboard the Capture it was given
@@ -338,6 +396,10 @@ pub(crate) mod fake {
 
         fn send_copy(&self) -> Result<(), CaptureError> {
             <FakeDesktop as Desktop>::send_copy(self)
+        }
+
+        fn permitted(&self) -> Result<(), CaptureError> {
+            <FakeDesktop as Desktop>::permitted(self)
         }
     }
 

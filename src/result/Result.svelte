@@ -11,6 +11,7 @@
     onAnswered,
     onRunning,
     onStreaming,
+    openAccessibility,
     openSettings,
     retry,
     showConversation,
@@ -22,6 +23,7 @@
     type Turn,
   } from "../lib/ipc";
   import { copyable, COPIED, render } from "../lib/markdown";
+  import { sending } from "../lib/sending";
 
   /** How near the bottom counts as reading along with the answer. */
   const PINNED = 32;
@@ -175,8 +177,17 @@
    */
   let carryingOn = $state(false);
 
-  /** What went wrong reaching Settings, in the words the backend chose. */
-  let unreachableSettings = $state<string | null>(null);
+  /**
+   * What stopped the user being sent somewhere, in the backend's own words. One
+   * field for both buttons below: they hang off the same failure's footer, and
+   * only one of them is ever on screen.
+   */
+  let unreachable = $state<string | null>(null);
+
+  /** Walks the user to the permission macOS is withholding (user story 55). */
+  async function grant() {
+    unreachable = await sending(openAccessibility);
+  }
 
   /** Asks the Turn on screen again, of the Model the user picked or of the same one. */
   async function askAgain(model?: string) {
@@ -196,13 +207,7 @@
 
   /** Opens Settings where the Provider that refused a key is configured. */
   async function fix(provider: string) {
-    unreachableSettings = null;
-
-    try {
-      await openSettings(provider);
-    } catch (error) {
-      unreachableSettings = String(error);
-    }
+    unreachable = await sending(() => openSettings(provider));
   }
 
   /** Whether the list of this session's Conversations is open, and what it holds. */
@@ -441,24 +446,40 @@
                   </button>
                 {/if}
 
-                <button type="button" class={FOOTER} onclick={() => askAgain()}>
-                  Try again
-                </button>
+                <!-- Not offered on a permission: asking again and asking
+                     elsewhere both put a question to a Model, and no Model is
+                     what this Turn is short of. Two buttons that cannot work
+                     would report it as an ordinary failure with a third. -->
+                {#if problem.kind !== "permission"}
+                  <button type="button" class={FOOTER} onclick={() => askAgain()}>
+                    Try again
+                  </button>
 
-                <select
-                  class="{FOOTER} max-w-40"
-                  value=""
-                  onchange={(event) => {
-                    const picked = event.currentTarget.value;
-                    event.currentTarget.value = "";
-                    if (picked !== "") askAgain(picked);
-                  }}
-                >
-                  <option value="">Ask another Model…</option>
-                  {#each switchable as model (model)}
-                    <option value={model}>{model}</option>
-                  {/each}
-                </select>
+                  <select
+                    class="{FOOTER} max-w-40"
+                    value=""
+                    onchange={(event) => {
+                      const picked = event.currentTarget.value;
+                      event.currentTarget.value = "";
+                      if (picked !== "") askAgain(picked);
+                    }}
+                  >
+                    <option value="">Ask another Model…</option>
+                    {#each switchable as model (model)}
+                      <option value={model}>{model}</option>
+                    {/each}
+                  </select>
+                {/if}
+
+                {#if problem.kind === "permission"}
+                  <!-- The Run an Action's own Hotkey started, with no Palette
+                       anywhere on the path to have reported this: the
+                       Conversation is where the permission has to be said, and
+                       where the way to it has to be offered. -->
+                  <button type="button" class={FOOTER} onclick={grant}>
+                    Open Accessibility settings
+                  </button>
+                {/if}
 
                 {#if problem.kind === "authentication"}
                   <!-- The one failure the Conversation cannot fix: the key is
@@ -474,9 +495,9 @@
               {/if}
             </div>
 
-            {#if last && unreachableSettings}
+            {#if last && unreachable}
               <p class="text-xs text-red-600 dark:text-red-400">
-                {unreachableSettings}
+                {unreachable}
               </p>
             {/if}
           {/if}

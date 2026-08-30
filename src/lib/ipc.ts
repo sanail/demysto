@@ -22,9 +22,15 @@ export type Captured =
   | { origin: "clipboard"; selection: Selection }
   | { origin: "nothing" };
 
-/** Mirrors `demysto_core::CaptureError`. */
+/**
+ * Mirrors `demysto_core::CaptureError`.
+ *
+ * The kinds exist so that a window can offer a different affordance per kind —
+ * `permission` is the one with somewhere to be sent. The message is composed in
+ * the backend and shown as it is.
+ */
 export type CaptureError = {
-  kind: "clipboard" | "keystroke";
+  kind: "clipboard" | "keystroke" | "permission";
   message: string;
 };
 
@@ -107,6 +113,12 @@ export type RunError =
    * — it is what the log is given, and this window shows the message.
    */
   | { kind: "malformed"; message: string; reason: string }
+  /**
+   * The operating system is withholding what the Capture this Run would have
+   * operated on needs — on macOS, the Accessibility permission. Offered the way
+   * to the pane that grants it rather than a retry that cannot help.
+   */
+  | { kind: "permission"; message: string }
   | {
       kind:
         | "configuration"
@@ -231,6 +243,15 @@ export function onProviderWanted(
   handle: (provider: string) => void,
 ): Promise<UnlistenFn> {
   return listen<string>("settings://provider", (event) => handle(event.payload));
+}
+
+/**
+ * Opens the settings pane where the Accessibility permission is granted, which
+ * is how a Capture the system refused is fixed from where it is reported.
+ * Rejects with a whole sentence when the pane could not be reached.
+ */
+export function openAccessibility(): Promise<void> {
+  return invoke<void>("open_accessibility");
 }
 
 /**

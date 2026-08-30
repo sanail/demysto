@@ -29,7 +29,8 @@ pub struct Catalogue {
     unclaimed: Vec<String>,
 }
 
-/// Claims the Hotkeys a catalogue states, and hands both to the window.
+/// Claims the Hotkeys a catalogue states, puts its Actions in the tray menu,
+/// and hands the catalogue and what could not be claimed to the window.
 ///
 /// The three commands that produce a catalogue all go through here, so that the
 /// Hotkeys follow the directory rather than the last save: an Action that
@@ -46,6 +47,11 @@ pub struct Catalogue {
 fn catalogued<R: Runtime>(app: &AppHandle<R>, defined: demysto_core::Catalogue) -> Catalogue {
     let palette = app.state::<Demysto>().palette_hotkey();
     let unclaimed = crate::hotkey::claim(app, palette.as_deref(), &defined.actions);
+
+    // The tray menu lists the Actions too, and for the same reason it is
+    // brought up to date here: it is the path for somebody who has not learned
+    // the Hotkey, and an Action missing from it is an Action they cannot reach.
+    crate::tray::follows_the_catalogue(app, &defined.actions);
 
     Catalogue { defined, unclaimed }
 }
@@ -140,6 +146,13 @@ pub fn models(demysto: State<'_, Demysto>) -> Vec<String> {
 #[tauri::command]
 pub fn open_settings<R: Runtime>(app: AppHandle<R>, provider: Option<String>) {
     crate::settings::reveal_at(&app, provider);
+}
+
+/// Opens the settings pane where the Accessibility permission is granted, which
+/// is how a Capture the system refused is fixed from where it is reported.
+#[tauri::command]
+pub fn open_accessibility() -> Result<(), String> {
+    crate::accessibility::reveal()
 }
 
 /// Opens the folder Demysto writes its logs in, so that a bug report can carry
@@ -264,7 +277,17 @@ async fn waiting<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -
 
 /// Hides the window this was invoked from, which is what Escape asks for in
 /// all of them.
+///
+/// The dock is told for the reason the close handler tells it: Escape out of
+/// the last Conversation is as ordinary a way to put a window away as the close
+/// button, and either one leaving Demysto in the dock would leave it there with
+/// nothing to switch back to.
 #[tauri::command]
 pub fn dismiss<R: Runtime>(window: WebviewWindow<R>) {
     let _ = window.hide();
+
+    crate::dock::follows_the_windows(
+        window.app_handle(),
+        crate::dock::Change::Hiding(window.label()),
+    );
 }

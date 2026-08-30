@@ -6,6 +6,8 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::capture::{CaptureError, CaptureOutcome};
+
 /// What one Turn produced, failure included: the Run that opened the
 /// Conversation, or a follow-up asked in it.
 ///
@@ -121,6 +123,14 @@ pub enum RunError {
     /// Provider, because the fix is in that Provider's own settings and the
     /// interface is expected to offer the way there (user story 45).
     Authentication { message: String, provider: String },
+    /// The operating system is withholding something the Capture this Run
+    /// would have operated on needs.
+    ///
+    /// Held apart from [`Self::NothingToRun`] because the advice differs: that
+    /// one asks the user to select something and press the Hotkey again, and
+    /// this one is the case where doing so changes nothing until a permission
+    /// has been granted (user story 55).
+    Permission { message: String },
     /// The Provider answered with something that is not the contract's shape.
     ///
     /// `reason` is what was wrong with it, without the quotation of what
@@ -138,6 +148,7 @@ impl RunError {
             | Self::Unreachable { message }
             | Self::TimedOut { message }
             | Self::Provider { message }
+            | Self::Permission { message }
             | Self::Authentication { message, .. }
             | Self::Malformed { message, .. } => message,
         }
@@ -173,6 +184,26 @@ impl fmt::Display for RunError {
 }
 
 impl std::error::Error for RunError {}
+
+/// What the user is told when the Run found no Selection to operate on: why
+/// the Capture before it produced none.
+///
+/// Every Run begins with a Capture — the Palette's, or the one an Action's own
+/// Hotkey performs on the way past it — so this is where a Capture the
+/// operating system refused reaches the user on the path that has no Palette on
+/// screen to have shown it (user story 55).
+///
+/// A clipboard that could not be read is not among them: it leaves the user
+/// able to select something and press the Hotkey again, which is exactly what
+/// the sentence below tells them to do.
+pub(crate) fn nothing_captured(outcome: Option<&CaptureOutcome>) -> RunError {
+    match outcome {
+        Some(CaptureOutcome::Failed(CaptureError::Permission(message))) => RunError::Permission {
+            message: message.clone(),
+        },
+        _ => nothing_to_run(),
+    }
+}
 
 /// What the user is told when the Hotkey found nothing to act on.
 pub(crate) fn nothing_to_run() -> RunError {

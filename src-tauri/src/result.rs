@@ -234,7 +234,17 @@ fn streaming(answer: &str) {
 }
 
 /// Brings the Conversation window in front of the user, wherever it was.
+///
+/// The dock is told first: a window belonging to an accessory application is
+/// not in the window switcher, and the whole point of a Conversation is that
+/// the user can leave it and come back to it with the keys they use for every
+/// other window (user story 50).
 fn reveal<R: Runtime>(window: &WebviewWindow<R>) {
+    crate::dock::follows_the_windows(
+        window.app_handle(),
+        crate::dock::Change::Showing(window.label()),
+    );
+
     let _ = window.show();
     let _ = window.set_focus();
 }

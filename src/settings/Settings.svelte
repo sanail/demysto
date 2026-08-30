@@ -27,6 +27,7 @@
     type Settings,
   } from "../lib/ipc";
   import { combination, reading } from "../lib/hotkey";
+  import { saidBy, sending } from "../lib/sending";
   import type { UnlistenFn } from "@tauri-apps/api/event";
 
   /** How long the window says a save landed. */
@@ -213,13 +214,7 @@
 
   /** Opens the folder the logs are written in, so a bug report can carry them. */
   async function showLogs() {
-    logsProblem = null;
-
-    try {
-      await openLogs();
-    } catch (error) {
-      logsProblem = saidBy(error);
-    }
+    logsProblem = await sending(openLogs);
   }
 
   /** Takes the settings as the file holds them as the state of this window. */
@@ -279,15 +274,6 @@
     if (draft.typed.trim() !== "") return { action: "set", key: draft.typed };
 
     return draft.forgetting ? { action: "forget" } : { action: "keep" };
-  }
-
-  /** The sentence a rejected command carries — every one of them has one. */
-  function saidBy(error: unknown): string {
-    if (typeof error === "object" && error !== null && "message" in error) {
-      return String((error as { message: unknown }).message);
-    }
-
-    return String(error);
   }
 
   /**

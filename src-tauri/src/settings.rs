@@ -21,6 +21,10 @@ pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
         return;
     };
 
+    // Before it is shown, for the reason a Conversation is: an accessory
+    // application's windows are in no switcher.
+    crate::dock::follows_the_windows(app, crate::dock::Change::Showing(LABEL));
+
     let _ = window.show();
     let _ = window.set_focus();
 }
