@@ -345,12 +345,12 @@ What is tested there:
 the pattern rather than follow one. That is a reason to be deliberate about the
 first module written, not a reason to defer the decision.
 
-**Deliberately untested.** Capture's real implementations, global Hotkeys, the
-tray, `NSPanel` behaviour, activation policy, and the Accessibility permission
-flow are interactive operating-system machinery, verified by hand on each
-platform. No WebDriver end-to-end suite: `tauri-driver` has no macOS support, and
-building one for two platforms out of three does not pay for itself on an
-application with two screens.
+**Not in the suite.** Capture's real implementations, global Hotkeys, the tray,
+`NSPanel` behaviour, activation policy, and the Accessibility permission flow are
+interactive operating-system machinery, checked on a live desktop per platform
+rather than in the suite. No WebDriver end-to-end suite: `tauri-driver` has no
+macOS support, and building one for two platforms out of three does not pay for
+itself on an application with two screens.
 
 ## Out of Scope
 

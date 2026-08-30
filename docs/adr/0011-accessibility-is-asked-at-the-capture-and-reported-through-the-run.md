@@ -63,8 +63,8 @@ A permission withdrawn between the Palette opening and an Action being chosen in
 it is not caught. The Run then works on the Selection already captured, which is
 the right answer anyway: that text was read while the permission held.
 
-Nothing here is tested against macOS. The suite exercises the whole surrounding
-behaviour through the fake desktop at the seam the spec names — the refusal, the
-clipboard left alone, the Run that reports it, and the clipboard-only session
-that asks nothing — and whether `AXIsProcessTrusted` tells the truth is macOS's
-business.
+The suite exercises the whole surrounding behaviour through the fake desktop at
+the seam the spec names — the refusal, the clipboard left alone, the Run that
+reports it, and the clipboard-only session that asks nothing. Whether
+`AXIsProcessTrusted` tells the truth is macOS's business, and is checked on a
+live desktop rather than in the suite.
