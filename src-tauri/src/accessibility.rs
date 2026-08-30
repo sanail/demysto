@@ -6,8 +6,6 @@
 //! it is a URL the desktop resolves, and `demysto-core` is not allowed to know
 //! that such a thing exists.
 
-use std::process::Command;
-
 /// The Accessibility list inside Privacy & Security, as macOS addresses it.
 ///
 /// The pane itself rather than the top of System Settings: what the user has to
@@ -23,6 +21,12 @@ const PANE: &str = "x-apple.systempreferences:com.apple.preference.security?Priv
 /// `folder::open` makes.
 #[cfg(target_os = "macos")]
 pub fn reveal() -> Result<(), String> {
+    // Imported here rather than at the top of the module: the platform that has
+    // no pane to open has no use for it either, and an import every other
+    // platform carries unused is a warning — which CI, running clippy with
+    // `-D warnings` on all three, turns into a failed build.
+    use std::process::Command;
+
     // Spawned rather than waited on, for the reason a file manager is: System
     // Settings runs for as long as the user keeps it open.
     Command::new("open")
