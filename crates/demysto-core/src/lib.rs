@@ -266,6 +266,21 @@ impl Demysto {
         self.store.lock().unwrap().showing().cloned()
     }
 
+    /// The whole of what the Conversation on screen is about, for the window
+    /// that quotes the opening of it and has been asked to show the rest.
+    ///
+    /// Asked for rather than carried on the Conversation, because a Selection
+    /// has no size limit and the Conversation crosses to the window every time
+    /// a Turn begins or ends; this crosses once, when somebody asks.
+    pub fn selection(&self) -> Option<String> {
+        self.store
+            .lock()
+            .unwrap()
+            .showing()
+            .and_then(Conversation::selection_text)
+            .map(ToOwned::to_owned)
+    }
+
     /// This session's Conversations, newest first, as the list of them reads.
     pub fn conversations(&self) -> Vec<Summary> {
         self.store.lock().unwrap().summaries()
@@ -817,6 +832,9 @@ mod tests {
 
     use super::*;
     use crate::capture::fake::{self, FakeDesktop};
+    // For the one test that puts two different texts on a fake clipboard in
+    // turn, so that two Conversations are about two different Selections.
+    use crate::capture::Desktop;
 
     /// A Demysto with a configuration directory of its own, kept for as long as
     /// the test holds it.
@@ -2001,6 +2019,107 @@ mod tests {
         let desktop = Arc::new(FakeDesktop::new(None, None));
 
         assert_eq!(demysto(fake::over(&desktop)).show_conversation(7), None);
+    }
+
+    #[test]
+    fn the_window_is_given_the_selection_its_answer_is_about() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        run(&demysto);
+
+        // The Action's name says what was done; this says what it was done to.
+        assert_eq!(showing(&demysto).preview.as_deref(), Some("a paragraph"));
+        assert_eq!(demysto.selection().as_deref(), Some("a paragraph"));
+    }
+
+    #[test]
+    fn a_selection_longer_than_the_window_quotes_is_cut_and_says_so() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        // Multibyte, because a Selection is as likely to be Russian as English
+        // and the cut is counted in characters rather than in bytes.
+        let long = "письмо ".repeat(100);
+        let demysto = ready_to_run(&server, &long);
+        run(&demysto);
+
+        let opening: String = long.chars().take(conversation::PREVIEW).collect();
+
+        assert_eq!(showing(&demysto).preview, Some(format!("{opening}…")));
+
+        // And the rest of it is there for the asking, which is what expanding
+        // the quotation does.
+        assert_eq!(demysto.selection(), Some(long));
+    }
+
+    #[test]
+    fn a_conversation_gone_back_to_is_quoted_by_its_own_selection() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        // Captured from the clipboard rather than from a selection, because
+        // that is the desktop a test can put two different texts on in turn.
+        let desktop = Arc::new(FakeDesktop::new(Some("the first paragraph"), None));
+        let demysto = rooted(
+            fake::over(&desktop),
+            Some(&format!(
+                "version = 1\n\n{}",
+                one_provider(&format!("{}/v1", server.url()))
+            )),
+        );
+
+        demysto.capture();
+        run(&demysto);
+        let earlier = showing(&demysto).id;
+
+        desktop
+            .set_clipboard_text(Some("the second paragraph"))
+            .expect("the fake clipboard should take it");
+        demysto.capture();
+        run(&demysto);
+
+        assert_eq!(
+            showing(&demysto).preview.as_deref(),
+            Some("the second paragraph")
+        );
+
+        // The Selection belongs to the Conversation, not to the session: going
+        // back to an earlier one quotes what that one was asked about.
+        assert_eq!(
+            demysto
+                .show_conversation(earlier)
+                .and_then(|shown| shown.preview)
+                .as_deref(),
+            Some("the first paragraph")
+        );
+        assert_eq!(demysto.selection().as_deref(), Some("the first paragraph"));
+    }
+
+    #[test]
+    fn a_conversation_with_no_selection_has_nothing_to_quote() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = rooted(fake::over(&desktop), None);
+
+        demysto.capture();
+
+        // The empty Conversation a declared Run leaves behind when there was
+        // nothing to run it on: the window heads it with the Action and quotes
+        // nothing, rather than quoting an empty box.
+        demysto.about_to_run("explain");
+
+        assert_eq!(showing(&demysto).preview, None);
+        assert_eq!(demysto.selection(), None);
     }
 
     #[test]

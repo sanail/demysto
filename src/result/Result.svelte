@@ -14,6 +14,7 @@
     openAccessibility,
     openSettings,
     retry,
+    selection,
     showConversation,
     stop,
     type Conversation,
@@ -184,6 +185,71 @@
    */
   let unreachable = $state<string | null>(null);
 
+  /** The quotation of the Selection, and whether all of it is on screen. */
+  let quotation = $state<HTMLElement>();
+  let expanded = $state(false);
+
+  /** The whole Selection, once it has been asked for; `null` until then. */
+  let whole = $state<string | null>(null);
+
+  /**
+   * Whether the quotation has more in it than the lines it is showing, which is
+   * what puts Show more under it.
+   *
+   * Measured rather than worked out from the preview's length: the preview is
+   * capped well beyond two lines, so a Selection far shorter than the cap is
+   * still the common case for being clipped, and only the layout knows.
+   */
+  let clipped = $state(false);
+
+  /** Which Conversation the quotation belongs to, so that going to another closes it. */
+  let quoting: number | null = null;
+
+  // A different Conversation is a different Selection: the quotation opens
+  // closed again rather than standing expanded on somebody else's text.
+  $effect(() => {
+    const id = showing?.id ?? null;
+    if (id === quoting) return;
+
+    quoting = id;
+    expanded = false;
+    whole = null;
+  });
+
+  /** Says whether the quotation is showing less than it holds. */
+  function measure() {
+    clipped =
+      quotation !== undefined &&
+      !expanded &&
+      quotation.scrollHeight > quotation.clientHeight;
+  }
+
+  // Re-measured whenever what is quoted or how much of it changes. The `void`s
+  // are the dependencies: nothing here reads them, and the measurement is of
+  // the DOM they produced.
+  //
+  // After a `tick` rather than in the effect itself, because collapsing and
+  // measuring are one change: the Conversation being switched puts the
+  // quotation back to two lines, and a measurement taken in the same breath
+  // finds the box it had while expanded, where nothing is clipped and Show
+  // more never appears.
+  $effect(() => {
+    void showing?.preview;
+    void whole;
+    void expanded;
+
+    tick().then(measure);
+  });
+
+  /** Shows the whole Selection, asking for the part the preview left out. */
+  async function expand() {
+    expanded = true;
+
+    // Asked once per Conversation: the Selection cannot change under a
+    // Conversation, so showing it a second time is showing what is already here.
+    if (whole === null) whole = await selection();
+  }
+
   /** Walks the user to the permission macOS is withholding (user story 55). */
   async function grant() {
     unreachable = await sending(openAccessibility);
@@ -319,7 +385,7 @@
   }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onresize={measure} />
 
 <main
   class="flex h-screen flex-col gap-3 bg-white p-6 font-sans text-neutral-900
@@ -375,6 +441,37 @@
     onclick={onAnswerClick}
     class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto"
   >
+    {#if showing?.preview}
+      <!-- What the Model is being asked about, quoted above what it said: the
+           window opens over whatever the user was reading, and the Action's
+           name alone does not say which paragraph it was handed — nor whether
+           the Capture took the right one.
+
+           Not headed with where it came from. The Conversation does not carry
+           that, and a heading reading "Selection" would be untrue of the Runs
+           that fell back to the clipboard. -->
+      <div class="flex flex-col items-start gap-1.5">
+        <blockquote
+          bind:this={quotation}
+          class="border-l-2 border-neutral-200 pl-3 text-sm whitespace-pre-wrap
+                 opacity-60 select-text dark:border-neutral-700"
+          class:line-clamp-2={!expanded}
+        >
+          {expanded ? (whole ?? showing.preview) : showing.preview}
+        </blockquote>
+
+        {#if clipped || expanded}
+          <button
+            type="button"
+            class="{FOOTER} opacity-40"
+            onclick={() => (expanded ? (expanded = false) : expand())}
+          >
+            {expanded ? "Show less" : "Show more"}
+          </button>
+        {/if}
+      </div>
+    {/if}
+
     {#if showing?.warning}
       <!-- Said before the answer and left there: the Selection is what every
            Turn in this Conversation is about, so this is about all of them. -->

@@ -118,6 +118,7 @@ pub fn run() {
             commands::open_accessibility,
             commands::open_settings,
             commands::conversation,
+            commands::selection,
             commands::conversations,
             commands::show_conversation,
             commands::show_answers_on,

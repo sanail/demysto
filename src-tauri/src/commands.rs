@@ -169,6 +169,13 @@ pub fn conversation(demysto: State<'_, Demysto>) -> Option<Conversation> {
     demysto.conversation()
 }
 
+/// The whole of what the Conversation on screen is about, for the window whose
+/// quotation of it the user has asked to expand.
+#[tauri::command]
+pub fn selection(demysto: State<'_, Demysto>) -> Option<String> {
+    demysto.selection()
+}
+
 /// This session's Conversations, newest first, for the list the window offers.
 #[tauri::command]
 pub fn conversations(demysto: State<'_, Demysto>) -> Vec<Summary> {

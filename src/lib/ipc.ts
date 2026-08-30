@@ -166,6 +166,12 @@ export type Conversation = {
    * it is unusually large. `null` when there was nothing to say.
    */
   warning: string | null;
+  /**
+   * The opening of the Selection, for the window to quote above the answer.
+   * `null` where there was no Selection. The rest of it comes from
+   * [`selection`], asked for only when the user expands the quotation.
+   */
+  preview: string | null;
 };
 
 /** Mirrors `demysto_core::Summary`: one line of the list of Conversations. */
@@ -271,6 +277,18 @@ export function openLogs(): Promise<void> {
  */
 export function conversation(): Promise<Conversation | null> {
   return invoke<Conversation | null>("conversation");
+}
+
+/**
+ * The whole of what the Conversation on screen is about, for expanding the
+ * quotation `Conversation.preview` opens with.
+ *
+ * Asked for rather than carried on the Conversation: a Selection has no size
+ * limit, and the Conversation crosses the bridge every time a Turn begins or
+ * ends.
+ */
+export function selection(): Promise<string | null> {
+  return invoke<string | null>("selection");
 }
 
 /** This session's Conversations, newest first. */

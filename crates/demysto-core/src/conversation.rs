@@ -19,6 +19,13 @@ pub(crate) const CAP: usize = 50;
 /// Enough to tell two Runs of the same Action apart, and no more.
 const ABOUT: usize = 80;
 
+/// How much of the Selection travels to the result window unasked, in
+/// characters. Comfortably more than the two lines that window quotes, so that
+/// anything short is already whole by the time somebody asks to see the rest —
+/// and bounded, because a Selection is as often a chapter as a phrase and this
+/// crosses the bridge every time the window refreshes.
+pub(crate) const PREVIEW: usize = 400;
+
 /// What the Provider is told each part of a Conversation is.
 const USER: &str = "user";
 const ASSISTANT: &str = "assistant";
@@ -60,7 +67,16 @@ pub struct Conversation {
     /// Selection, which every Turn shares: a follow-up does not send it again
     /// and is not warned about it again.
     pub warning: Option<String>,
-    /// What every Turn in it is about. Held because the list shows it and
+    /// The opening of the Selection, for the window to quote above the answer:
+    /// what the Model is being asked about, in the user's own words rather than
+    /// in the Action's name alone. `None` where there was no Selection.
+    ///
+    /// Held beside the Selection rather than taken from it at serialisation
+    /// time, for the reason `warning` is: both are settled when the Conversation
+    /// opens and neither changes after.
+    pub preview: Option<String>,
+    /// What every Turn in it is about. Held because the list shows it, because
+    /// the window asks for the whole of it when the preview is expanded, and
     /// because a Run declared before it happens has already been told it; what
     /// the Model is sent is the Turns, not this.
     #[serde(skip)]
@@ -160,6 +176,7 @@ impl Store {
                 turns: vec![Turn::opening()],
                 model: None,
                 warning: None,
+                preview: None,
                 selection: None,
             });
 
@@ -174,6 +191,9 @@ impl Store {
             .expect("a Conversation is open by this point");
 
         opening.action = action;
+        opening.preview = selection
+            .as_ref()
+            .map(|selection| opening_of(selection.as_text(), PREVIEW));
         opening.selection = selection;
         opening.warning = warning;
         self.showing = Some(opening.id);
@@ -351,6 +371,12 @@ impl Conversation {
         self.selection.as_ref().map_or(Kind::Text, Selection::kind)
     }
 
+    /// The whole of what every Turn in this Conversation is about, for the
+    /// window that has quoted the opening of it and been asked for the rest.
+    pub(crate) fn selection_text(&self) -> Option<&str> {
+        self.selection.as_ref().map(Selection::as_text)
+    }
+
     /// Whether this is a Conversation whose one Turn is still waiting for its
     /// first answer, and so is the one a Run about to begin belongs to.
     fn unanswered(&self) -> bool {
@@ -454,12 +480,27 @@ impl Turn {
 /// The opening words of a Selection, on one line: the list is a list, and a
 /// Selection is as often a page as a phrase.
 fn about(selection: &str) -> String {
-    let mut about: String = selection.split_whitespace().collect::<Vec<_>>().join(" ");
+    opening_of(
+        &selection.split_whitespace().collect::<Vec<_>>().join(" "),
+        ABOUT,
+    )
+}
 
-    if let Some((end, _)) = about.char_indices().nth(ABOUT) {
-        about.truncate(end);
-        about.push('…');
-    }
+/// The first `at` characters of some text, saying so where there were more.
+///
+/// Counted in characters and cut on their boundaries: a Selection is as likely
+/// to be Japanese as English, and `String::truncate` on a byte offset in the
+/// middle of one panics.
+///
+/// Newlines are left where they are — unlike [`about`], whose line has no room
+/// for them. The window quotes this as it was written.
+fn opening_of(text: &str, at: usize) -> String {
+    let Some((end, _)) = text.char_indices().nth(at) else {
+        return text.to_owned();
+    };
 
-    about
+    let mut opening = text[..end].to_owned();
+    opening.push('…');
+
+    opening
 }
