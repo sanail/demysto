@@ -358,6 +358,10 @@ fn through_the_portal<R: Runtime>(
     let noting = app.clone();
 
     crate::portal::claim(
+        // Идентификатор берётся из конфигурации приложения, а не пишется здесь:
+        // портал ищет по нему установленный desktop-файл, чтобы показать
+        // пользователю имя и значок, и разойтись эти два имени не должны.
+        app.config().identifier.clone(),
         wanted,
         move |pressed| {
             // The same two paths the handler above takes, off the thread that

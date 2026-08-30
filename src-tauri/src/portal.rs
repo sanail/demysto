@@ -187,6 +187,7 @@ mod binding {
         BindShortcutsOptions, GlobalShortcuts, NewShortcut, Shortcut,
     };
     use ashpd::desktop::CreateSessionOptions;
+    use ashpd::AppID;
     use futures_util::StreamExt;
     use tauri::async_runtime::{Receiver, Sender};
 
@@ -220,6 +221,7 @@ mod binding {
     /// and at startup there is no window for what it finds to appear on — the
     /// log is where such a report belongs, and the caller is what has one.
     pub fn claim(
+        app_id: String,
         wanted: Vec<Wanted>,
         pressed: impl Fn(&str) + Send + Sync + 'static,
         noted: impl Fn(&str) + Send + Sync + 'static,
@@ -237,7 +239,7 @@ mod binding {
         *stopping = Some(stop);
 
         tauri::async_runtime::spawn(async move {
-            if let Err(said) = hold(wanted, pressed, &noted, stopped).await {
+            if let Err(said) = hold(app_id, wanted, pressed, &noted, stopped).await {
                 report(vec![said], &noted);
             }
         });
@@ -265,11 +267,14 @@ mod binding {
     /// being told to let go, which happens only because another asking is
     /// taking this one's place.
     async fn hold(
+        app_id: String,
         wanted: Vec<Wanted>,
         pressed: impl Fn(&str),
         noted: &impl Fn(&str),
         mut stopped: Receiver<()>,
     ) -> Result<(), String> {
+        say_who_we_are(&app_id).await;
+
         let portal = GlobalShortcuts::new().await.map_err(unreachable)?;
         let session = portal
             .create_session(CreateSessionOptions::default())
@@ -330,6 +335,33 @@ mod binding {
         let _ = session.close().await;
 
         Ok(())
+    }
+
+    /// Tells the portal which application this is, before asking it for
+    /// anything.
+    ///
+    /// Without this every GlobalShortcuts request is refused outright with
+    /// `NotAllowed: An app id is required`, on GNOME and on KDE alike — watched
+    /// on both. The portal keeps a Hotkey against an application identity, and
+    /// a sandboxed application carries one it cannot forge; an ordinary one has
+    /// to say who it is, and `org.freedesktop.host.portal.Registry` is where.
+    /// Qt says it for its own applications, which is why a desktop's own
+    /// components manage what Demysto could not.
+    ///
+    /// The identifier has to match an installed desktop entry — that is how the
+    /// portal finds the name and icon it shows the user — so it comes from the
+    /// application's own configuration rather than being written out here.
+    ///
+    /// A failure is deliberately not reported: registering twice on the one
+    /// connection `ashpd` keeps is refused, and so is registering on a desktop
+    /// whose portal predates the interface. Neither is worth a sentence,
+    /// because the request that follows is about to produce the real one.
+    async fn say_who_we_are(app_id: &str) {
+        let Ok(app_id) = app_id.parse::<AppID>() else {
+            return;
+        };
+
+        let _ = ashpd::register_host_app(app_id).await;
     }
 
     /// One Hotkey as the portal is asked for it.
