@@ -4154,6 +4154,19 @@ mod tests {
         ThenNothing(String),
     }
 
+    /// How long a raw server holds a connection it is meant never to finish.
+    ///
+    /// It only has to outlast the client's own timeout, which the suite sets to
+    /// 200 ms, and a wide margin costs nothing: the client gives up first on
+    /// every path this is used on, and the thread holding the socket is
+    /// detached, so nothing waits for it.
+    ///
+    /// Two seconds was enough in practice and is not what made this suite
+    /// flake — that was `provider::broke_off`, reading the shape of the error
+    /// rather than the clock. The margin is wide here so that a hold expiring
+    /// first is never among the explanations to consider again.
+    const HELD_OPEN: Duration = Duration::from_secs(30);
+
     /// A server that answers each connection with exactly what it was told to,
     /// and remembers what was asked of it.
     ///
@@ -4202,7 +4215,7 @@ mod tests {
                     }
                     // Held rather than closed: a connection that closes is an
                     // answer of a kind, and this is the endpoint that gives none.
-                    Says::Nothing => std::thread::sleep(Duration::from_secs(2)),
+                    Says::Nothing => std::thread::sleep(HELD_OPEN),
                     Says::ThenNothing(body) => {
                         let _ = connection.write_all(
                             format!(
@@ -4211,7 +4224,7 @@ mod tests {
                             .as_bytes(),
                         );
                         let _ = connection.flush();
-                        std::thread::sleep(Duration::from_secs(2));
+                        std::thread::sleep(HELD_OPEN);
                     }
                 }
             }

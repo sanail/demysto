@@ -9,7 +9,7 @@
 
 use std::io::Read;
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -66,6 +66,10 @@ pub(crate) fn answer(
 ) -> Result<(), RunError> {
     let provider = &resolved.endpoint;
 
+    // Отсчёт с начала запроса: он и есть признак того, что чтение оборвал
+    // собственный таймаут, а не Provider. См. `broke_off`.
+    let started = Instant::now();
+
     let mut response = asking(provider, &resolved.model, said, timeout)?
         .send()
         .map_err(|error| sending(provider, timeout, &error))?;
@@ -101,7 +105,7 @@ pub(crate) fn answer(
         // user's answer as far as it got (user story 46).
         let read = response
             .read(&mut buffer)
-            .map_err(|error| broke_off(provider, &error))?;
+            .map_err(|error| broke_off(provider, started.elapsed(), timeout, &error))?;
 
         let chunk = &buffer[..read];
         keep(&mut body_start, chunk);
@@ -353,11 +357,28 @@ fn sending(provider: &Endpoint, waited: Duration, error: &reqwest::Error) -> Run
 
 /// A stream that started and then stopped being read: a different thing from an
 /// endpoint that never answered, because there is an answer so far to keep.
-fn broke_off(provider: &Endpoint, error: &std::io::Error) -> RunError {
-    let timed_out = matches!(
-        error.kind(),
-        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
-    ) || timed_out_beneath(error);
+fn broke_off(
+    provider: &Endpoint,
+    waited: Duration,
+    timeout: Duration,
+    error: &std::io::Error,
+) -> RunError {
+    // Истёкший срок — самый надёжный признак, и стоит он первым.
+    //
+    // Формы, в которых таймаут доезжает сюда, зависят от того, где именно он
+    // застал чтение: иногда это `ErrorKind::TimedOut`, иногда `reqwest::Error`
+    // в цепочке причин, а иногда — внутренний маркер reqwest, у которого нет
+    // публичного типа и который снаружи опознаётся только по тексту. Три
+    // разных ответа на один и тот же вопрос, и выбор между ними зависел от
+    // загрузки машины: под нагрузкой тот же самый таймаут приезжал третьей
+    // формой и объявлялся оборванным соединением. Часы такой неоднозначности
+    // не знают.
+    let timed_out = waited >= timeout
+        || matches!(
+            error.kind(),
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+        )
+        || timed_out_beneath(error);
 
     match timed_out {
         true => RunError::TimedOut {
@@ -382,6 +403,11 @@ fn broke_off(provider: &Endpoint, error: &std::io::Error) -> RunError {
 /// leaves the kind generic, so the only place the fact survives is further down
 /// the chain. Asked rather than assumed, because a Provider that stopped
 /// speaking and one that was never there want different things said about them.
+///
+/// Not the whole answer, and no longer the first thing asked: the client also
+/// has a timeout marker of its own with no public type, which nothing outside
+/// that crate can recognise. `broke_off` looks at the clock before it looks
+/// here.
 fn timed_out_beneath(error: &std::io::Error) -> bool {
     use std::error::Error;
 
