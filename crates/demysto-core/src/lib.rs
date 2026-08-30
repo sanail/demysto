@@ -30,7 +30,7 @@ mod sse;
 mod stream;
 
 pub use action::{Action, Parameter};
-pub use capture::{Capture, CaptureError, CaptureOutcome, Captured};
+pub use capture::{Capture, CaptureError, CaptureOutcome, Captured, Capturing};
 pub use catalogue::{ActionEdit, ActionError, ActionStanding, Catalogue, DefinedAction};
 pub use config::{ConfigError, DEFAULT_LARGE_SELECTION};
 pub use conversation::{Conversation, Summary, Turn};
@@ -51,6 +51,11 @@ pub struct Demysto {
     config_dir: PathBuf,
     version: String,
     capture: Box<dyn Capture>,
+    /// What a Capture on this desktop can read, so that the interface can say
+    /// so where the answer is not the whole Selection (user story 56). Held
+    /// from startup for the reason the environment is: it is the session
+    /// Demysto was launched into, and a session does not change under it.
+    capturing: Capturing,
     /// The environment as it was when Demysto started, which is where a key
     /// may come from. Held rather than looked at again, so that the settings
     /// can be read a second time — which every save does — and arrive at the
@@ -128,6 +133,18 @@ pub fn keys_that_need_no_modifier() -> Vec<&'static str> {
     hotkey::keys_that_need_no_modifier()
 }
 
+/// Whether Demysto is running in a Wayland session.
+///
+/// A free function because the shell asks it before there is a facade to ask,
+/// and because what it decides there is not a Capture: on Wayland a Hotkey
+/// cannot be claimed from the display server either, and has to be asked of the
+/// GlobalShortcuts portal instead (ADR-0003). One question, because it is one
+/// fact about the session — what a Capture makes of it is
+/// [`Status::capturing`].
+pub fn wayland_session() -> bool {
+    desktop::wayland()
+}
+
 /// What the application can report about itself before anything is configured.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Status {
@@ -139,6 +156,10 @@ pub struct Status {
     /// state nothing. Reported so that the window can say what leaving the
     /// field blank means rather than repeat a number of its own.
     pub large_selection_default: u64,
+    /// What a Capture on this desktop can read. Everywhere but Wayland this is
+    /// the Selection, and the windows that show it say nothing; on Wayland it
+    /// carries the sentence they show instead.
+    pub capturing: Capturing,
 }
 
 /// A count with its thousands marked off, because the number in a warning about
@@ -163,15 +184,23 @@ impl Demysto {
     /// own `CARGO_PKG_VERSION`: what the user is running is the application, and
     /// the library's version is nobody's business but the build's.
     pub fn new(config_dir: impl Into<PathBuf>, version: impl Into<String>) -> Self {
-        Self::with_capture(config_dir, version, desktop::for_platform())
+        let (capture, capturing) = desktop::for_platform();
+
+        Self::with_capture(config_dir, version, capture, capturing)
     }
 
     /// Builds a facade over a Capture chosen by the caller, which is how the
     /// test suite keeps the desktop out of it.
+    ///
+    /// The Capture and what it can read arrive together, because the second is
+    /// what the first was chosen by: a suite substituting the Capture a Wayland
+    /// session gets and leaving the answer to `capturing` behind would be a
+    /// facade whose interface says the opposite of what its Capture does.
     pub fn with_capture(
         config_dir: impl Into<PathBuf>,
         version: impl Into<String>,
         capture: Box<dyn Capture>,
+        capturing: Capturing,
     ) -> Self {
         let config_dir = config_dir.into();
 
@@ -190,6 +219,7 @@ impl Demysto {
             config_dir,
             version,
             capture,
+            capturing,
             last_capture: Mutex::new(None),
             store: Mutex::new(Store::new()),
             stopping: Mutex::new(None),
@@ -815,6 +845,7 @@ impl Demysto {
             version: self.version.clone(),
             config_dir: self.config_dir.clone(),
             large_selection_default: DEFAULT_LARGE_SELECTION,
+            capturing: self.capturing.clone(),
         }
     }
 }
@@ -871,25 +902,35 @@ mod tests {
         }
     }
 
+    /// A Demysto rooted at a directory the test already holds, for the one test
+    /// that starts a second session over the first one's configuration.
+    fn as_a_session(config_dir: &Path, desktop: fake::Reading) -> Demysto {
+        let (capture, capturing) = desktop;
+
+        Demysto::with_capture(config_dir, "1.2.3", capture, capturing)
+    }
+
     /// A Demysto with nothing configured to talk to.
-    fn demysto(capture: Box<dyn Capture>) -> Rooted {
-        rooted(capture, None)
+    fn demysto(desktop: fake::Reading) -> Rooted {
+        rooted(desktop, None)
     }
 
     /// A Demysto configured with one Provider, at `base_url`.
-    fn demysto_asking(capture: Box<dyn Capture>, base_url: &str) -> Rooted {
-        rooted(capture, Some(&one_provider(base_url)))
+    fn demysto_asking(desktop: fake::Reading, base_url: &str) -> Rooted {
+        rooted(desktop, Some(&one_provider(base_url)))
     }
 
-    fn rooted(capture: Box<dyn Capture>, settings: Option<&str>) -> Rooted {
+    fn rooted(desktop: fake::Reading, settings: Option<&str>) -> Rooted {
         let dir = TempDir::new().unwrap();
 
         if let Some(settings) = settings {
             std::fs::write(dir.path().join(config::FILE_NAME), settings).unwrap();
         }
 
+        let (capture, capturing) = desktop;
+
         Rooted {
-            demysto: Demysto::with_capture(dir.path(), "1.2.3", capture).unthrottled(),
+            demysto: Demysto::with_capture(dir.path(), "1.2.3", capture, capturing).unthrottled(),
             _dir: dir,
         }
     }
@@ -1160,7 +1201,7 @@ mod tests {
         }
 
         assert_eq!(
-            demysto(Box::new(Broken)).capture(),
+            demysto((Box::new(Broken), Capturing::Selection)).capture(),
             CaptureOutcome::Failed(CaptureError::Clipboard("no owner".to_owned()))
         );
     }
@@ -1270,6 +1311,30 @@ mod tests {
             Captured::Clipboard(Selection::text("copied by hand"))
         );
         assert_eq!(desktop.clipboard_now(), Some("copied by hand".to_owned()));
+    }
+
+    /// What the windows show is what the Capture actually does, at the seam
+    /// where the Capture is substituted (user story 56).
+    #[test]
+    fn a_session_that_reads_only_the_clipboard_says_so_for_the_interface() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+
+        assert_eq!(
+            demysto(fake::clipboard_only_over(&desktop))
+                .status()
+                .capturing,
+            Capturing::ClipboardOnly(fake::COPY_IT_YOURSELF.to_owned())
+        );
+    }
+
+    #[test]
+    fn a_session_that_reads_the_selection_has_nothing_to_say_about_it() {
+        let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+
+        assert_eq!(
+            demysto(fake::over(&desktop)).status().capturing,
+            Capturing::Selection
+        );
     }
 
     #[test]
@@ -4058,7 +4123,7 @@ mod tests {
         .unwrap();
 
         let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
-        let session = Demysto::with_capture(dir.path(), "1.2.3", fake::over(&desktop));
+        let session = as_a_session(dir.path(), fake::over(&desktop));
         session.capture();
         run(&session);
 
@@ -4066,7 +4131,7 @@ mod tests {
 
         // The same configuration directory, and nothing of the Conversation in
         // it: history is held in memory and nowhere else (user story 62).
-        let next = Demysto::with_capture(dir.path(), "1.2.3", fake::over(&desktop));
+        let next = as_a_session(dir.path(), fake::over(&desktop));
 
         assert!(next.conversations().is_empty());
     }

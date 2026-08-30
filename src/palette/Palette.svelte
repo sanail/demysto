@@ -8,8 +8,10 @@
     onCapturing,
     openAccessibility,
     run,
+    status,
     type Action,
     type CaptureOutcome,
+    type Capturing,
   } from "../lib/ipc";
   import { latest } from "../lib/latest.svelte";
   import { sending } from "../lib/sending";
@@ -20,7 +22,27 @@
     last: lastCapture,
   });
 
-  onMount(capture.watch);
+  /**
+   * What a Capture on this desktop can read. Asked once: it is the session
+   * Demysto was launched into, and a session does not change under it.
+   */
+  let capturing = $state<Capturing | null>(null);
+
+  onMount(() => {
+    const stop = capture.watch();
+
+    status().then((reported) => (capturing = reported.capturing));
+
+    return stop;
+  });
+
+  /**
+   * The sentence a session that cannot read a Selection is owed, `null`
+   * everywhere else (user story 56).
+   */
+  const clipboardOnly = $derived(
+    capturing?.reads === "clipboard_only" ? capturing.detail : null,
+  );
 
   const outcome = $derived(capture.value);
   const captured = $derived(
@@ -198,7 +220,9 @@
 
   <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
     {#if outcome === null}
-      <p class="text-sm opacity-50">Reading what you selected…</p>
+      <p class="text-sm opacity-50">
+        {clipboardOnly ? "Reading the clipboard…" : "Reading what you selected…"}
+      </p>
     {:else if outcome.status === "failed"}
       <p class="text-sm text-red-600 dark:text-red-400">
         {outcome.detail.message}
@@ -223,10 +247,17 @@
         {/if}
       {/if}
     {:else if !selection}
-      <p class="text-sm opacity-60">
-        Nothing is selected and the clipboard is empty. Select some text and
-        press the Hotkey again.
-      </p>
+      {#if clipboardOnly}
+        <!-- Not "nothing is selected": on this desktop a Selection was never
+             something Demysto could have read, and saying so is the difference
+             between a limitation and a tool that appears broken. -->
+        <p class="text-sm opacity-60">{clipboardOnly}</p>
+      {:else}
+        <p class="text-sm opacity-60">
+          Nothing is selected and the clipboard is empty. Select some text and
+          press the Hotkey again.
+        </p>
+      {/if}
     {:else}
       <p class="line-clamp-2 text-sm whitespace-pre-wrap opacity-60">
         {selection.text}

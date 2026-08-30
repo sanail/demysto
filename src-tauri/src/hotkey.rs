@@ -144,6 +144,15 @@ pub fn claim<R: Runtime>(
     palette: Option<&str>,
     actions: &[DefinedAction],
 ) -> Vec<String> {
+    // Wayland lets no application claim a Hotkey from the display server, so
+    // there the whole set is asked of the GlobalShortcuts portal instead and
+    // none of what follows applies — the desktop, not Demysto, decides which
+    // combination each one answers to (ADR-0003).
+    #[cfg(target_os = "linux")]
+    if demysto_core::wayland_session() {
+        return through_the_portal(app, palette, actions);
+    }
+
     // One at a time: two of these interleaving would each give up what the
     // other had just taken, and leave the set Demysto believes it holds
     // describing neither.
@@ -313,6 +322,55 @@ fn claiming<R: Runtime>(
     });
 
     Ok(())
+}
+
+/// Asks the portal for the same set the display server is asked for anywhere
+/// else, and answers with what could not be had, in the same whole sentences.
+///
+/// The Hotkeys stated in the settings and by the Actions travel as preferences
+/// rather than as claims: the portal shows the user what Demysto asked for and
+/// the desktop assigns the combination. Which is why nothing here refuses a
+/// combination the way [`claiming`] does — there is no set to collide within,
+/// and a Hotkey that types something is the desktop's business to allow or not.
+#[cfg(target_os = "linux")]
+fn through_the_portal<R: Runtime>(
+    app: &AppHandle<R>,
+    palette: Option<&str>,
+    actions: &[DefinedAction],
+) -> Vec<String> {
+    use crate::portal::Wanted;
+
+    let mut wanted = vec![Wanted {
+        id: crate::portal::OPENS_THE_PALETTE.to_owned(),
+        description: "Demysto — open the Palette".to_owned(),
+        trigger: crate::portal::trigger(palette.unwrap_or(PALETTE)),
+    }];
+
+    wanted.extend(actions.iter().filter_map(|action| {
+        Some(Wanted {
+            id: crate::portal::for_action(&action.id),
+            description: format!("Demysto — {}", action.name),
+            trigger: crate::portal::trigger(action.hotkey.as_deref()?),
+        })
+    }));
+
+    let answering = app.clone();
+    let noting = app.clone();
+
+    crate::portal::claim(
+        wanted,
+        move |pressed| {
+            // The same two paths the handler above takes, off the thread that
+            // draws every window for the same reason — except that this one
+            // arrives on a task of the portal's rather than on a keypress, and
+            // taking a Capture off it matters just as much.
+            match crate::portal::action_of(pressed) {
+                None => crate::palette::toggle(&answering),
+                Some(action) => crate::result::straight_to(&answering, action.to_owned()),
+            }
+        },
+        move |said| noting.state::<Demysto>().note(said),
+    )
 }
 
 #[cfg(test)]

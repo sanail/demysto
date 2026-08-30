@@ -15,32 +15,73 @@ use std::time::Duration;
 
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
-use crate::capture::{Capture, CaptureError, ClipboardCapture, Desktop, DesktopCapture};
+use crate::capture::{Capture, CaptureError, Capturing, ClipboardCapture, Desktop, DesktopCapture};
 
 /// The environment variable Linux session managers use to say which display
 /// server is running.
+///
+/// The one thing outside `config` that reads the environment, and read for the
+/// reason a key is not: this says which display server Demysto is talking to,
+/// and that cannot change without the session it belongs to ending.
 const SESSION_TYPE_ENV: &str = "XDG_SESSION_TYPE";
+
+/// What the user is told on a session that will not let Demysto read a
+/// Selection for them (user story 56).
+///
+/// Says what to do instead as well as what is wrong: a limitation stated
+/// without the way round it is indistinguishable, to somebody who has just
+/// pressed the Hotkey, from the tool being broken.
+const WAYLAND_CLIPBOARD_ONLY: &str = "This is a Wayland session, and Wayland does not let one \
+     application type into another. Demysto cannot read what you have selected: copy it yourself \
+     with Ctrl+C first, then press the Hotkey, and Demysto reads the clipboard.";
 
 /// How long the modifiers of the Hotkey the user just pressed are given to come
 /// back up before the copy chord is sent, so that the chord is not read as the
 /// user's own keys plus ours.
 const MODIFIER_SETTLE: Duration = Duration::from_millis(60);
 
-/// The Capture this session can actually perform.
-pub(crate) fn for_platform() -> Box<dyn Capture> {
-    if accepts_synthetic_input(std::env::var_os(SESSION_TYPE_ENV).as_deref()) {
-        Box::new(DesktopCapture::new(SystemDesktop))
-    } else {
-        Box::new(ClipboardCapture::new(SystemDesktop))
+/// The Capture this session can actually perform, and what it can read.
+///
+/// The two together because whoever holds the first has to be able to say the
+/// second: the interface tells the user what it can read, and being told the
+/// wrong thing is worse than not being told.
+pub(crate) fn for_platform() -> (Box<dyn Capture>, Capturing) {
+    match reading(std::env::var_os(SESSION_TYPE_ENV).as_deref()) {
+        Capturing::Selection => (
+            Box::new(DesktopCapture::new(SystemDesktop)),
+            Capturing::Selection,
+        ),
+        degraded => (Box::new(ClipboardCapture::new(SystemDesktop)), degraded),
     }
 }
 
-/// Whether this session lets an ordinary application type into another one.
+/// Whether this is a Wayland session.
 ///
-/// Wayland does not, by design, and reaching for the RemoteDesktop portal to
-/// get around it was rejected in ADR-0003. Everything else is assumed to.
-fn accepts_synthetic_input(session_type: Option<&OsStr>) -> bool {
-    !session_type.is_some_and(|session_type| session_type.eq_ignore_ascii_case("wayland"))
+/// Wayland lets an ordinary application neither type into another one nor claim
+/// a Hotkey for itself: the first is ADR-0003's, and the second is why the
+/// Hotkey there is asked of the GlobalShortcuts portal rather than of the
+/// display server. One question because it is one fact, asked by the two parts
+/// of the shell it decides.
+pub(crate) fn wayland() -> bool {
+    refuses_synthetic_input(std::env::var_os(SESSION_TYPE_ENV).as_deref())
+}
+
+/// What a Capture can read on a session of this type.
+fn reading(session_type: Option<&OsStr>) -> Capturing {
+    match refuses_synthetic_input(session_type) {
+        true => Capturing::ClipboardOnly(WAYLAND_CLIPBOARD_ONLY.to_owned()),
+        false => Capturing::Selection,
+    }
+}
+
+/// Whether this session refuses to let one application type into another.
+///
+/// Wayland does, by design, and reaching for the RemoteDesktop portal to get
+/// around it was rejected in ADR-0003. Every other session is assumed not to —
+/// including one that names no type at all, which is every macOS and Windows
+/// machine there is.
+fn refuses_synthetic_input(session_type: Option<&OsStr>) -> bool {
+    session_type.is_some_and(|kind| kind.eq_ignore_ascii_case("wayland"))
 }
 
 /// The clipboard and keyboard of the machine Demysto is running on.
@@ -87,7 +128,7 @@ impl Desktop for SystemDesktop {
 
         enigo
             .key(copy, Direction::Press)
-            .and_then(|()| enigo.key(copy_letter(), Direction::Click))
+            .and_then(|()| enigo.raw(COPY_LETTER, Direction::Click))
             .map_err(|error| keystroke(&error.to_string()))?;
 
         // Released outside the `?` above: leaving a modifier stuck down would
@@ -150,38 +191,50 @@ fn accessibility() -> Result<(), CaptureError> {
     Ok(())
 }
 
-/// The letter half of the copy chord, as the key the user's fingers are on.
-///
-/// Asking enigo for the character would make it consult the active keyboard
-/// layout to find out where that character sits, and on macOS that lookup goes
-/// through the Text Services Manager, which asserts it is being called on the
-/// main thread and aborts the process when it is not — see the test below, and
-/// `palette::off_thread` for why a Capture is never on that thread.
-///
-/// The keycode is the better answer besides. macOS matches a Command chord
-/// against the physical key whatever layout is active, so `Cmd+C` copies from
-/// the same key under a Cyrillic layout as under a Latin one — while the
-/// character lookup, finding no `c` on that layout at all, would come back with
-/// keycode zero and send `Cmd+A`.
+// The letter half of the copy chord is sent as the physical key the user's own
+// fingers are on, not as the character printed on it — through enigo's `raw`,
+// which takes the platform's own number for a key and asks nothing of the
+// keyboard layout. Every platform numbers keys differently, so the constant is
+// per platform and the way it travels is not.
+//
+// Asking for the character instead would send enigo to the active layout to
+// find out where a `c` sits, and a layout carrying no Latin `c` has no answer:
+//
+//   - On macOS the lookup goes through the Text Services Manager, which asserts
+//     it is being called on the main thread and aborts the process when it is
+//     not — and a Capture is never on that thread; see `palette::off_thread`.
+//     Finding no `c`, it would come back with keycode zero and send `Cmd+A`.
+//   - On Windows the lookup is `VkKeyScanEx`, which answers -1 for a character
+//     the layout does not carry; enigo then falls back to entering the
+//     character as text, and a text event under a held Ctrl is not a copy.
+//   - On X11 enigo does have an answer — it binds the keysym to a spare keycode
+//     — so the character would have worked there. It is sent as the physical
+//     key anyway, so that all three platforms send what pressing the key sends.
+//
+// Which is what the chord is matched against besides: `Cmd+C` and `Ctrl+C` copy
+// from the same key under a Cyrillic layout as under a Latin one, because that
+// is where the user's finger goes.
+
+/// `kVK_ANSI_C`, from `Carbon/HIToolbox/Events.h`.
 #[cfg(target_os = "macos")]
-fn copy_letter() -> Key {
-    /// `kVK_ANSI_C`, from `Carbon/HIToolbox/Events.h`.
-    const ANSI_C: u32 = 0x08;
+const COPY_LETTER: u16 = 0x08;
 
-    Key::Other(ANSI_C)
-}
+/// The scan code of the `C` key in set 1, which is what `SendInput` takes and
+/// what Windows translates back through whatever layout is active.
+#[cfg(target_os = "windows")]
+const COPY_LETTER: u16 = 0x2E;
 
-/// The letter half of the copy chord.
+/// The X11 keycode of the `C` key: the Linux input event code for it, 46, plus
+/// the 8 X11 offsets every evdev keycode by.
 ///
-/// macOS is the platform whose character lookup insists on a thread this code
-/// is never on, and the only one this has been watched failing on, so it is the
-/// only one moved off the character. Whether X11 and Windows resolve a `c` that
-/// a Cyrillic layout does not carry is ticket 13's to find out, on machines
-/// that can be watched.
-#[cfg(not(target_os = "macos"))]
-fn copy_letter() -> Key {
-    Key::Unicode('c')
-}
+/// Only X11 reaches this. A Wayland session never sends a copy chord at all —
+/// [`for_platform`] gives it the Capture that does not try (ADR-0003).
+///
+/// This is enigo's `x11rb` backend, which is the one its default features
+/// select. Its `xdo` backend has never implemented sending a keycode at all,
+/// and turning that feature on here would panic every Capture on X11.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const COPY_LETTER: u16 = 54;
 
 fn clipboard() -> Result<arboard::Clipboard, CaptureError> {
     arboard::Clipboard::new().map_err(|error| CaptureError::Clipboard(error.to_string()))
@@ -198,40 +251,50 @@ fn keystroke(message: &str) -> CaptureError {
 mod tests {
     use super::*;
 
-    fn accepts(session_type: Option<&str>) -> bool {
-        accepts_synthetic_input(session_type.map(OsStr::new))
+    fn on(session_type: Option<&str>) -> Capturing {
+        reading(session_type.map(OsStr::new))
     }
 
-    /// The copy chord's letter must not be one enigo has to look up.
-    ///
-    /// `Key::Unicode` sends enigo to the Text Services Manager to ask where the
-    /// character sits on the layout that is active, and that API asserts it is
-    /// being called on the main thread. A Capture is never on it — it waits on
-    /// another application, and the comment on `palette::off_thread` says why
-    /// that wait cannot happen there — so the assertion aborts the process.
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn the_copy_letter_is_not_one_the_keyboard_layout_has_to_resolve() {
-        assert!(!matches!(copy_letter(), Key::Unicode(_)));
-    }
-
-    #[test]
-    fn x11_accepts_a_synthetic_copy() {
-        assert!(accepts(Some("x11")));
+    /// What a session that reads only the clipboard says about itself, or the
+    /// test's own failure where it reads a Selection after all.
+    fn said_on(session_type: Option<&str>) -> String {
+        match on(session_type) {
+            Capturing::ClipboardOnly(said) => said,
+            Capturing::Selection => {
+                panic!("{session_type:?} should be a session that reads only the clipboard")
+            }
+        }
     }
 
     #[test]
-    fn wayland_does_not() {
-        assert!(!accepts(Some("wayland")));
+    fn x11_reads_the_selection() {
+        assert_eq!(on(Some("x11")), Capturing::Selection);
+    }
+
+    #[test]
+    fn wayland_reads_only_the_clipboard() {
+        assert!(matches!(on(Some("wayland")), Capturing::ClipboardOnly(_)));
     }
 
     #[test]
     fn the_session_type_is_matched_regardless_of_case() {
-        assert!(!accepts(Some("Wayland")));
+        assert!(matches!(on(Some("Wayland")), Capturing::ClipboardOnly(_)));
     }
 
     #[test]
-    fn a_platform_that_sets_no_session_type_is_not_wayland() {
-        assert!(accepts(None));
+    fn a_platform_that_sets_no_session_type_reads_the_selection() {
+        assert_eq!(on(None), Capturing::Selection);
+    }
+
+    /// The sentence is the whole of what a Wayland user is given (user story
+    /// 56), so it has to name the limitation and the way round it. A sentence
+    /// that says only that something is unavailable reads as a broken tool.
+    #[test]
+    fn a_clipboard_only_session_says_what_to_do_instead() {
+        let said = said_on(Some("wayland"));
+
+        assert!(said.contains("Wayland"), "{said}");
+        assert!(said.contains("clipboard"), "{said}");
+        assert!(said.contains("Ctrl+C"), "{said}");
     }
 }

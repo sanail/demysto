@@ -11,6 +11,27 @@ pub trait Capture: Send + Sync {
     fn capture(&self) -> Result<Captured, CaptureError>;
 }
 
+/// What a Capture on this desktop is able to read.
+///
+/// Answered once, from the session Demysto started in, and shown rather than
+/// inferred: everywhere but Wayland a Capture reads what the user selected, and
+/// on Wayland it can only read what they copied themselves. A user who is not
+/// told that reasonably concludes the Hotkey is broken (user story 56).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "reads", content = "detail", rename_all = "snake_case")]
+pub enum Capturing {
+    /// The desktop accepts a synthetic copy, so a Capture reads the Selection
+    /// out of whatever the user is looking at.
+    Selection,
+    /// The desktop refuses synthetic input, so a Capture reads only what the
+    /// user put on the clipboard themselves.
+    ///
+    /// Carries the whole sentence, for the reason
+    /// [`CaptureError::Permission`] does: only the platform that imposes the
+    /// limitation can say what it is and what to do instead.
+    ClipboardOnly(String),
+}
+
 /// What one Capture produced.
 ///
 /// The origin is part of the result rather than an inference the Palette makes:
@@ -287,7 +308,20 @@ pub(crate) mod fake {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use super::{Capture, CaptureError, ClipboardCapture, Desktop, DesktopCapture, Settle};
+    use super::{
+        Capture, CaptureError, Capturing, ClipboardCapture, Desktop, DesktopCapture, Settle,
+    };
+
+    /// A desktop as the facade is handed one: the Capture it performs, and what
+    /// that Capture can read.
+    ///
+    /// The two together because the facade takes them together — see
+    /// `Demysto::with_capture` for why neither is any use without the other.
+    pub(crate) type Reading = (Box<dyn Capture>, Capturing);
+
+    /// What a fake Wayland session says about itself, standing in for the
+    /// sentence `desktop` writes on the platform that has one.
+    pub(crate) const COPY_IT_YOURSELF: &str = "this session reads only the clipboard";
 
     /// What a desktop withholding the permission says, standing in for the
     /// sentence the platform that has one writes — see `desktop`.
@@ -405,18 +439,24 @@ pub(crate) mod fake {
 
     /// The Capture every desktop that accepts synthetic input uses, with the
     /// waiting taken out of it.
-    pub(crate) fn over(desktop: &Arc<FakeDesktop>) -> Box<dyn Capture> {
-        Box::new(DesktopCapture::with_settle(
+    pub(crate) fn over(desktop: &Arc<FakeDesktop>) -> Reading {
+        let capture = DesktopCapture::with_settle(
             Arc::clone(desktop),
             Settle {
                 interval: Duration::ZERO,
                 attempts: 5,
             },
-        ))
+        );
+
+        (Box::new(capture), Capturing::Selection)
     }
 
-    /// The Capture a Wayland session gets instead.
-    pub(crate) fn clipboard_only_over(desktop: &Arc<FakeDesktop>) -> Box<dyn Capture> {
-        Box::new(ClipboardCapture::new(Arc::clone(desktop)))
+    /// The Capture a Wayland session gets instead, and the sentence that goes
+    /// with it.
+    pub(crate) fn clipboard_only_over(desktop: &Arc<FakeDesktop>) -> Reading {
+        (
+            Box::new(ClipboardCapture::new(Arc::clone(desktop))),
+            Capturing::ClipboardOnly(COPY_IT_YOURSELF.to_owned()),
+        )
     }
 }

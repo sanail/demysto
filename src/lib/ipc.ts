@@ -1,6 +1,18 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+/**
+ * Mirrors `demysto_core::Capturing`: what a Capture on this desktop can read.
+ *
+ * Everywhere but Wayland it reads the Selection and the windows say nothing
+ * about it. On Wayland it can only read what the user copied themselves, and
+ * `detail` is the whole sentence explaining that and what to do instead — the
+ * backend writes it, because only the platform imposing the limitation can.
+ */
+export type Capturing =
+  | { reads: "selection" }
+  | { reads: "clipboard_only"; detail: string };
+
 /** Mirrors `demysto_core::Status`. */
 export type Status = {
   version: string;
@@ -11,6 +23,7 @@ export type Status = {
    * of its own.
    */
   large_selection_default: number;
+  capturing: Capturing;
 };
 
 /** Mirrors `demysto_core::Selection`. */

@@ -25,6 +25,15 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-single-instance = "2"
 
+# Wayland claims no Hotkey of its own: it is asked of the desktop's
+# GlobalShortcuts portal over D-Bus instead (ADR-0003), and only Linux has one.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "global_shortcuts"] }
+futures-util = { version = "0.3", default-features = false }
+# Tauri's own async runtime, reached directly for the one thing it does not
+# re-export: waiting on the portal and on being told to let go of it at once.
+tokio = { version = "1", default-features = false, features = ["macros"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = "0.3"

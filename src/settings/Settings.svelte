@@ -16,6 +16,7 @@
     verifyProvider,
     type ActionEdit,
     type ActionStanding,
+    type Capturing,
     type Catalogue,
     type ConfiguredModel,
     type ConfiguredProvider,
@@ -32,6 +33,11 @@
 
   /** How long the window says a save landed. */
   const ACKNOWLEDGED = 1600;
+
+  /** What a Capture on this desktop cannot do, where there is such a thing. */
+  function said(capturing: Capturing): string | null {
+    return capturing.reads === "clipboard_only" ? capturing.detail : null;
+  }
 
   /**
    * One Provider as this window has it: what will be written, plus what is only
@@ -91,6 +97,13 @@
    * every time, because claiming them is what asking for the catalogue does.
    */
   let unclaimedHotkeys = $state<string[]>([]);
+  /**
+   * The sentence a desktop that will not let Demysto read a Selection is owed,
+   * `null` everywhere else (user story 56). ADR-0003 puts it here as well as in
+   * the Palette: the Palette says it to somebody who has just pressed the
+   * Hotkey, and this says it to somebody working out what the tool does.
+   */
+  let clipboardOnly = $state<string | null>(null);
   let editing = $state<Editing | null>(null);
   /**
    * Which Hotkey field is being recorded into, `null` for neither. While one is,
@@ -175,6 +188,7 @@
     const reported = await status();
     where = reported.config_dir;
     largeSelectionDefault = reported.large_selection_default;
+    clipboardOnly = said(reported.capturing);
 
     // A refused key is reported in the Conversation and fixed here, so the
     // window is told which Provider it was opened for.
@@ -913,6 +927,21 @@
       <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
         Hotkeys
       </h2>
+
+      {#if clipboardOnly}
+        <!-- Both halves of what Wayland costs, together and where the Hotkey is
+             set, because both are answers to "why did pressing it do that?" —
+             see ADR-0003. -->
+        <p class="text-xs opacity-50">{clipboardOnly}</p>
+
+        <p class="text-xs opacity-50">
+          Wayland also lets no application claim a Hotkey for itself. Demysto
+          asks the desktop's GlobalShortcuts portal for the combinations below,
+          and the desktop decides what each one answers to — change them in the
+          desktop's own keyboard shortcut settings, where they are listed under
+          Demysto.
+        </p>
+      {/if}
 
       {#if !unreadable}
         <div class="flex flex-col gap-1">

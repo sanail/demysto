@@ -10,6 +10,13 @@ mod folder;
 mod hotkey;
 mod notify;
 mod palette;
+/// The Hotkey on Wayland.
+///
+/// Compiled everywhere, though only Linux reaches the half that talks to the
+/// portal: the other half translates a Hotkey into the portal's own syntax, and
+/// is plain string work that every platform's suite is welcome to check.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod portal;
 mod result;
 mod settings;
 mod tray;
