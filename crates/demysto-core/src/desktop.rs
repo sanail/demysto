@@ -11,6 +11,7 @@
 //! through the fake desktop instead.
 
 use std::ffi::OsStr;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
@@ -48,10 +49,13 @@ const MODIFIER_SETTLE: Duration = Duration::from_millis(60);
 pub(crate) fn for_platform() -> (Box<dyn Capture>, Capturing) {
     match reading(std::env::var_os(SESSION_TYPE_ENV).as_deref()) {
         Capturing::Selection => (
-            Box::new(DesktopCapture::new(SystemDesktop)),
+            Box::new(DesktopCapture::new(SystemDesktop::new())),
             Capturing::Selection,
         ),
-        degraded => (Box::new(ClipboardCapture::new(SystemDesktop)), degraded),
+        degraded => (
+            Box::new(ClipboardCapture::new(SystemDesktop::new())),
+            degraded,
+        ),
     }
 }
 
@@ -85,11 +89,68 @@ fn refuses_synthetic_input(session_type: Option<&OsStr>) -> bool {
 }
 
 /// The clipboard and keyboard of the machine Demysto is running on.
-pub(crate) struct SystemDesktop;
+///
+/// The clipboard connection is held for as long as Demysto runs rather than
+/// opened per call, and that is not a saving — it is the only way the writes
+/// survive.
+///
+/// On X11 the clipboard holds no content of its own: it records which window
+/// owns the selection, and that window hands the text over when somebody asks
+/// for it. An owner that has gone leaves nothing behind. Opening a connection,
+/// writing, and closing it therefore puts text on the clipboard for as long as
+/// it takes to close — which is to say not at all. Watched doing exactly that:
+/// a Capture that restored the user's clipboard left it empty instead, so
+/// every Capture over a Selection destroyed whatever the user had copied.
+///
+/// Wayland and macOS keep the content themselves and would not have minded
+/// either way; one connection for all three is simpler than one rule per
+/// platform.
+pub(crate) struct SystemDesktop {
+    clipboard: Mutex<Option<arboard::Clipboard>>,
+}
+
+impl SystemDesktop {
+    pub(crate) fn new() -> Self {
+        Self {
+            clipboard: Mutex::new(None),
+        }
+    }
+
+    /// Runs something against the held clipboard connection, opening one on
+    /// first use.
+    ///
+    /// A connection that has failed is dropped rather than kept: an X server
+    /// that went away takes it with it, and the next Capture deserves a fresh
+    /// one instead of the same error for the rest of the session.
+    fn on_clipboard<T>(
+        &self,
+        act: impl FnOnce(&mut arboard::Clipboard) -> Result<T, arboard::Error>,
+    ) -> Result<T, arboard::Error> {
+        let mut held = self
+            .clipboard
+            .lock()
+            .unwrap_or_else(|held| held.into_inner());
+
+        if held.is_none() {
+            *held = Some(arboard::Clipboard::new()?);
+        }
+
+        let outcome = act(held.as_mut().expect("a clipboard was just opened"));
+
+        if matches!(
+            outcome,
+            Err(arboard::Error::ClipboardOccupied) | Err(arboard::Error::Unknown { .. })
+        ) {
+            *held = None;
+        }
+
+        outcome
+    }
+}
 
 impl Desktop for SystemDesktop {
     fn clipboard_text(&self) -> Result<Option<String>, CaptureError> {
-        match clipboard()?.get_text() {
+        match self.on_clipboard(arboard::Clipboard::get_text) {
             Ok(text) => Ok(Some(text)),
             // An empty clipboard and one holding an image both come back this
             // way; for a text-only v1 they are the same thing.
@@ -99,12 +160,10 @@ impl Desktop for SystemDesktop {
     }
 
     fn set_clipboard_text(&self, text: Option<&str>) -> Result<(), CaptureError> {
-        let mut clipboard = clipboard()?;
-
-        match text {
+        self.on_clipboard(|clipboard| match text {
             Some(text) => clipboard.set_text(text),
             None => clipboard.clear(),
-        }
+        })
         .map_err(|error| CaptureError::Clipboard(error.to_string()))
     }
 
@@ -235,10 +294,6 @@ const COPY_LETTER: u16 = 0x2E;
 /// and turning that feature on here would panic every Capture on X11.
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const COPY_LETTER: u16 = 54;
-
-fn clipboard() -> Result<arboard::Clipboard, CaptureError> {
-    arboard::Clipboard::new().map_err(|error| CaptureError::Clipboard(error.to_string()))
-}
 
 /// A keystroke enigo itself refused, which is a different thing from one macOS
 /// would not have delivered — that is asked about first, in [`accessibility`],
