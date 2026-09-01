@@ -52,6 +52,19 @@
     captured && captured.origin !== "nothing" ? captured.selection : null,
   );
 
+  /**
+   * Where this Capture came from, in the words the Palette says it in — and
+   * `null` where there is nothing to say, which is every state that produced
+   * no Selection: those say what happened in a sentence of their own.
+   */
+  const origin = $derived(
+    captured?.origin === "selection"
+      ? "Selection"
+      : captured?.origin === "clipboard"
+        ? "From the clipboard"
+        : null,
+  );
+
   /** The Actions that accept this Capture, as the backend filtered them. */
   let offered = $state<Action[]>([]);
   /** What the user has typed to narrow that list. */
@@ -211,58 +224,74 @@
   <header class="flex items-baseline justify-between gap-3">
     <h1 class="text-sm font-semibold tracking-tight">Demysto</h1>
 
-    {#if captured?.origin === "selection"}
-      <span class="text-xs opacity-50">Selection</span>
-    {:else if captured?.origin === "clipboard"}
-      <span class="text-xs opacity-50">From the clipboard</span>
-    {/if}
+    <!-- Drawn as quietly as before and now said as well. Two things it needs
+         to be heard, both learnt the hard way on a live desktop: a role, since
+         WebKit keeps no inline run that has neither one nor a name and this
+         caption reached the accessibility tree nowhere; and a place in the
+         page from the start, since a live region that arrives together with
+         its words is announced by nobody. `role="status"` is both, and it
+         speaks the moment a Capture lands — which is after the window is
+         already up and the focus is in the field below (ticket 18). -->
+    <span id="capture-origin" role="status" class="text-xs opacity-50"
+      >{origin ?? ""}</span
+    >
   </header>
 
   <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-    {#if outcome === null}
-      <p class="text-sm opacity-50">
-        {clipboardOnly ? "Reading the clipboard…" : "Reading what you selected…"}
-      </p>
-    {:else if outcome.status === "failed"}
-      <p class="text-sm text-red-600 dark:text-red-400">
-        {outcome.detail.message}
-      </p>
+    <!-- Named by that caption rather than headed by one of its own: reaching
+         the captured text, a screen reader reads where it came from as part
+         of it, and the window says nothing louder than it did. -->
+    <section
+      aria-labelledby={origin === null ? undefined : "capture-origin"}
+      class="flex flex-col gap-2"
+    >
+      {#if outcome === null}
+        <p class="text-sm opacity-50">
+          {clipboardOnly ? "Reading the clipboard…" : "Reading what you selected…"}
+        </p>
+      {:else if outcome.status === "failed"}
+        <p class="text-sm text-red-600 dark:text-red-400">
+          {outcome.detail.message}
+        </p>
 
-      {#if outcome.detail.kind === "permission"}
-        <!-- The one Capture failure with somewhere to be sent: nothing about
-             this Palette can fix it, and the pane that can is one click away. -->
-        <div>
-          <button
-            type="button"
-            onclick={grant}
-            class="cursor-pointer rounded border border-neutral-300 px-2 py-1 text-xs
-                   hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          >
-            Open Accessibility settings
-          </button>
-        </div>
+        {#if outcome.detail.kind === "permission"}
+          <!-- The one Capture failure with somewhere to be sent: nothing about
+               this Palette can fix it, and the pane that can is one click away. -->
+          <div>
+            <button
+              type="button"
+              onclick={grant}
+              class="cursor-pointer rounded border border-neutral-300 px-2 py-1 text-xs
+                     hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            >
+              Open Accessibility settings
+            </button>
+          </div>
 
-        {#if unreachable}
-          <p class="text-xs text-red-600 dark:text-red-400">{unreachable}</p>
+          {#if unreachable}
+            <p class="text-xs text-red-600 dark:text-red-400">{unreachable}</p>
+          {/if}
         {/if}
-      {/if}
-    {:else if !selection}
-      {#if clipboardOnly}
-        <!-- Not "nothing is selected": on this desktop a Selection was never
-             something Demysto could have read, and saying so is the difference
-             between a limitation and a tool that appears broken. -->
-        <p class="text-sm opacity-60">{clipboardOnly}</p>
+      {:else if !selection}
+        {#if clipboardOnly}
+          <!-- Not "nothing is selected": on this desktop a Selection was never
+               something Demysto could have read, and saying so is the difference
+               between a limitation and a tool that appears broken. -->
+          <p class="text-sm opacity-60">{clipboardOnly}</p>
+        {:else}
+          <p class="text-sm opacity-60">
+            Nothing is selected and the clipboard is empty. Select some text and
+            press the Hotkey again.
+          </p>
+        {/if}
       {:else}
-        <p class="text-sm opacity-60">
-          Nothing is selected and the clipboard is empty. Select some text and
-          press the Hotkey again.
+        <p class="line-clamp-2 text-sm whitespace-pre-wrap opacity-60">
+          {selection.text}
         </p>
       {/if}
-    {:else}
-      <p class="line-clamp-2 text-sm whitespace-pre-wrap opacity-60">
-        {selection.text}
-      </p>
+    </section>
 
+    {#if selection}
       {#if collecting && parameter}
         <label class="flex flex-col gap-1">
           <span class="text-xs opacity-60">

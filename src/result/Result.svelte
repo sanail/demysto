@@ -449,8 +449,17 @@
 
            Not headed with where it came from. The Conversation does not carry
            that, and a heading reading "Selection" would be untrue of the Runs
-           that fell back to the clipboard. -->
-      <div class="flex flex-col items-start gap-1.5">
+           that fell back to the clipboard.
+
+           What it is, though, has to be said rather than drawn: on screen the
+           rule down the left and the grey say "this is the text, not the
+           answer", and a screen reader is given neither. So the quotation is a
+           named region — true of both origins, and nothing added to the window
+           (ticket 18). -->
+      <section
+        aria-label="The text this Conversation is about"
+        class="flex flex-col items-start gap-1.5"
+      >
         <blockquote
           bind:this={quotation}
           class="border-l-2 border-neutral-200 pl-3 text-sm whitespace-pre-wrap
@@ -469,7 +478,7 @@
             {expanded ? "Show less" : "Show more"}
           </button>
         {/if}
-      </div>
+      </section>
     {/if}
 
     {#if showing?.warning}
@@ -530,7 +539,11 @@
               {/if}
 
               {#if turn.outcome.status === "stopped"}
-                <span class="opacity-40">Stopped</span>
+                <!-- With a role for the reason the Palette's origin caption
+                     has one: WebKit keeps no inline run that has neither a
+                     role nor a name, and "Stopped" is the whole of what says
+                     this answer is short because the user said so. -->
+                <span role="status" class="opacity-40">Stopped</span>
               {/if}
 
               <!-- Offered on the last Turn alone: what is asked again is the
