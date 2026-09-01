@@ -13,6 +13,7 @@
     settings as configured,
     status,
     verifyProvider,
+    type Capturing,
     type ConfiguredProvider,
     type Edit,
     type Exported,
@@ -84,6 +85,29 @@
    * as Settings does.
    */
   let languageFixed = $state<Exported | null>(null);
+  /**
+   * The sentence a desktop that will not let Demysto read a Selection is owed,
+   * `null` everywhere else (user story 56).
+   *
+   * The last step invites a press of the Hotkey over selected text, and on
+   * Wayland that is the one thing it cannot do (ADR-0003): the invitation would
+   * be teaching a new user a gesture that produces nothing. So the same
+   * sentence the Palette and Settings say is said here, before they ever reach
+   * either of them.
+   */
+  let clipboardOnly = $state<string | null>(null);
+
+  /**
+   * What a Capture on this desktop cannot do, where there is such a thing.
+   *
+   * Named for the reading rather than for the sentence, unlike Settings' own
+   * `said`: this window already has a `said` — what the Provider answered.
+   */
+  function cannotRead(capturing: Capturing): string | null {
+    return capturing.reads === "clipboard_only"
+      ? t("capture-clipboard-only")
+      : null;
+  }
 
   /**
    * The Provider being configured, as this window has it. One rather than the
@@ -148,7 +172,9 @@
     presets = await offeredPresets();
     paletteDefault = (await allowed()).palette_default;
     autostartWanted = await autostart();
-    languageFixed = (await status()).language_env;
+    const reported = await status();
+    languageFixed = reported.language_env;
+    clipboardOnly = cannotRead(reported.capturing);
 
     if (await accessibilityAskedFor()) steps = [...ORDER];
 
@@ -557,6 +583,9 @@
         <p class="text-sm opacity-60">
           {t("welcome-done-detail", { hotkey })}
         </p>
+        {#if clipboardOnly}
+          <p class="text-sm opacity-60">{clipboardOnly}</p>
+        {/if}
         <p class="text-sm opacity-60">{t("welcome-done-tray")}</p>
       </section>
     {/if}
