@@ -176,17 +176,12 @@ pub fn run() {
         // A fresh installation is met by the flow rather than by a tray icon it
         // has to work out for itself (user story 57).
         //
-        // Here rather than in `setup`, which is where every other window is
-        // prepared: on WebKitGTK a window shown before the event loop is
-        // running never paints. It comes up as a correct, complete, white
-        // rectangle — the page is there, the accessibility tree reads it back
-        // in full, and nothing at all is on screen. macOS and Windows draw it
-        // either way, so this is the one ordering the three platforms disagree
-        // about. By this event the Hotkey has been claimed, which the last step
-        // invites a press of.
+        // Here rather than in `setup`, where every other window is prepared,
+        // because by this event the application is running: the Hotkey the last
+        // step invites a press of has been claimed, and `welcome::reveal` is
+        // free to take the beat one platform needs before showing anything.
         RunEvent::Ready => {
             if !app.state::<Demysto>().welcomed() {
-                // ВРЕМЕННО, ДЛЯ ОПЫТА: показать через три секунды.
                 welcome::reveal(app);
             }
         }
