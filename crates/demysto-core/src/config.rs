@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::files;
+use crate::i18n::{say, Words};
 
 /// The file Demysto reads, inside the configuration directory.
 pub(crate) const FILE_NAME: &str = "settings.toml";
@@ -41,6 +42,8 @@ pub(crate) const VISION_SETTING: &str = "default_vision_model";
 pub(crate) const PALETTE_SETTING: &str = "palette_hotkey";
 /// And the length past which a Selection is worth a word before it is paid for.
 pub(crate) const LARGE_SELECTION_SETTING: &str = "large_selection";
+/// And the language the interface is asked to speak.
+pub(crate) const LANGUAGE_SETTING: &str = "language";
 
 /// How long a Selection has to be, in characters, before Demysto says so —
 /// where the settings state nothing.
@@ -51,61 +54,6 @@ pub(crate) const LARGE_SELECTION_SETTING: &str = "large_selection";
 /// without a word, and low enough to catch the select-all this exists for (user
 /// story 48).
 pub const DEFAULT_LARGE_SELECTION: u64 = 20_000;
-
-/// Where the preamble names every preset there is, filled in from the presets
-/// themselves so that adding one cannot leave the file describing the old set.
-const PRESETS: &str = "{presets}";
-
-/// Where the preamble states the length Demysto warns at, filled in for the
-/// same reason: a number written into the prose would be a number to keep in
-/// step with the one the code uses.
-const LARGE_SELECTION: &str = "{large_selection}";
-
-/// The prose a fresh installation is met by: what the file is, and what each
-/// field in the example under it means.
-const PREAMBLE: &str = r#"# Demysto's settings.
-#
-# Read when Demysto starts, and again whenever Settings writes it — so restart
-# Demysto after editing this file by hand.
-#
-# Uncomment the example below and fill it in.
-#
-# `preset` names a service Demysto knows the conventions of: it fills in
-# `base_url`, and it says which environment variable that service's own
-# documentation tells people to export. State `base_url` yourself for a service
-# that has no preset, or to override what a preset fills in — a local server
-# listening on a port of your own, say.
-#
-# The presets are:
-#
-{presets}
-#
-# A preset marked "no key" is a server running on this machine, which has no
-# keys at all: a Provider using one needs none, and none is sent. Every other
-# preset wants one.
-#
-# The key is looked for in the variable `api_key_env` names, then in the
-# preset's own variable, then in `api_key` here. Leaving `api_key` out and
-# exporting the variable instead keeps the secret out of this file.
-#
-# `models` lists the Models of a Provider you want to use. `vision` says
-# whether one accepts images, and is stated rather than guessed at from the
-# identifier, because a name is not a capability.
-#
-# A Model is named "<provider>/<model>" wherever one is nominated or bound.
-# `default_model` is what an Action binding no Model of its own resolves to, and
-# `default_vision_model` is what one resolves to for an image.
-#
-# `palette_hotkey` is the key combination that opens the Palette. Leave it out
-# for the one Demysto comes with. It is written as its modifiers and then one
-# key — "Ctrl+Alt+Space" — and a key that types nothing, such as F13, may stand
-# on its own. Settings records one for you if you would rather press it than
-# spell it.
-#
-# `large_selection` is how many characters a Selection may hold before Demysto
-# says so in the Conversation. Nothing is ever cut and nothing is ever refused:
-# it is there so that an accidental select-all is not silently paid for. Leave
-# it out for {large_selection}, or set it to 0 to be told nothing."#;
 
 /// What the user is asked to uncomment.
 ///
@@ -134,7 +82,11 @@ models = [{ id = "qwen/qwen3-8b" }]
 
 /// What a fresh installation gets: a file that parses, says what goes in it,
 /// and configures nothing until the user uncomments the example.
-fn template() -> String {
+///
+/// The prose is `settings-file-preamble` in the catalogues, so that the first
+/// thing a new installation says is said in the language the rest of the
+/// interface speaks.
+fn template(words: &Words) -> String {
     let example: String = EXAMPLE
         .lines()
         .map(|line| match line.is_empty() {
@@ -151,13 +103,17 @@ fn template() -> String {
             name,
             auth: Auth::Nothing,
             ..
-        } => format!("#   {name} (no key)"),
-        Spec { name, .. } => format!("#   {name}"),
+        } => say!(words, "settings-file-preset-keyless", "preset" = name),
+        Spec { name, .. } => say!(words, "settings-file-preset", "preset" = name),
     });
 
-    let preamble = PREAMBLE
-        .replace(PRESETS, &named.join("\n"))
-        .replace(LARGE_SELECTION, &DEFAULT_LARGE_SELECTION.to_string());
+    let preamble = say!(
+        words,
+        "settings-file-preamble",
+        "presets" = named.join("\n"),
+        "languageEnv" = crate::i18n::LANGUAGE_ENV,
+        "largeSelection" = DEFAULT_LARGE_SELECTION.to_string(),
+    );
 
     format!("{preamble}\n\nversion = {VERSION}\n\n{example}")
 }
@@ -179,6 +135,9 @@ pub(crate) struct Config {
     /// How many characters a Selection may hold before Demysto says so, as the
     /// file states it. `None` where it states nothing, which is the default.
     pub(crate) large_selection: Option<u64>,
+    /// The language the file asks the interface to speak, `None` where it asks
+    /// for none and the operating system decides (user story 59).
+    pub(crate) language: Option<String>,
 }
 
 /// A configured LLM endpoint, and the Models it offers.
@@ -381,7 +340,7 @@ impl Environment {
         Self(std::env::vars().collect())
     }
 
-    fn get(&self, name: &str) -> Option<String> {
+    pub(crate) fn get(&self, name: &str) -> Option<String> {
         self.0.get(name).cloned()
     }
 
@@ -408,18 +367,23 @@ impl fmt::Debug for Environment {
 
 /// Reads the settings file, creating it when it is not there yet, and resolves
 /// the Providers it configures.
-pub(crate) fn load(config_dir: &Path, env: &Environment) -> Result<Config, ConfigError> {
-    let (path, text) = read(config_dir)?;
-    let config = resolve(&path, parse(&path, &text)?, env)?;
+pub(crate) fn load(
+    config_dir: &Path,
+    env: &Environment,
+    words: &Words,
+) -> Result<Config, ConfigError> {
+    let (path, text) = read(config_dir, words)?;
+    let config = resolve(&path, parse(&path, &text, words)?, env, words)?;
 
     // Asked here rather than in [`resolve`], which the settings window also
     // goes through: a file configuring nothing is Demysto having nothing to run
     // against, and it is also what starting over passes through. Refusing to
     // save it would leave somebody unable to remove their last Provider.
     if config.providers.is_empty() {
-        return Err(ConfigError::NoProvider(format!(
-            "no Provider is configured; open {} and fill in the example it holds",
-            path.display()
+        return Err(ConfigError::NoProvider(say!(
+            words,
+            "config-no-provider",
+            "path" = path.display().to_string()
         )));
     }
 
@@ -433,24 +397,45 @@ pub(crate) fn load(config_dir: &Path, env: &Environment) -> Result<Config, Confi
 /// than the [`Config`] it loads to: the preamble, the user's own comments, and
 /// anything a later Demysto wrote there all survive a round trip through the
 /// text and none of them survives one through [`File`].
-pub(crate) fn read(config_dir: &Path) -> Result<(PathBuf, String), ConfigError> {
+pub(crate) fn read(config_dir: &Path, words: &Words) -> Result<(PathBuf, String), ConfigError> {
     let path = config_dir.join(FILE_NAME);
-    let text = read_or_create(&path)?;
+    let text = read_or_create(&path, words)?;
 
     Ok((path, text))
 }
 
+/// The language the settings file asks for, before anything has been said in
+/// any language.
+///
+/// The one thing read out of the file ahead of reading the file. Everything
+/// else about it — including every sentence explaining what is wrong with it —
+/// is said in a language, and the language is settled here. Nothing is created
+/// and nothing is reported: a file that is not there yet states no language, and
+/// so does one nobody can parse, which leaves the operating system deciding.
+pub(crate) fn stated_language(config_dir: &Path) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Stating {
+        language: Option<String>,
+    }
+
+    let text = fs::read_to_string(config_dir.join(FILE_NAME)).ok()?;
+
+    toml::from_str::<Stating>(&text).ok()?.language
+}
+
 /// The file as it is written, checked only for being a shape this build knows.
-pub(crate) fn parse(path: &Path, text: &str) -> Result<File, ConfigError> {
-    let file: File = toml::from_str(text).map_err(|error| unparseable(path, text, &error))?;
+pub(crate) fn parse(path: &Path, text: &str, words: &Words) -> Result<File, ConfigError> {
+    let file: File =
+        toml::from_str(text).map_err(|error| unparseable(path, text, &error, words))?;
 
     if file.version > VERSION {
-        return Err(ConfigError::Malformed(format!(
-            "{} says it is version {}, and this Demysto understands version {VERSION}; \
-             update Demysto, or point {} at another directory",
-            path.display(),
-            file.version,
-            crate::paths::CONFIG_DIR_ENV,
+        return Err(ConfigError::Malformed(say!(
+            words,
+            "config-newer-version",
+            "path" = path.display().to_string(),
+            "stated" = file.version,
+            "understood" = VERSION,
+            "variable" = crate::paths::CONFIG_DIR_ENV,
         )));
     }
 
@@ -459,16 +444,21 @@ pub(crate) fn parse(path: &Path, text: &str) -> Result<File, ConfigError> {
 
 /// The Providers a parsed file configures, with their keys resolved. Every
 /// error here is the file saying something nobody can act on.
-pub(crate) fn resolve(path: &Path, file: File, env: &Environment) -> Result<Config, ConfigError> {
+pub(crate) fn resolve(
+    path: &Path,
+    file: File,
+    env: &Environment,
+    words: &Words,
+) -> Result<Config, ConfigError> {
     let mut providers: Vec<Provider> = Vec::with_capacity(file.providers.len());
 
     for entry in &file.providers {
-        nameable(entry, &providers, path)?;
+        nameable(entry, &providers, path, words)?;
 
         providers.push(Provider {
             name: entry.name.clone(),
-            base_url: base_url(entry, path)?,
-            key: resolve_key(entry, env, path),
+            base_url: base_url(entry, path, words)?,
+            key: resolve_key(entry, env, path, words),
             models: entry
                 .models
                 .iter()
@@ -486,6 +476,7 @@ pub(crate) fn resolve(path: &Path, file: File, env: &Environment) -> Result<Conf
         default_model: file.default_model,
         default_vision_model: file.default_vision_model,
         large_selection: file.large_selection,
+        language: file.language,
     })
 }
 
@@ -509,6 +500,11 @@ pub(crate) struct File {
     /// How many characters a Selection may hold before Demysto says so, `None`
     /// where the file states nothing and [`DEFAULT_LARGE_SELECTION`] decides.
     pub(crate) large_selection: Option<u64>,
+    /// The language the interface is asked to speak, as a tag: `None` where the
+    /// file asks for none, and whatever the user typed where it names one no
+    /// catalogue answers to — `i18n::chosen` passes over anything it does not
+    /// recognise rather than refusing to start over a two-letter typo.
+    pub(crate) language: Option<String>,
 }
 
 fn first_version() -> u32 {
@@ -635,14 +631,19 @@ impl Preset {
 ///
 /// A stated base URL wins over the preset's, so that a proxy or a regional
 /// endpoint does not cost the user the preset's other half.
-pub(crate) fn base_url(entry: &ProviderEntry, path: &Path) -> Result<String, ConfigError> {
+pub(crate) fn base_url(
+    entry: &ProviderEntry,
+    path: &Path,
+    words: &Words,
+) -> Result<String, ConfigError> {
     stated(entry.base_url.clone())
         .or_else(|| entry.preset.map(|preset| preset.spec().base_url.to_owned()))
         .ok_or_else(|| {
-            ConfigError::Malformed(format!(
-                "the Provider \"{}\" in {} states no base_url and no preset to take one from",
-                entry.name,
-                path.display()
+            ConfigError::Malformed(say!(
+                words,
+                "config-provider-no-base-url",
+                "provider" = entry.name.clone(),
+                "path" = path.display().to_string()
             ))
         })
 }
@@ -653,30 +654,39 @@ pub(crate) fn base_url(entry: &ProviderEntry, path: &Path) -> Result<String, Con
 /// unreachable or ambiguous, and a Model nobody can name is a Model nobody can
 /// nominate — a failure that would otherwise surface as "no such Model" over a
 /// file that plainly holds it.
-fn nameable(entry: &ProviderEntry, taken: &[Provider], path: &Path) -> Result<(), ConfigError> {
+fn nameable(
+    entry: &ProviderEntry,
+    taken: &[Provider],
+    path: &Path,
+    words: &Words,
+) -> Result<(), ConfigError> {
     let malformed = |reason: String| {
-        Err(ConfigError::Malformed(format!(
-            "{reason} in {}",
-            path.display()
+        Err(ConfigError::Malformed(say!(
+            words,
+            "config-in-file",
+            "reason" = reason,
+            "path" = path.display().to_string()
         )))
     };
 
     if entry.name.trim().is_empty() {
-        return malformed("a Provider is configured with no name".to_owned());
+        return malformed(say!(words, "config-provider-no-name"));
     }
 
     if entry.name.contains(SEPARATOR) {
-        return malformed(format!(
-            "the Provider \"{}\" has a \"{SEPARATOR}\" in its name, which is what separates a \
-             Provider from a Model",
-            entry.name
+        return malformed(say!(
+            words,
+            "config-provider-name-has-separator",
+            "provider" = entry.name.clone(),
+            "separator" = SEPARATOR.to_string()
         ));
     }
 
     if taken.iter().any(|provider| provider.name == entry.name) {
-        return malformed(format!(
-            "two Providers are called \"{}\", so a Model of either cannot be named",
-            entry.name
+        return malformed(say!(
+            words,
+            "config-two-providers-named",
+            "provider" = entry.name.clone()
         ));
     }
 
@@ -684,16 +694,19 @@ fn nameable(entry: &ProviderEntry, taken: &[Provider], path: &Path) -> Result<()
     // no model in it. It arrives from a window where "Add a Model" adds an
     // empty row, so it is what saving without typing produces.
     if entry.models.iter().any(|model| model.id.trim().is_empty()) {
-        return malformed(format!(
-            "the Provider \"{}\" lists a Model with no name",
-            entry.name
+        return malformed(say!(
+            words,
+            "config-provider-model-no-name",
+            "provider" = entry.name.clone()
         ));
     }
 
     if let Some(duplicate) = duplicate_model(entry) {
-        return malformed(format!(
-            "the Provider \"{}\" lists the Model \"{duplicate}\" twice",
-            entry.name
+        return malformed(say!(
+            words,
+            "config-provider-model-twice",
+            "provider" = entry.name.clone(),
+            "model" = duplicate.to_owned()
         ));
     }
 
@@ -721,7 +734,12 @@ fn duplicate_model(entry: &ProviderEntry) -> Option<&str> {
 /// stated for a keyless service is still used, because the three sources are
 /// asked first: somebody may have put a local server behind something that
 /// wants one.
-pub(crate) fn resolve_key(entry: &ProviderEntry, env: &Environment, path: &Path) -> Key {
+pub(crate) fn resolve_key(
+    entry: &ProviderEntry,
+    env: &Environment,
+    path: &Path,
+    words: &Words,
+) -> Key {
     let from_env =
         |name: &str| stated(env.get(name)).map(|key| (key, Origin::Variable(name.to_owned())));
 
@@ -740,7 +758,7 @@ pub(crate) fn resolve_key(entry: &ProviderEntry, env: &Environment, path: &Path)
         // holds nothing routinely: an application launched from the Finder or a
         // desktop entry never sees what a shell profile exported.
         None if has_no_keys(entry) && entry.api_key_env.is_none() => Key::NotNeeded,
-        None => Key::Missing(no_key(entry, path)),
+        None => Key::Missing(no_key(entry, path, words)),
     }
 }
 
@@ -778,7 +796,7 @@ pub(crate) fn stated(value: Option<String>) -> Option<String> {
 
 /// Everywhere the key was looked for, so that the user is told where to put one
 /// rather than only that there isn't one.
-fn no_key(entry: &ProviderEntry, path: &Path) -> String {
+fn no_key(entry: &ProviderEntry, path: &Path, words: &Words) -> String {
     // Sorted and deduplicated: a Provider that names its preset's own variable
     // in `api_key_env` would otherwise be told about it twice.
     let variables: BTreeSet<&str> = entry
@@ -789,41 +807,42 @@ fn no_key(entry: &ProviderEntry, path: &Path) -> String {
         .collect();
 
     match variables.is_empty() {
-        true => format!(
-            "The Provider \"{}\" has no API key: set api_key for it in {}, or name an \
-             environment variable in api_key_env.",
-            entry.name,
-            path.display()
+        true => say!(
+            words,
+            "config-no-key-anywhere",
+            "provider" = entry.name.clone(),
+            "path" = path.display().to_string()
         ),
-        false => format!(
-            "The Provider \"{}\" has no API key: export {}, or set api_key for it in {}.",
-            entry.name,
-            variables.into_iter().collect::<Vec<_>>().join(" or "),
-            path.display()
+        false => say!(
+            words,
+            "config-no-key-export",
+            "provider" = entry.name.clone(),
+            "variables" = variables.into_iter().collect::<Vec<_>>().join(" or "),
+            "path" = path.display().to_string()
         ),
     }
 }
 
-fn read_or_create(path: &Path) -> Result<String, ConfigError> {
+fn read_or_create(path: &Path, words: &Words) -> Result<String, ConfigError> {
     match fs::read_to_string(path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            create(path)?;
+            create(path, words)?;
 
             // Read back rather than returning the template: the file on disk is
             // the source of truth, and it is the one the user will edit.
-            fs::read_to_string(path).map_err(|error| unreadable(path, &error))
+            fs::read_to_string(path).map_err(|error| unreadable(path, &error, words))
         }
-        read => read.map_err(|error| unreadable(path, &error)),
+        read => read.map_err(|error| unreadable(path, &error, words)),
     }
 }
 
 /// Writes the template, owner-only, without touching a file that is already
 /// there.
-fn create(path: &Path) -> Result<(), ConfigError> {
+fn create(path: &Path, words: &Words) -> Result<(), ConfigError> {
     use std::io::Write;
 
     if let Some(parent) = path.parent() {
-        files::create_dir(parent).map_err(|error| unreadable(parent, &error))?;
+        files::create_dir(parent).map_err(|error| unreadable(parent, &error, words))?;
     }
 
     let mut file = match files::options().create_new(true).write(true).open(path) {
@@ -831,26 +850,36 @@ fn create(path: &Path) -> Result<(), ConfigError> {
         // Somebody else got there between the read and this line. Their file is
         // as good as ours, and better than an error the user cannot act on.
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Ok(()),
-        Err(error) => return Err(unreadable(path, &error)),
+        Err(error) => return Err(unreadable(path, &error, words)),
     };
 
-    file.write_all(template().as_bytes())
-        .map_err(|error| unreadable(path, &error))
+    file.write_all(template(words).as_bytes())
+        .map_err(|error| unreadable(path, &error, words))
 }
 
 /// Replaces the settings file with `text`, owner-only, without ever leaving a
 /// half-written one behind — see [`crate::files::replace`], which `catalogue`
 /// writes an Action through in the same way.
-pub(crate) fn write(path: &Path, text: &str) -> Result<(), ConfigError> {
-    files::replace(path, text).map_err(|error| unwritable(path, &error))
+pub(crate) fn write(path: &Path, text: &str, words: &Words) -> Result<(), ConfigError> {
+    files::replace(path, text).map_err(|error| unwritable(path, &error, words))
 }
 
-fn unreadable(path: &Path, error: &io::Error) -> ConfigError {
-    ConfigError::Unreadable(format!("{} could not be read: {error}", path.display()))
+fn unreadable(path: &Path, error: &io::Error, words: &Words) -> ConfigError {
+    ConfigError::Unreadable(say!(
+        words,
+        "config-unreadable",
+        "path" = path.display().to_string(),
+        "detail" = error.to_string()
+    ))
 }
 
-fn unwritable(path: &Path, error: &io::Error) -> ConfigError {
-    ConfigError::Unwritable(format!("{} could not be written: {error}", path.display()))
+fn unwritable(path: &Path, error: &io::Error, words: &Words) -> ConfigError {
+    ConfigError::Unwritable(say!(
+        words,
+        "config-unwritable",
+        "path" = path.display().to_string(),
+        "detail" = error.to_string()
+    ))
 }
 
 /// What a parse failure says, and where — but never the line it happened on.
@@ -861,19 +890,26 @@ fn unwritable(path: &Path, error: &io::Error) -> ConfigError {
 /// exactly one thing in exchange for keeping the key out of the keychain: "The
 /// key never enters the webview." So the reason and the line number cross, and
 /// the file's own text does not.
-fn unparseable(path: &Path, text: &str, error: &toml::de::Error) -> ConfigError {
+fn unparseable(path: &Path, text: &str, error: &toml::de::Error, words: &Words) -> ConfigError {
     let line = error
         .span()
         .and_then(|span| text.get(..span.start))
         .map(|before| before.matches('\n').count() + 1);
 
     ConfigError::Malformed(match line {
-        Some(line) => format!(
-            "{} is not valid TOML at line {line}: {}",
-            path.display(),
-            error.message()
+        Some(line) => say!(
+            words,
+            "config-not-toml-at-line",
+            "path" = path.display().to_string(),
+            "line" = line,
+            "detail" = error.message().to_owned()
         ),
-        None => format!("{} is not valid TOML: {}", path.display(), error.message()),
+        None => say!(
+            words,
+            "config-not-toml",
+            "path" = path.display().to_string(),
+            "detail" = error.message().to_owned()
+        ),
     })
 }
 
@@ -893,7 +929,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(FILE_NAME), format!("version = 1\n\n{body}")).unwrap();
 
-        let loaded = load(dir.path(), env);
+        let loaded = load(dir.path(), env, &crate::i18n::english());
         (dir, loaded)
     }
 
@@ -1303,7 +1339,7 @@ models = [{ id = \"deepseek-chat\" }]
     fn a_settings_file_is_created_when_there_is_none() {
         let dir = TempDir::new().unwrap();
 
-        let _ = load(dir.path(), &Environment::default());
+        let _ = load(dir.path(), &Environment::default(), &crate::i18n::english());
 
         assert!(dir.path().join(FILE_NAME).is_file());
     }
@@ -1313,7 +1349,7 @@ models = [{ id = \"deepseek-chat\" }]
         let dir = TempDir::new().unwrap();
         let nested = dir.path().join("never/been/here");
 
-        let _ = load(&nested, &Environment::default());
+        let _ = load(&nested, &Environment::default(), &crate::i18n::english());
 
         assert!(nested.join(FILE_NAME).is_file());
     }
@@ -1325,7 +1361,7 @@ models = [{ id = \"deepseek-chat\" }]
 
         let dir = TempDir::new().unwrap();
 
-        let _ = load(dir.path(), &Environment::default());
+        let _ = load(dir.path(), &Environment::default(), &crate::i18n::english());
 
         let mode = fs::metadata(dir.path().join(FILE_NAME))
             .unwrap()
@@ -1340,7 +1376,7 @@ models = [{ id = \"deepseek-chat\" }]
         let dir = TempDir::new().unwrap();
 
         assert!(matches!(
-            load(dir.path(), &Environment::default()),
+            load(dir.path(), &Environment::default(), &crate::i18n::english()),
             Err(ConfigError::NoProvider(_))
         ));
     }
@@ -1372,7 +1408,7 @@ models = [{ id = \"deepseek-chat\" }]
         // The names are written out for the template, and read back by serde
         // from the same word; a typo in either would be a preset the file names
         // and rejects.
-        let written = template();
+        let written = template(&crate::i18n::english());
 
         for preset in Preset::ALL {
             let spec = preset.spec();
@@ -1409,7 +1445,7 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn the_template_holds_the_example_with_a_comment_marker_on_every_line() {
-        let written = template();
+        let written = template(&crate::i18n::english());
 
         for line in EXAMPLE.lines().filter(|line| !line.is_empty()) {
             assert!(written.contains(&format!("# {line}\n")), "{written}");
@@ -1496,7 +1532,9 @@ models = [{ id = \"deepseek-chat\" }]
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(FILE_NAME), "version = 99\n").unwrap();
 
-        let Err(ConfigError::Malformed(message)) = load(dir.path(), &Environment::default()) else {
+        let Err(ConfigError::Malformed(message)) =
+            load(dir.path(), &Environment::default(), &crate::i18n::english())
+        else {
             panic!("a file from the future should not be acted on");
         };
 
@@ -1508,6 +1546,6 @@ models = [{ id = \"deepseek-chat\" }]
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(FILE_NAME), file_only()).unwrap();
 
-        assert!(load(dir.path(), &Environment::default()).is_ok());
+        assert!(load(dir.path(), &Environment::default(), &crate::i18n::english()).is_ok());
     }
 }

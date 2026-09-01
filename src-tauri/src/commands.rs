@@ -11,7 +11,7 @@ use demysto_core::{
     Preset, ProviderEdit, RunError, Settings, Status, Summary,
 };
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindow};
 
 /// The catalogue as the window that writes Actions sees it: what the core holds,
 /// plus what came of claiming the Hotkeys the Actions in it state.
@@ -77,6 +77,22 @@ pub fn hotkeys(demysto: State<'_, Demysto>) -> Hotkeys {
 #[tauri::command]
 pub fn status(demysto: State<'_, Demysto>) -> Status {
     demysto.status()
+}
+
+/// Emitted with the tag of the language Demysto now speaks, so that every
+/// window already on screen redraws itself in it rather than waiting to be
+/// reopened (user story 59).
+const LANGUAGE_EVENT: &str = "language://spoken";
+
+/// The language the windows are to draw themselves in.
+///
+/// The tag alone, because the catalogue itself is on both sides: the windows
+/// import the same `i18n/*.ftl` files this crate is compiled against, so what
+/// crosses the channel is which of them to read rather than what it says.
+/// Asked at startup by every window, and again whenever a save changes it.
+#[tauri::command]
+pub fn language(demysto: State<'_, Demysto>) -> &'static str {
+    demysto.language().tag()
 }
 
 /// What the last Capture produced, for a Palette that mounted after it.
@@ -151,15 +167,15 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>, provider: Option<String>) {
 /// Opens the settings pane where the Accessibility permission is granted, which
 /// is how a Capture the system refused is fixed from where it is reported.
 #[tauri::command]
-pub fn open_accessibility() -> Result<(), String> {
-    crate::accessibility::reveal()
+pub fn open_accessibility(demysto: State<'_, Demysto>) -> Result<(), String> {
+    crate::accessibility::reveal(&demysto.words())
 }
 
 /// Opens the folder Demysto writes its logs in, so that a bug report can carry
 /// them.
 #[tauri::command]
 pub fn open_logs(demysto: State<'_, Demysto>) -> Result<(), String> {
-    crate::folder::open(&demysto.logs_dir())
+    crate::folder::open(&demysto.logs_dir(), &demysto.words())
 }
 
 /// The Conversation the window is showing, for one that mounted after the Turn
@@ -244,7 +260,29 @@ pub async fn save_settings<R: Runtime>(
     app: AppHandle<R>,
     edit: Edit,
 ) -> Result<Settings, ConfigError> {
-    waiting(move || app.state::<Demysto>().save_settings(&edit)).await
+    let saved = {
+        let app = app.clone();
+        waiting(move || app.state::<Demysto>().save_settings(&edit)).await
+    }?;
+
+    // Told to every window, not only the one that saved: the language is the
+    // one setting that changes what a window says rather than what it does, and
+    // a Conversation left open behind Settings would otherwise go on speaking
+    // the language nobody chose any more. The tray menu is not a window and
+    // redraws nowhere, so it is rebuilt where the catalogue is read — see
+    // `catalogued`, which the window asks for straight after a save.
+    let _ = app.emit(LANGUAGE_EVENT, app.state::<Demysto>().language().tag());
+
+    // The two native surfaces no webview redraws, put back beside the event
+    // that redraws the rest: the window's own title, and — on macOS — the menu
+    // bar. The tray menu is the third, and is rebuilt where the catalogue is
+    // read (see `catalogued`, which the window asks for straight after a save).
+    crate::settings::names_itself(&app);
+
+    #[cfg(target_os = "macos")]
+    let _ = crate::menu::build(&app);
+
+    Ok(saved)
 }
 
 /// The services Demysto knows the conventions of, for the window to offer.

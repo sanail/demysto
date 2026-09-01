@@ -1,8 +1,8 @@
 //! Obtaining a Selection from the foreground application or the clipboard.
 
-use std::fmt;
 use std::time::Duration;
 
+use crate::i18n::{say, Words};
 use crate::selection::Selection;
 
 /// The act of obtaining a Selection, behind a trait so that the core can be
@@ -26,10 +26,10 @@ pub enum Capturing {
     /// The desktop refuses synthetic input, so a Capture reads only what the
     /// user put on the clipboard themselves.
     ///
-    /// Carries the whole sentence, for the reason
-    /// [`CaptureError::Permission`] does: only the platform that imposes the
-    /// limitation can say what it is and what to do instead.
-    ClipboardOnly(String),
+    /// The fact and not the sentence about it. The sentence lives in the
+    /// catalogue, where every other sentence lives, and is said by whichever
+    /// window is on screen when it needs saying — `capture-clipboard-only`.
+    ClipboardOnly,
 }
 
 /// What one Capture produced.
@@ -91,6 +91,13 @@ impl From<Result<Captured, CaptureError>> for CaptureOutcome {
     }
 }
 
+/// Why a Capture produced nothing.
+///
+/// Neither `Display` nor `Error`, deliberately: what the user is told depends
+/// on the language the interface is speaking, and neither trait has anywhere to
+/// be told it — [`Self::message`] takes the words instead. Nothing treats this
+/// as an error in the `?` sense either; it is a state the Palette shows, as
+/// [`CaptureOutcome`] says.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", content = "message", rename_all = "snake_case")]
 pub enum CaptureError {
@@ -102,25 +109,39 @@ pub enum CaptureError {
     ///
     /// Held apart from [`Self::Keystroke`] because what the user is owed
     /// differs: a keystroke that failed is worth trying again, and this is not
-    /// worth trying again until they have granted something. Carries the whole
-    /// sentence, which names the permission and where it is granted, because
-    /// only the platform that has such a permission can say either.
-    Permission(String),
+    /// worth trying again until they have granted something. Only macOS has
+    /// such a permission, so the sentence that names it — and the pane it is
+    /// granted in — is one message in the catalogue rather than a string this
+    /// carries.
+    Permission,
 }
 
-impl fmt::Display for CaptureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl CaptureError {
+    /// What the user is told this was, in their own language.
+    ///
+    /// Not a `Display`: the sentence depends on which language the interface is
+    /// speaking, and a `Display` has nowhere to be told. What the platform said
+    /// travels inside the error and is quoted into the sentence here.
+    pub(crate) fn message(&self, words: &Words) -> String {
         match self {
-            Self::Clipboard(message) => write!(f, "the clipboard is unavailable: {message}"),
-            Self::Keystroke(message) => {
-                write!(f, "the copy keystroke could not be sent: {message}")
+            Self::Clipboard(detail) => {
+                say!(
+                    words,
+                    "capture-clipboard-unavailable",
+                    "detail" = detail.clone()
+                )
             }
-            Self::Permission(message) => f.write_str(message),
+            Self::Keystroke(detail) => {
+                say!(
+                    words,
+                    "capture-keystroke-refused",
+                    "detail" = detail.clone()
+                )
+            }
+            Self::Permission => say!(words, "capture-no-accessibility"),
         }
     }
 }
-
-impl std::error::Error for CaptureError {}
 
 /// The parts of the desktop a Capture touches, so that the surrounding
 /// behaviour — the fallback, the restoration — is testable without one.
@@ -319,14 +340,6 @@ pub(crate) mod fake {
     /// `Demysto::with_capture` for why neither is any use without the other.
     pub(crate) type Reading = (Box<dyn Capture>, Capturing);
 
-    /// What a fake Wayland session says about itself, standing in for the
-    /// sentence `desktop` writes on the platform that has one.
-    pub(crate) const COPY_IT_YOURSELF: &str = "this session reads only the clipboard";
-
-    /// What a desktop withholding the permission says, standing in for the
-    /// sentence the platform that has one writes — see `desktop`.
-    pub(crate) const REFUSED: &str = "the permission is not granted";
-
     /// A desktop whose foreground application holds `selection`, and which puts
     /// it on the clipboard `lands_after` reads after being sent a copy.
     #[derive(Default)]
@@ -411,7 +424,7 @@ pub(crate) mod fake {
             *self.permission_checks.lock().unwrap() += 1;
 
             match self.refuses_permission {
-                true => Err(CaptureError::Permission(REFUSED.to_owned())),
+                true => Err(CaptureError::Permission),
                 false => Ok(()),
             }
         }
@@ -456,7 +469,7 @@ pub(crate) mod fake {
     pub(crate) fn clipboard_only_over(desktop: &Arc<FakeDesktop>) -> Reading {
         (
             Box::new(ClipboardCapture::new(Arc::clone(desktop))),
-            Capturing::ClipboardOnly(COPY_IT_YOURSELF.to_owned()),
+            Capturing::ClipboardOnly,
         )
     }
 }

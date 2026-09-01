@@ -220,7 +220,10 @@ highlighting by `highlight.js` over a reduced language set.
 created mode `0600` on Unix, carrying a `version` field for future migrations.
 Owns key resolution in the order fixed by ADR-0002: a Provider's `api_key_env`
 field, then the preset's conventional variable, then the file's `api_key`. Keys
-are read once at startup; no other module reads the environment.
+are read once at startup; the environment is snapshotted here and nowhere else,
+and everything that has a say in it — the language override included — reads
+that snapshot. The one exception is the session type, which `desktop` asks for
+because it decides which Capture exists at all.
 
 **Action catalogue.** Built-in Actions are compiled into the binary; disk holds
 only user-authored Actions, one file each, plus Overrides of built-in ones
@@ -290,12 +293,22 @@ every Run, because macOS revokes it whenever the binary's signature changes.
 
 ### Interface language
 
-One Fluent catalogue per language at the repository root is the single source of
-truth, consumed by both the frontend and the Rust layer — the tray menu and
-notifications are native, so Rust needs the same strings. Fluent rather than flat
-JSON because Russian plural forms are exactly what it exists for. Language
-follows the operating system, falls back to English, and is overridable in
-Settings and by an environment variable.
+One Fluent catalogue per language in `i18n/` is the single source of truth,
+consumed by both the frontend and the Rust layer — the tray menu and
+notifications are native, so Rust needs the same strings. Vite imports the files
+as text and `demysto-core` compiles them in with `include_str!`; neither derives
+its strings from the other. Fluent rather than flat JSON because Russian plural
+forms are exactly what it exists for.
+
+Language follows the operating system, falls back to English, and is overridable
+in Settings and by `DEMYSTO_LANGUAGE`, in that order of precedence: the variable,
+then the settings file, then the system. A source naming a language Demysto does
+not speak is passed over rather than treated as English, so a typo in the
+variable still leaves the desktop deciding. Changing it in Settings takes effect
+without a restart, in every window and in the tray menu.
+
+What the built-in Actions say to a Model stays in English whatever the interface
+speaks — ADR-0012.
 
 ### Distribution
 

@@ -10,9 +10,11 @@
     run,
     status,
     type Action,
+    type CaptureError,
     type CaptureOutcome,
     type Capturing,
   } from "../lib/ipc";
+  import { t } from "../lib/i18n.svelte";
   import { latest } from "../lib/latest.svelte";
   import { sending } from "../lib/sending";
 
@@ -39,9 +41,13 @@
   /**
    * The sentence a session that cannot read a Selection is owed, `null`
    * everywhere else (user story 56).
+   *
+   * Said here rather than carried from the backend: the sentence is a sentence
+   * like any other, and the catalogue is where they live. What the backend says
+   * is which kind of session this is.
    */
   const clipboardOnly = $derived(
-    capturing?.reads === "clipboard_only" ? capturing.detail : null,
+    capturing?.reads === "clipboard_only" ? t("capture-clipboard-only") : null,
   );
 
   const outcome = $derived(capture.value);
@@ -59,9 +65,9 @@
    */
   const origin = $derived(
     captured?.origin === "selection"
-      ? "Selection"
+      ? t("palette-origin-selection")
       : captured?.origin === "clipboard"
-        ? "From the clipboard"
+        ? t("palette-origin-clipboard")
         : null,
   );
 
@@ -82,6 +88,24 @@
 
   /** What stopped the user being sent somewhere, in the backend's own words. */
   let unreachable = $state<string | null>(null);
+
+  /**
+   * What a Capture that failed is owed, in a whole sentence.
+   *
+   * The backend reports which of the three it was and quotes whatever the
+   * platform said; the sentence around that is the catalogue's, like every
+   * other sentence in this window.
+   */
+  function refused(failure: CaptureError): string {
+    switch (failure.kind) {
+      case "clipboard":
+        return t("capture-clipboard-unavailable", { detail: failure.message });
+      case "keystroke":
+        return t("capture-keystroke-refused", { detail: failure.message });
+      case "permission":
+        return t("capture-no-accessibility");
+    }
+  }
 
   /** Walks the user to the permission macOS is withholding (user story 55). */
   async function grant() {
@@ -222,7 +246,7 @@
          text-neutral-900 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
 >
   <header class="flex items-baseline justify-between gap-3">
-    <h1 class="text-sm font-semibold tracking-tight">Demysto</h1>
+    <h1 class="text-sm font-semibold tracking-tight">{t("app-name")}</h1>
 
     <!-- Drawn as quietly as before and now said as well. The role is what
          keeps it in the accessibility tree at all: WebKitGTK keeps no inline
@@ -254,11 +278,13 @@
     >
       {#if outcome === null}
         <p class="text-sm opacity-50">
-          {clipboardOnly ? "Reading the clipboard…" : "Reading what you selected…"}
+          {clipboardOnly
+            ? t("palette-reading-clipboard")
+            : t("palette-reading-selection")}
         </p>
       {:else if outcome.status === "failed"}
         <p class="text-sm text-red-600 dark:text-red-400">
-          {outcome.detail.message}
+          {refused(outcome.detail)}
         </p>
 
         {#if outcome.detail.kind === "permission"}
@@ -271,7 +297,7 @@
               class="cursor-pointer rounded border border-neutral-300 px-2 py-1 text-xs
                      hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
             >
-              Open Accessibility settings
+              {t("palette-open-accessibility")}
             </button>
           </div>
 
@@ -286,10 +312,7 @@
                between a limitation and a tool that appears broken. -->
           <p class="text-sm opacity-60">{clipboardOnly}</p>
         {:else}
-          <p class="text-sm opacity-60">
-            Nothing is selected and the clipboard is empty. Select some text and
-            press the Hotkey again.
-          </p>
+          <p class="text-sm opacity-60">{t("palette-nothing-captured")}</p>
         {/if}
       {:else}
         <p class="line-clamp-2 text-sm whitespace-pre-wrap opacity-60">
@@ -315,7 +338,7 @@
           bind:this={field}
           bind:value={filter}
           oninput={() => (highlighted = 0)}
-          placeholder="Filter Actions…"
+          placeholder={t("palette-filter")}
           class={FIELD}
         />
 
@@ -336,7 +359,7 @@
             </li>
           {:else}
             <li class="px-2 py-1 text-sm opacity-50">
-              No Action is called that.
+              {t("palette-no-action-matches")}
             </li>
           {/each}
         </ul>
@@ -346,11 +369,11 @@
 
   <footer class="text-xs opacity-40">
     {#if collecting}
-      Enter to run · Esc to go back
+      {t("palette-keys-collecting")}
     {:else if selection}
-      ↑↓ to choose · Enter to run · Esc to close
+      {t("palette-keys-choosing")}
     {:else}
-      Esc to close
+      {t("palette-keys-closing")}
     {/if}
   </footer>
 </main>

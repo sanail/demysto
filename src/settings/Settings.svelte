@@ -23,11 +23,13 @@
     type DefinedAction,
     type KeyEdit,
     type KeyStanding,
+    type Exported,
     type Preset,
     type ProviderEdit,
     type Settings,
   } from "../lib/ipc";
   import { combination, reading } from "../lib/hotkey";
+  import { spokenTag, t } from "../lib/i18n.svelte";
   import { saidBy, sending } from "../lib/sending";
   import type { UnlistenFn } from "@tauri-apps/api/event";
 
@@ -36,7 +38,9 @@
 
   /** What a Capture on this desktop cannot do, where there is such a thing. */
   function said(capturing: Capturing): string | null {
-    return capturing.reads === "clipboard_only" ? capturing.detail : null;
+    return capturing.reads === "clipboard_only"
+      ? t("capture-clipboard-only")
+      : null;
   }
 
   /**
@@ -122,6 +126,22 @@
   let largeSelection = $state<number | null>(null);
   /** Demysto's own figure, so that the field can say what leaving it empty means. */
   let largeSelectionDefault = $state(0);
+  /**
+   * The language the settings ask for, empty for following the operating
+   * system.
+   *
+   * What the file states rather than what is being spoken: an environment
+   * variable can be fixing the second, and a field that showed it would report
+   * a choice nobody made — the same reason the key field shows where a key is
+   * rather than the key.
+   */
+  let language = $state("");
+  /**
+   * The language the environment fixes, `null` where nothing is exported. The
+   * field is still offered where it is set: what is written goes on being what
+   * the file says, and is what will be spoken the moment the variable is not.
+   */
+  let languageFixed = $state<Exported | null>(null);
   /** Where the logs are, and what went wrong opening the folder. */
   let logsProblem = $state<string | null>(null);
   /** The Provider the window was opened at, so that it can be shown as such. */
@@ -166,21 +186,24 @@
     "outline-none focus:border-neutral-500 dark:border-neutral-700 " +
     "dark:focus:border-neutral-500";
 
-  /**
-   * What both Hotkey fields say about what may be recorded. One sentence rather
-   * than two, because it is one rule — and honest about which keys are worth
-   * trying: an operating system answers to its own volume and media keys long
-   * before Demysto sees them.
-   */
-  const HOTKEY_RULE =
-    "Hold at least one modifier, or press a key that types nothing on its own — " +
-    "F13 and above are the ones most keyboards can send.";
-
   const BUTTON =
     "cursor-pointer rounded border border-neutral-300 px-2 py-1 text-xs " +
     "hover:bg-neutral-100 disabled:cursor-default disabled:opacity-40 " +
     "disabled:hover:bg-transparent dark:border-neutral-700 " +
     "dark:hover:bg-neutral-800 dark:disabled:hover:bg-transparent";
+
+  /**
+   * The languages Demysto speaks, each written in its own name.
+   *
+   * The endonyms rather than translations of them: a list of languages written
+   * in the language somebody cannot read is a list they cannot use to get out
+   * of it. Written here rather than taken from a catalogue for the same
+   * reason — they are the same two words in every one.
+   */
+  const LANGUAGES = [
+    { tag: "en", name: "English" },
+    { tag: "ru", name: "Русский" },
+  ];
 
   onMount(async () => {
     presets = await offeredPresets();
@@ -189,6 +212,7 @@
     where = reported.config_dir;
     largeSelectionDefault = reported.large_selection_default;
     clipboardOnly = said(reported.capturing);
+    languageFixed = reported.language_env;
 
     // A refused key is reported in the Conversation and fixed here, so the
     // window is told which Provider it was opened for.
@@ -239,6 +263,7 @@
     defaultVisionModel = settings.default_vision_model ?? "";
     paletteHotkey = settings.palette_hotkey ?? "";
     largeSelection = settings.large_selection;
+    language = settings.language ?? "";
   }
 
   /** Takes the catalogue as the directory holds it as the state of this window. */
@@ -315,17 +340,19 @@
 
   /** What the key field says instead of the key. */
   function about(draft: Draft): string {
-    if (draft.forgetting) return "Will be removed when you save";
+    if (draft.forgetting) return t("settings-key-going");
 
     switch (draft.standing.state) {
       case "in_file":
-        return "Held in the settings file — type to replace it";
+        return t("settings-key-in-file");
       case "in_environment":
-        return `Taken from ${draft.standing.variable}`;
+        return t("settings-key-in-environment", {
+          variable: draft.standing.variable,
+        });
       case "not_needed":
-        return "This service has no keys";
+        return t("settings-key-not-needed");
       case "missing":
-        return "No key yet";
+        return t("settings-key-missing");
     }
   }
 
@@ -387,7 +414,7 @@
       draft.offered = await providerModels(edited(draft));
 
       if (draft.offered.length === 0) {
-        draft.said = { well: false, message: "It offers no Models." };
+        draft.said = { well: false, message: t("settings-provider-offers-nothing") };
       }
     } catch (error) {
       draft.said = { well: false, message: saidBy(error) };
@@ -404,7 +431,10 @@
 
     try {
       await verifyProvider(edited(draft), draft.trying);
-      draft.said = { well: true, message: `${draft.trying} answered.` };
+      draft.said = {
+        well: true,
+        message: t("settings-provider-answered", { model: draft.trying }),
+      };
     } catch (error) {
       draft.said = { well: false, message: saidBy(error) };
     } finally {
@@ -430,6 +460,7 @@
         // same as a zero somebody typed: one leaves Demysto's own figure
         // deciding, the other asks to be told nothing.
         large_selection: stated(largeSelection),
+        language,
       }));
 
       // Asked for again because reading the catalogue is what claims the
@@ -534,6 +565,22 @@
     recording = null;
   }
 
+  /** The language this window was drawn in, so that a change can be noticed. */
+  let drawnIn = spokenTag();
+
+  // A draft of a built-in holds what the built-in says, in the words it said
+  // them in: its name, its Parameters' labels, and what they offer. Changing
+  // the language leaves those the words of a language nobody chose — and saving
+  // the draft afterwards would write them into an Override, leaving one Action
+  // in the Palette speaking it for good. So the panel closes with the language
+  // it was written in, and reopens in the new one.
+  $effect(() => {
+    if (spokenTag() === drawnIn) return;
+
+    drawnIn = spokenTag();
+    stopEditing();
+  });
+
   function declare() {
     editing?.draft.parameters.push({ id: "", label: "", default: "" });
   }
@@ -582,9 +629,9 @@
       case "built_in":
         return null;
       case "overridden":
-        return "Changed";
+        return t("settings-action-changed");
       case "authored":
-        return "Yours";
+        return t("settings-action-yours");
     }
   }
 
@@ -649,7 +696,7 @@
          dark:bg-neutral-900 dark:text-neutral-100"
 >
   <header class="flex items-baseline justify-between gap-3">
-    <h1 class="text-sm font-semibold tracking-tight">Settings</h1>
+    <h1 class="text-sm font-semibold tracking-tight">{t("settings-title")}</h1>
     <span class="truncate text-xs opacity-40" title={where}>{where}</span>
   </header>
 
@@ -660,19 +707,17 @@
            what is wrong and where. -->
       <section class="flex flex-col gap-2">
         <p class="text-sm text-red-600 dark:text-red-400">{unreadable}</p>
-        <p class="text-sm opacity-60">
-          Settings will not write over a file it cannot read, so nothing here can
-          be edited until that file is repaired. Open it, fix what it says, and
-          reopen this window.
-        </p>
+        <p class="text-sm opacity-60">{t("settings-unreadable-file")}</p>
       </section>
     {:else}
     <section class="flex flex-col gap-3">
       <div class="flex items-baseline justify-between gap-3">
         <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-          Providers
+          {t("settings-providers")}
         </h2>
-        <button type="button" class={BUTTON} onclick={add}>Add a Provider</button>
+        <button type="button" class={BUTTON} onclick={add}>
+          {t("settings-add-provider")}
+        </button>
       </div>
 
       {#each drafts as draft, at (at)}
@@ -688,21 +733,29 @@
         >
           <div class="grid grid-cols-2 gap-3">
             <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">Name</span>
-              <input bind:value={draft.name} class={FIELD} placeholder="openai" />
+              <span class="text-xs opacity-60">{t("settings-provider-name")}</span>
+              <input
+                bind:value={draft.name}
+                class={FIELD}
+                placeholder={t("settings-provider-name-example")}
+              />
             </label>
 
             <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">Service</span>
+              <span class="text-xs opacity-60">{t("settings-provider-service")}</span>
               <select
                 bind:value={draft.preset}
                 onchange={() => picked(draft)}
                 class={FIELD}
               >
-                <option value="">No preset</option>
+                <option value="">{t("settings-provider-no-preset")}</option>
                 {#each presets as preset (preset.name)}
                   <option value={preset.name}>
-                    {preset.name}{preset.needs_key ? "" : " (no key)"}
+                    {preset.needs_key
+                      ? preset.name
+                      : t("settings-provider-preset-keyless", {
+                          preset: preset.name,
+                        })}
                   </option>
                 {/each}
               </select>
@@ -710,18 +763,20 @@
 
             <label class="col-span-2 flex flex-col gap-1">
               <span class="text-xs opacity-60">
-                Base URL{draft.preset === "" ? "" : " — leave empty to use the preset's"}
+                {draft.preset === ""
+                  ? t("settings-provider-base-url")
+                  : t("settings-provider-base-url-from-preset")}
               </span>
               <input
                 bind:value={draft.base_url}
                 class={FIELD}
                 placeholder={presets.find((it) => it.name === draft.preset)
-                  ?.base_url ?? "https://api.example.com/v1"}
+                  ?.base_url ?? t("settings-provider-base-url-example")}
               />
             </label>
 
             <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">API key</span>
+              <span class="text-xs opacity-60">{t("settings-provider-key")}</span>
               <input
                 type="password"
                 bind:value={draft.typed}
@@ -733,13 +788,13 @@
 
             <label class="flex flex-col gap-1">
               <span class="text-xs opacity-60">
-                Or the environment variable holding it
+                {t("settings-provider-key-variable")}
               </span>
               <input
                 bind:value={draft.api_key_env}
                 class={FIELD}
                 placeholder={presets.find((it) => it.name === draft.preset)
-                  ?.variable ?? "MY_API_KEY"}
+                  ?.variable ?? t("settings-provider-key-variable-example")}
               />
             </label>
           </div>
@@ -755,15 +810,15 @@
                 }}
               >
                 {draft.forgetting
-                  ? "Keep the key in the file"
-                  : "Remove the key from the file"}
+                  ? t("settings-keep-key")
+                  : t("settings-remove-key")}
               </button>
             </p>
           {/if}
 
           <div class="flex flex-col gap-2">
             <div class="flex items-baseline justify-between gap-3">
-              <span class="text-xs opacity-60">Models</span>
+              <span class="text-xs opacity-60">{t("settings-models")}</span>
               <div class="flex gap-2">
                 <button
                   type="button"
@@ -771,7 +826,7 @@
                   disabled={draft.asking}
                   onclick={() => askForModels(draft)}
                 >
-                  Fetch
+                  {t("settings-fetch-models")}
                 </button>
                 <button
                   type="button"
@@ -779,7 +834,7 @@
                   disabled={draft.asking || draft.trying === ""}
                   onclick={() => verify(draft)}
                 >
-                  Verify key
+                  {t("settings-verify-key")}
                 </button>
               </div>
             </div>
@@ -791,7 +846,7 @@
 
                   <label class="flex items-center gap-1 text-xs opacity-70">
                     <input type="checkbox" bind:checked={model.vision} />
-                    Sees images
+                    {t("settings-model-sees-images")}
                   </label>
 
                   <label class="flex items-center gap-1 text-xs opacity-70">
@@ -801,7 +856,7 @@
                       value={model.id}
                       bind:group={draft.trying}
                     />
-                    Verify with
+                    {t("settings-model-verify-with")}
                   </label>
 
                   <button
@@ -809,27 +864,25 @@
                     class={BUTTON}
                     onclick={() => stopOffering(draft, index)}
                   >
-                    Remove
+                    {t("settings-remove-model")}
                   </button>
                 </li>
               {:else}
-                <li class="text-xs opacity-50">
-                  No Model yet. Fetch the list, or add one by hand.
-                </li>
+                <li class="text-xs opacity-50">{t("settings-no-models")}</li>
               {/each}
             </ul>
 
             <div class="flex gap-2">
               <button type="button" class={BUTTON} onclick={() => offer(draft, "")}>
-                Add a Model
+                {t("settings-add-model")}
               </button>
               <button type="button" class={BUTTON} onclick={() => remove(at)}>
-                Remove this Provider
+                {t("settings-remove-provider")}
               </button>
             </div>
 
             {#if draft.asking}
-              <p class="text-xs opacity-50">Asking the Provider…</p>
+              <p class="text-xs opacity-50">{t("settings-asking-provider")}</p>
             {:else if draft.said}
               <p
                 class="text-xs {draft.said.well
@@ -861,25 +914,21 @@
         </article>
       {:else}
         <p class="text-sm opacity-50">
-          {read
-            ? "No Provider is configured yet. Add one to start asking things."
-            : "Reading the settings…"}
+          {read ? t("settings-no-providers") : t("settings-reading")}
         </p>
       {/each}
     </section>
 
     <section class="flex flex-col gap-3">
       <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-        Defaults
+        {t("settings-defaults")}
       </h2>
 
       <div class="grid grid-cols-2 gap-3">
         <label class="flex flex-col gap-1">
-          <span class="text-xs opacity-60">
-            Default Model — what an Action with no Model of its own uses
-          </span>
+          <span class="text-xs opacity-60">{t("settings-default-model")}</span>
           <select bind:value={defaultModel} class={FIELD}>
-            <option value="">None</option>
+            <option value="">{t("settings-model-none")}</option>
             {#each nominable as model (model.name)}
               <option value={model.name}>{model.name}</option>
             {/each}
@@ -888,13 +937,15 @@
 
         <label class="flex flex-col gap-1">
           <span class="text-xs opacity-60">
-            Default Vision Model — what an image uses instead
+            {t("settings-default-vision-model")}
           </span>
           <select bind:value={defaultVisionModel} class={FIELD}>
-            <option value="">None</option>
+            <option value="">{t("settings-model-none")}</option>
             {#each nominable as model (model.name)}
               <option value={model.name}>
-                {model.name}{model.vision ? "" : " (does not see)"}
+                {model.vision
+                  ? model.name
+                  : t("settings-model-does-not-see", { model: model.name })}
               </option>
             {/each}
           </select>
@@ -902,30 +953,56 @@
       </div>
 
       <label class="flex flex-col gap-1">
-        <span class="text-xs opacity-60">
-          Warn above — how many characters a Selection may hold before Demysto
-          says so
-        </span>
+        <span class="text-xs opacity-60">{t("settings-large-selection")}</span>
         <input
           type="number"
           min="0"
           bind:value={largeSelection}
-          placeholder={`${largeSelectionDefault} — what Demysto comes with`}
+          placeholder={t("settings-large-selection-default", {
+            characters: largeSelectionDefault,
+          })}
           class="{FIELD} max-w-64"
         />
         <span class="text-xs opacity-50">
-          Nothing is ever cut and nothing is ever refused: the warning is there
-          so that an accidental select-all is not silently paid for. Leave the
-          field empty for Demysto's own figure, or set it to 0 to be told
-          nothing.
+          {t("settings-large-selection-detail")}
         </span>
       </label>
+    </section>
+
+    <section class="flex flex-col gap-3">
+      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
+        {t("settings-language")}
+      </h2>
+
+      <label class="flex flex-col gap-1">
+        <span class="text-xs opacity-60">{t("settings-language-field")}</span>
+        <select bind:value={language} class="{FIELD} max-w-64">
+          <option value="">{t("settings-language-follows-system")}</option>
+          {#each LANGUAGES as offered (offered.tag)}
+            <option value={offered.tag}>{offered.name}</option>
+          {/each}
+        </select>
+      </label>
+
+      <span class="text-xs opacity-50">{t("settings-language-detail")}</span>
+
+      {#if languageFixed}
+        <!-- Said where the field is, for the reason a key found in a variable
+             is: without it, somebody choosing a language here and watching
+             nothing change has no way to learn why. -->
+        <p class="text-xs opacity-50">
+          {t("settings-language-from-environment", {
+            variable: languageFixed.variable,
+            value: languageFixed.value,
+          })}
+        </p>
+      {/if}
     </section>
     {/if}
 
     <section class="flex flex-col gap-3">
       <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-        Hotkeys
+        {t("settings-hotkeys")}
       </h2>
 
       {#if clipboardOnly}
@@ -934,20 +1011,12 @@
              see ADR-0003. -->
         <p class="text-xs opacity-50">{clipboardOnly}</p>
 
-        <p class="text-xs opacity-50">
-          Wayland also lets no application claim a Hotkey for itself. Demysto
-          asks the desktop's GlobalShortcuts portal for the combinations below,
-          and the desktop decides what each one answers to — change them in the
-          desktop's own keyboard shortcut settings, where they are listed under
-          Demysto.
-        </p>
+        <p class="text-xs opacity-50">{t("settings-wayland-hotkeys")}</p>
       {/if}
 
       {#if !unreadable}
         <div class="flex flex-col gap-1">
-          <span class="text-xs opacity-60">
-            The Palette — what opens it over whatever you are reading
-          </span>
+          <span class="text-xs opacity-60">{t("settings-palette-hotkey")}</span>
           <div class="flex items-center gap-2">
             <span
               class="{FIELD} flex-1 truncate {paletteHotkey ||
@@ -956,11 +1025,13 @@
                 : 'opacity-40'}"
             >
               {#if recording === "palette"}
-                Press a combination… Esc to stop
+                {t("settings-hotkey-recording")}
               {:else if paletteHotkey}
                 {reading(paletteHotkey)}
               {:else}
-                {reading(paletteDefault)} — what Demysto comes with
+                {t("settings-hotkey-default", {
+                  hotkey: reading(paletteDefault),
+                })}
               {/if}
             </span>
 
@@ -970,7 +1041,7 @@
               disabled={recording !== null}
               onclick={() => (recording = "palette")}
             >
-              Record
+              {t("settings-hotkey-record")}
             </button>
 
             <button
@@ -979,12 +1050,12 @@
               disabled={!paletteHotkey}
               onclick={unbindPalette}
             >
-              Clear
+              {t("settings-hotkey-clear")}
             </button>
           </div>
           <span class="text-xs opacity-50">
-            {HOTKEY_RULE} Saved by the Save button below, and answered to as soon
-            as it is.
+            {t("settings-hotkey-rule")}
+            {t("settings-palette-hotkey-detail")}
           </span>
         </div>
       {/if}
@@ -996,18 +1067,14 @@
 
     <section class="flex flex-col gap-3">
       <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-        Logs
+        {t("settings-logs")}
       </h2>
 
-      <p class="text-xs opacity-50">
-        Demysto keeps a local log of what it did — which Action, which Model,
-        what went wrong — and never of what you were looking at or what a Model
-        said. Nothing is sent anywhere. Attach these to a bug report.
-      </p>
+      <p class="text-xs opacity-50">{t("settings-logs-detail")}</p>
 
       <div>
         <button type="button" class={BUTTON} onclick={showLogs}>
-          Open the log folder
+          {t("settings-open-logs")}
         </button>
       </div>
 
@@ -1019,19 +1086,19 @@
     <section class="flex flex-col gap-3">
       <div class="flex items-baseline justify-between gap-3">
         <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-          Actions
+          {t("settings-actions")}
         </h2>
         <button type="button" class={BUTTON} onclick={write}>
-          Write an Action
+          {t("settings-write-action")}
         </button>
       </div>
 
-      <p class="text-xs opacity-50">
-        Each Action is a file of its own in <code>actions</code>, so one can be
-        backed up or sent to somebody. Built-in Actions are not written there:
-        changing one keeps only what you changed, and resetting it deletes that.
-        An Action is saved on its own, not by the Save button below.
-      </p>
+      <!-- Through `@html` for the `<code>` in it, which is markup a
+           translation has to be able to put where its own sentence wants it.
+           The catalogues are this repository's own files, not anything a user
+           or a Model wrote: the two places untrusted text is rendered are the
+           answer and the Selection, and neither comes through here. -->
+      <p class="text-xs opacity-50">{@html t("settings-actions-detail")}</p>
 
       {#each unreadableActions as said (said)}
         <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
@@ -1067,16 +1134,16 @@
               onclick={() => change(action)}
               disabled={editing?.draft.id === action.id}
             >
-              Edit
+              {t("settings-action-edit")}
             </button>
 
             {#if action.standing === "overridden"}
               <button type="button" class={BUTTON} onclick={() => forget(action)}>
-                Reset
+                {t("settings-action-reset")}
               </button>
             {:else if action.standing === "authored"}
               <button type="button" class={BUTTON} onclick={() => forget(action)}>
-                Delete
+                {t("settings-action-delete")}
               </button>
             {/if}
           </li>
@@ -1090,20 +1157,18 @@
         >
           <div class="grid grid-cols-2 gap-3">
             <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">Name — what the Palette lists</span>
+              <span class="text-xs opacity-60">{t("settings-action-name")}</span>
               <input
                 bind:value={editing.draft.name}
                 class={FIELD}
-                placeholder="Rewrite plainly"
+                placeholder={t("settings-action-name-example")}
               />
             </label>
 
             <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">
-                Model — leave at the default unless this Action needs its own
-              </span>
+              <span class="text-xs opacity-60">{t("settings-action-model")}</span>
               <select bind:value={editing.draft.model} class={FIELD}>
-                <option value={null}>Whatever the defaults say</option>
+                <option value={null}>{t("settings-action-model-default")}</option>
                 {#each bindable as model (model)}
                   <option value={model}>{model}</option>
                 {/each}
@@ -1112,10 +1177,7 @@
           </div>
 
           <div class="flex flex-col gap-1">
-            <span class="text-xs opacity-60">
-              Hotkey — runs this Action on what you have selected, with no
-              Palette in the way
-            </span>
+            <span class="text-xs opacity-60">{t("settings-action-hotkey")}</span>
             <div class="flex items-center gap-2">
               <span
                 class="{FIELD} flex-1 truncate {editing.draft.hotkey ||
@@ -1124,11 +1186,11 @@
                   : 'opacity-40'}"
               >
                 {#if recording === "action"}
-                  Press a combination… Esc to stop
+                  {t("settings-hotkey-recording")}
                 {:else if editing.draft.hotkey}
                   {reading(editing.draft.hotkey)}
                 {:else}
-                  None — this Action is reached through the Palette
+                  {t("settings-hotkey-none")}
                 {/if}
               </span>
 
@@ -1138,7 +1200,7 @@
                 disabled={recording !== null}
                 onclick={() => (recording = "action")}
               >
-                Record
+                {t("settings-hotkey-record")}
               </button>
 
               <button
@@ -1147,42 +1209,35 @@
                 disabled={!editing.draft.hotkey}
                 onclick={unbind}
               >
-                Clear
+                {t("settings-hotkey-clear")}
               </button>
             </div>
             <span class="text-xs opacity-50">
-              {HOTKEY_RULE} Parameters are not asked for on this path — each takes
-              what it offers.
+              {t("settings-hotkey-rule")}
+              {t("settings-action-hotkey-detail")}
             </span>
           </div>
 
           <label class="flex flex-col gap-1">
-            <span class="text-xs opacity-60">Prompt</span>
+            <span class="text-xs opacity-60">{t("settings-action-prompt")}</span>
             <textarea
               bind:value={editing.draft.template}
               rows="8"
               class="{FIELD} resize-y font-mono text-xs"
-              placeholder="Explain the text below. The text is in
-{'{{'}selection_language{'}}'}; answer in {'{{'}ui_language{'}}'}.
-
-{'{{'}selection{'}}'}"
+              placeholder={t("settings-action-prompt-example")}
             ></textarea>
           </label>
 
+          <!-- Through `@html` for the reason the Actions note above is. -->
           <p class="text-xs opacity-50">
-            <code>{"{{selection}}"}</code> is what you selected;
-            <code>{"{{ui_language}}"}</code> and
-            <code>{"{{selection_language}}"}</code> are the language you read and
-            the one it turned out to be in. Anything else in double braces is a
-            Parameter, which the Palette asks for before the Run — declare it
-            below.
+            {@html t("settings-action-prompt-detail")}
           </p>
 
           <div class="flex flex-col gap-2">
             <div class="flex items-baseline justify-between gap-3">
-              <span class="text-xs opacity-60">Parameters</span>
+              <span class="text-xs opacity-60">{t("settings-parameters")}</span>
               <button type="button" class={BUTTON} onclick={declare}>
-                Declare a Parameter
+                {t("settings-declare-parameter")}
               </button>
             </div>
 
@@ -1192,30 +1247,28 @@
                   <input
                     bind:value={parameter.id}
                     class="{FIELD} flex-1 font-mono text-xs"
-                    placeholder="target"
+                    placeholder={t("settings-parameter-id-example")}
                   />
                   <input
                     bind:value={parameter.label}
                     class="{FIELD} flex-1"
-                    placeholder="Into which language?"
+                    placeholder={t("settings-parameter-label-example")}
                   />
                   <input
                     bind:value={parameter.default}
                     class="{FIELD} flex-1"
-                    placeholder="What it offers"
+                    placeholder={t("settings-parameter-default-example")}
                   />
                   <button
                     type="button"
                     class={BUTTON}
                     onclick={() => stopDeclaring(at)}
                   >
-                    Remove
+                    {t("settings-remove-parameter")}
                   </button>
                 </li>
               {:else}
-                <li class="text-xs opacity-50">
-                  None. This Action runs the moment it is chosen.
-                </li>
+                <li class="text-xs opacity-50">{t("settings-no-parameters")}</li>
               {/each}
             </ul>
           </div>
@@ -1231,15 +1284,13 @@
               disabled={actionSaving}
               onclick={keep}
             >
-              {actionSaving ? "Saving\u2026" : "Save this Action"}
+              {actionSaving ? t("settings-saving") : t("settings-save-action")}
             </button>
             <button type="button" class={BUTTON} onclick={stopEditing}>
-              Cancel
+              {t("settings-cancel")}
             </button>
             {#if editing.standing === "overridden"}
-              <span class="text-xs opacity-50">
-                Saving this with nothing changed puts the built-in back.
-              </span>
+              <span class="text-xs opacity-50">{t("settings-reset-by-saving")}</span>
             {/if}
           </div>
         </article>
@@ -1252,15 +1303,15 @@
       {#if problem}
         <span class="text-red-600 dark:text-red-400">{problem}</span>
       {:else if saved}
-        <span class="opacity-50">Saved.</span>
+        <span class="opacity-50">{t("settings-saved")}</span>
       {:else}
-        <span class="opacity-40">Esc to close</span>
+        <span class="opacity-40">{t("settings-keys")}</span>
       {/if}
     </p>
 
     {#if !unreadable}
       <button type="button" class={BUTTON} disabled={saving} onclick={save}>
-        {saving ? "Saving…" : "Save"}
+        {saving ? t("settings-saving") : t("settings-save")}
       </button>
     {/if}
   </footer>

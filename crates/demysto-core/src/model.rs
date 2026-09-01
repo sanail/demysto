@@ -14,6 +14,7 @@
 use std::fmt;
 
 use crate::config::{self, Config, Key, Model, Provider, MODEL_SETTING, VISION_SETTING};
+use crate::i18n::{say, Words};
 use crate::run::RunError;
 use crate::selection::Kind;
 
@@ -76,8 +77,9 @@ pub(crate) fn resolve(
     config: &Config,
     binding: Option<&str>,
     kind: Kind,
+    words: &Words,
 ) -> Result<Resolved, RunError> {
-    let (provider, model) = chosen(config, binding, kind)?;
+    let (provider, model) = chosen(config, binding, kind, words)?;
 
     Ok(Resolved {
         endpoint: endpoint_for(&provider.name, &provider.base_url, &provider.key)?,
@@ -126,20 +128,21 @@ fn chosen<'a>(
     config: &'a Config,
     binding: Option<&str>,
     kind: Kind,
+    words: &Words,
 ) -> Result<(&'a Provider, &'a Model), RunError> {
     // What the Action names wins outright, images included: a binding is the
     // user saying which Model, and Demysto is in no position to know better.
     if let Some(name) = binding {
         return config
             .model(name)
-            .ok_or_else(|| bound_to_nothing(config, name));
+            .ok_or_else(|| bound_to_nothing(config, name, words));
     }
 
     if kind == Kind::Image {
         if let Some(name) = config.default_vision_model.as_deref() {
             return config
                 .model(name)
-                .ok_or_else(|| nominates_nothing(config, VISION_SETTING, name));
+                .ok_or_else(|| nominates_nothing(config, VISION_SETTING, name, words));
         }
     }
 
@@ -148,62 +151,67 @@ fn chosen<'a>(
     // that cannot see is a real question, and one for v1.1: it has no Selection
     // to ask it of yet, and the answer is worth deciding against a picture
     // rather than against a guess.
-    default(config)
+    default(config, words)
 }
 
 /// The Model an Action that binds none resolves to.
-fn default(config: &Config) -> Result<(&Provider, &Model), RunError> {
+fn default<'a>(config: &'a Config, words: &Words) -> Result<(&'a Provider, &'a Model), RunError> {
     let Some(name) = config.default_model.as_deref() else {
-        return Err(nothing_nominated(config));
+        return Err(nothing_nominated(config, words));
     };
 
     config
         .model(name)
-        .ok_or_else(|| nominates_nothing(config, MODEL_SETTING, name))
+        .ok_or_else(|| nominates_nothing(config, MODEL_SETTING, name, words))
 }
 
 /// The Models there are to choose from, so that the user can fix a name without
 /// going to look one up.
-fn offered(config: &Config) -> String {
+fn offered(config: &Config, words: &Words) -> String {
     let names: Vec<String> = config
         .models()
         .map(|(provider, model)| config::qualified(provider, model))
         .collect();
 
     match names.is_empty() {
-        true => "No Model is configured at all; add one to a Provider there.".to_owned(),
-        false => format!("The Models configured there are: {}.", names.join(", ")),
+        true => say!(words, "model-none-configured"),
+        false => say!(words, "model-configured-are", "models" = names.join(", ")),
     }
 }
 
-fn bound_to_nothing(config: &Config, name: &str) -> RunError {
+fn bound_to_nothing(config: &Config, name: &str, words: &Words) -> RunError {
     RunError::Configuration {
-        message: format!(
-        "This Action is bound to the Model \"{name}\", and no Provider in {} offers one by that \
-         name. {}",
-        config.path.display(),
-        offered(config)
-    ),
-    }
-}
-
-fn nominates_nothing(config: &Config, setting: &str, name: &str) -> RunError {
-    RunError::Configuration {
-        message: format!(
-            "{setting} in {} names the Model \"{name}\", and no Provider there offers one by that \
-         name. {}",
-            config.path.display(),
-            offered(config)
+        message: say!(
+            words,
+            "model-action-binds-nothing",
+            "model" = name.to_owned(),
+            "path" = config.path.display().to_string(),
+            "offered" = offered(config, words)
         ),
     }
 }
 
-fn nothing_nominated(config: &Config) -> RunError {
+fn nominates_nothing(config: &Config, setting: &str, name: &str, words: &Words) -> RunError {
     RunError::Configuration {
-        message: format!(
-            "No {MODEL_SETTING} is nominated in {}. {}",
-            config.path.display(),
-            offered(config)
+        message: say!(
+            words,
+            "model-setting-names-nothing",
+            "setting" = setting.to_owned(),
+            "path" = config.path.display().to_string(),
+            "model" = name.to_owned(),
+            "offered" = offered(config, words)
+        ),
+    }
+}
+
+fn nothing_nominated(config: &Config, words: &Words) -> RunError {
+    RunError::Configuration {
+        message: say!(
+            words,
+            "model-nothing-nominated",
+            "setting" = MODEL_SETTING,
+            "path" = config.path.display().to_string(),
+            "offered" = offered(config, words)
         ),
     }
 }
@@ -273,6 +281,7 @@ mod tests {
             default_model: default.map(ToOwned::to_owned),
             default_vision_model: vision.map(ToOwned::to_owned),
             large_selection: None,
+            language: None,
         }
     }
 
@@ -300,7 +309,8 @@ mod tests {
 
     /// The Model the chain arrives at, by the name it is nominated by.
     fn resolved(config: &Config, binding: Option<&str>, kind: Kind) -> String {
-        let resolved = resolve(config, binding, kind).expect("the chain should resolve");
+        let resolved = resolve(config, binding, kind, &crate::i18n::english())
+            .expect("the chain should resolve");
 
         // The Provider is named from the endpoint it answers at, which is what
         // resolving to a Model at one Provider rather than another comes to.
@@ -315,7 +325,8 @@ mod tests {
 
     /// What the user is told when it arrives at nothing.
     fn failure(config: &Config, binding: Option<&str>, kind: Kind) -> String {
-        let error = resolve(config, binding, kind).expect_err("the chain should not resolve");
+        let error = resolve(config, binding, kind, &crate::i18n::english())
+            .expect_err("the chain should not resolve");
 
         assert!(
             matches!(error, RunError::Configuration { message: _ }),
@@ -447,7 +458,8 @@ mod tests {
             Some("local/a-model"),
             None,
         );
-        let resolved = resolve(&config, None, Kind::Text).expect("the chain should resolve");
+        let resolved = resolve(&config, None, Kind::Text, &crate::i18n::english())
+            .expect("the chain should resolve");
 
         assert_eq!(resolved.endpoint.api_key, None);
     }
@@ -457,7 +469,8 @@ mod tests {
         // Two Providers, two keys, two addresses: resolving to the Model is
         // only useful if it says which of them to ask.
         let config = both();
-        let resolved = resolve(&config, None, Kind::Image).expect("the chain should resolve");
+        let resolved = resolve(&config, None, Kind::Image, &crate::i18n::english())
+            .expect("the chain should resolve");
 
         assert_eq!(resolved.endpoint.base_url, "https://dear.example/v1");
         assert_eq!(resolved.endpoint.api_key.as_deref(), Some("dear-key"));

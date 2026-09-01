@@ -6,12 +6,10 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
  *
  * Everywhere but Wayland it reads the Selection and the windows say nothing
  * about it. On Wayland it can only read what the user copied themselves, and
- * `detail` is the whole sentence explaining that and what to do instead — the
- * backend writes it, because only the platform imposing the limitation can.
+ * the window says so — `capture-clipboard-only` in the catalogues, which is
+ * where every sentence lives.
  */
-export type Capturing =
-  | { reads: "selection" }
-  | { reads: "clipboard_only"; detail: string };
+export type Capturing = { reads: "selection" | "clipboard_only" };
 
 /** Mirrors `demysto_core::Status`. */
 export type Status = {
@@ -24,7 +22,16 @@ export type Status = {
    */
   large_selection_default: number;
   capturing: Capturing;
+  /**
+   * The interface language the environment fixes, `null` where nothing is
+   * exported — so that Settings can say a language chosen there is not the one
+   * being spoken, rather than offering a field that changes nothing.
+   */
+  language_env: Exported | null;
 };
+
+/** Mirrors `demysto_core::Exported`. */
+export type Exported = { variable: string; value: string };
 
 /** Mirrors `demysto_core::Selection`. */
 export type Selection = { kind: "text"; text: string };
@@ -39,13 +46,15 @@ export type Captured =
  * Mirrors `demysto_core::CaptureError`.
  *
  * The kinds exist so that a window can offer a different affordance per kind —
- * `permission` is the one with somewhere to be sent. The message is composed in
- * the backend and shown as it is.
+ * `permission` is the one with somewhere to be sent — and so that each can be
+ * said in a sentence of its own. `message` is whatever the platform said, which
+ * the sentence quotes; the permission has none, macOS having said nothing but
+ * no.
  */
-export type CaptureError = {
-  kind: "clipboard" | "keystroke" | "permission";
-  message: string;
-};
+export type CaptureError =
+  | { kind: "clipboard"; message: string }
+  | { kind: "keystroke"; message: string }
+  | { kind: "permission" };
 
 /** Mirrors `demysto_core::CaptureOutcome`. */
 export type CaptureOutcome =
@@ -402,6 +411,11 @@ export type Settings = {
    * Zero is a user who would rather not be told.
    */
   large_selection: number | null;
+  /**
+   * The language the file asks the interface to speak, `null` for one that asks
+   * for none and leaves the operating system deciding.
+   */
+  language: string | null;
 };
 
 /** Mirrors `demysto_core::KeyEdit`: what a save does to a Provider's key. */
@@ -430,6 +444,8 @@ export type Edit = {
   palette_hotkey: string | null;
   /** `null` takes the setting out of the file; zero is being told nothing. */
   large_selection: number | null;
+  /** The language to speak, empty for following the operating system. */
+  language: string | null;
 };
 
 /**

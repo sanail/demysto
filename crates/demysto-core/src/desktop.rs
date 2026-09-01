@@ -26,16 +26,6 @@ use crate::capture::{Capture, CaptureError, Capturing, ClipboardCapture, Desktop
 /// and that cannot change without the session it belongs to ending.
 const SESSION_TYPE_ENV: &str = "XDG_SESSION_TYPE";
 
-/// What the user is told on a session that will not let Demysto read a
-/// Selection for them (user story 56).
-///
-/// Says what to do instead as well as what is wrong: a limitation stated
-/// without the way round it is indistinguishable, to somebody who has just
-/// pressed the Hotkey, from the tool being broken.
-const WAYLAND_CLIPBOARD_ONLY: &str = "This is a Wayland session, and Wayland does not let one \
-     application type into another. Demysto cannot read what you have selected: copy it yourself \
-     with Ctrl+C first, then press the Hotkey, and Demysto reads the clipboard.";
-
 /// How long the modifiers of the Hotkey the user just pressed are given to come
 /// back up before the copy chord is sent, so that the chord is not read as the
 /// user's own keys plus ours.
@@ -73,7 +63,7 @@ pub(crate) fn wayland() -> bool {
 /// What a Capture can read on a session of this type.
 fn reading(session_type: Option<&OsStr>) -> Capturing {
     match refuses_synthetic_input(session_type) {
-        true => Capturing::ClipboardOnly(WAYLAND_CLIPBOARD_ONLY.to_owned()),
+        true => Capturing::ClipboardOnly,
         false => Capturing::Selection,
     }
 }
@@ -202,19 +192,6 @@ impl Desktop for SystemDesktop {
     }
 }
 
-/// What the user is told when macOS is withholding the Accessibility
-/// permission.
-///
-/// Names the pane rather than only the permission, so that the sentence and the
-/// button the interface puts beside it say the same thing — and so that the
-/// sentence is still followable for somebody who reads it in a notification,
-/// where there is no button.
-#[cfg(target_os = "macos")]
-const NO_ACCESSIBILITY: &str = "macOS is not letting Demysto read what you selected: Demysto \
-     needs the Accessibility permission. Open Privacy & Security → Accessibility and turn \
-     Demysto on. macOS withdraws it whenever the application changes, so this can come back \
-     after an update.";
-
 /// Whether macOS is letting Demysto type into another application.
 ///
 /// `AXIsProcessTrusted` rather than the variant that offers to ask for the
@@ -237,7 +214,7 @@ fn accessibility() -> Result<(), CaptureError> {
 
     match trusted {
         true => Ok(()),
-        false => Err(CaptureError::Permission(NO_ACCESSIBILITY.to_owned())),
+        false => Err(CaptureError::Permission),
     }
 }
 
@@ -310,17 +287,6 @@ mod tests {
         reading(session_type.map(OsStr::new))
     }
 
-    /// What a session that reads only the clipboard says about itself, or the
-    /// test's own failure where it reads a Selection after all.
-    fn said_on(session_type: Option<&str>) -> String {
-        match on(session_type) {
-            Capturing::ClipboardOnly(said) => said,
-            Capturing::Selection => {
-                panic!("{session_type:?} should be a session that reads only the clipboard")
-            }
-        }
-    }
-
     #[test]
     fn x11_reads_the_selection() {
         assert_eq!(on(Some("x11")), Capturing::Selection);
@@ -328,12 +294,12 @@ mod tests {
 
     #[test]
     fn wayland_reads_only_the_clipboard() {
-        assert!(matches!(on(Some("wayland")), Capturing::ClipboardOnly(_)));
+        assert_eq!(on(Some("wayland")), Capturing::ClipboardOnly);
     }
 
     #[test]
     fn the_session_type_is_matched_regardless_of_case() {
-        assert!(matches!(on(Some("Wayland")), Capturing::ClipboardOnly(_)));
+        assert_eq!(on(Some("Wayland")), Capturing::ClipboardOnly);
     }
 
     #[test]
@@ -341,15 +307,7 @@ mod tests {
         assert_eq!(on(None), Capturing::Selection);
     }
 
-    /// The sentence is the whole of what a Wayland user is given (user story
-    /// 56), so it has to name the limitation and the way round it. A sentence
-    /// that says only that something is unavailable reads as a broken tool.
-    #[test]
-    fn a_clipboard_only_session_says_what_to_do_instead() {
-        let said = said_on(Some("wayland"));
-
-        assert!(said.contains("Wayland"), "{said}");
-        assert!(said.contains("clipboard"), "{said}");
-        assert!(said.contains("Ctrl+C"), "{said}");
-    }
+    // The sentence itself is `capture-clipboard-only` in the catalogues, and
+    // what it has to say is `i18n`'s to assert: this module's business is which
+    // session gets it.
 }

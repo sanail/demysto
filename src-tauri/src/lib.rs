@@ -75,7 +75,7 @@ pub fn run() {
             // После трея и до всего остального: без пункта меню с `Cmd+C`
             // выделение в окне Conversation некуда забрать (user story 15).
             #[cfg(target_os = "macos")]
-            menu::build(app)?;
+            menu::build(app.handle())?;
 
             // Claimed from the catalogue, so that an Action already carrying a
             // Hotkey answers to it from the first keypress rather than from the
@@ -122,6 +122,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::status,
+            commands::language,
             commands::last_capture,
             commands::actions,
             commands::run,

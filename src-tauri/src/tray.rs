@@ -9,7 +9,7 @@
 
 use std::error::Error;
 
-use demysto_core::DefinedAction;
+use demysto_core::{DefinedAction, Demysto};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{App, AppHandle, Manager, Runtime};
 
@@ -45,11 +45,12 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
         .ok_or("no default window icon is embedded in this build")?
         .clone();
 
-    let actions = app.state::<demysto_core::Demysto>().catalogue().actions;
+    let demysto = app.state::<Demysto>();
+    let actions = demysto.catalogue().actions;
 
     tauri::tray::TrayIconBuilder::with_id(TRAY)
         .icon(icon)
-        .menu(&menu(app, &actions)?)
+        .menu(&menu(app, &actions, &demysto)?)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             SHOW => crate::palette::reveal(app),
@@ -81,7 +82,12 @@ pub fn follows_the_catalogue<R: Runtime>(app: &AppHandle<R>, actions: &[DefinedA
         return;
     };
 
-    if let Ok(menu) = menu(app, actions) {
+    // Rebuilt in whatever language Demysto is speaking now, which is also why
+    // a save that only changed the language still comes through here: the tray
+    // is the one part of the interface no window redraws.
+    let demysto = app.state::<Demysto>();
+
+    if let Ok(menu) = menu(app, actions, &demysto) {
         let _ = tray.set_menu(Some(menu));
     }
 }
@@ -94,10 +100,19 @@ pub fn follows_the_catalogue<R: Runtime>(app: &AppHandle<R>, actions: &[DefinedA
 fn menu<R: Runtime, M: Manager<R>>(
     manager: &M,
     actions: &[DefinedAction],
+    demysto: &Demysto,
 ) -> tauri::Result<Menu<R>> {
-    let show = MenuItem::with_id(manager, SHOW, "Open Demysto", true, None::<&str>)?;
-    let settings = MenuItem::with_id(manager, SETTINGS, "Settings…", true, None::<&str>)?;
-    let quit = MenuItem::with_id(manager, QUIT, "Quit Demysto", true, None::<&str>)?;
+    let words = demysto.words();
+
+    let show = MenuItem::with_id(manager, SHOW, words.text("tray-open"), true, None::<&str>)?;
+    let settings = MenuItem::with_id(
+        manager,
+        SETTINGS,
+        words.text("tray-settings"),
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(manager, QUIT, words.text("tray-quit"), true, None::<&str>)?;
 
     let runnable = actions
         .iter()
@@ -120,7 +135,12 @@ fn menu<R: Runtime, M: Manager<R>>(
         .iter()
         .map(|item| item as &dyn tauri::menu::IsMenuItem<R>)
         .collect::<Vec<_>>();
-    let listed = Submenu::with_items(manager, "Actions", !items.is_empty(), &items)?;
+    let listed = Submenu::with_items(
+        manager,
+        words.text("tray-actions"),
+        !items.is_empty(),
+        &items,
+    )?;
 
     Menu::with_items(
         manager,

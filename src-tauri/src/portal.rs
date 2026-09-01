@@ -22,6 +22,8 @@
 
 use std::time::Duration;
 
+use demysto_core::{say, Words};
+
 /// The identifier the portal knows the Palette's Hotkey by.
 ///
 /// Fixed rather than derived, and unlike anything [`for_action`] produces, so
@@ -86,34 +88,30 @@ fn holding<'a>(held: &'a [Held], wanted: &Wanted) -> Option<&'a Held<'a>> {
 /// changes what the user is told to do about a Hotkey that was not taken: while
 /// Demysto is still asking, sending them to their desktop's settings would be
 /// sending them to undo work that is still under way.
-fn what_came_of(wanted: &[Wanted], held: &[Held], asking_again: bool) -> Vec<String> {
+fn what_came_of(
+    wanted: &[Wanted],
+    held: &[Held],
+    asking_again: bool,
+    words: &Words,
+) -> Vec<String> {
     wanted
         .iter()
         .filter_map(|wanted| {
+            let named = wanted.description.clone();
+
             let Some(held) = holding(held, wanted) else {
-                return Some(if asking_again {
-                    format!(
-                        "The desktop has not taken a Hotkey for {}, so nothing answers to it yet. \
-                         Demysto is asking again.",
-                        wanted.description
-                    )
-                } else {
-                    format!(
-                        "The desktop did not take a Hotkey for {}, so nothing answers to it. Its \
-                         keyboard shortcut settings are where Demysto's Hotkeys are assigned.",
-                        wanted.description
-                    )
+                // Two messages rather than one with a clause in it: while
+                // Demysto is still asking, sending somebody to their desktop's
+                // settings is sending them to undo work that is still under way.
+                return Some(match asking_again {
+                    true => say!(words, "portal-not-taken-yet", "wanted" = named),
+                    false => say!(words, "portal-not-taken", "wanted" = named),
                 });
             };
 
-            held.under.is_none().then(|| {
-                format!(
-                    "The desktop is holding a Hotkey for {} under no combination, so nothing \
-                     answers to it yet. Give it one in the desktop's own keyboard shortcut \
-                     settings.",
-                    wanted.description
-                )
-            })
+            held.under
+                .is_none()
+                .then(|| say!(words, "portal-held-under-nothing", "wanted" = named))
         })
         .collect()
 }
@@ -313,10 +311,13 @@ mod binding {
     };
     use ashpd::desktop::{CreateSessionOptions, Session};
     use ashpd::AppID;
+    use demysto_core::Interface;
     use futures_util::{Stream, StreamExt};
     use tauri::async_runtime::{Receiver, Sender};
 
-    use super::{before_asking_again, took_nothing, what_came_of, Held, Wanted, ANSWER_WITHIN};
+    use super::{
+        before_asking_again, say, took_nothing, what_came_of, Held, Wanted, Words, ANSWER_WITHIN,
+    };
 
     /// What the Hotkeys the portal holds came to, in whole sentences, for the
     /// window that reports every Hotkey Demysto does not answer to.
@@ -342,6 +343,19 @@ mod binding {
     ///
     /// So the guard is here rather than in `hotkey::claim`: this is the one
     /// platform where asking twice is something the user has to answer twice.
+    ///
+    /// What counts as the same set includes each Hotkey's description, and that
+    /// is deliberate rather than incidental: the description is what the
+    /// desktop's own shortcut settings show beside the combination, so it is
+    /// part of the interface and follows the interface language. The cost is
+    /// that changing the language in Settings asks the desktop again — one more
+    /// consent dialog, and on a desktop that drops its bindings when a session
+    /// is replaced, the combinations assigned by hand with it. Renaming an
+    /// Action has always cost the same, for the same reason; the language is a
+    /// second way to reach it. The alternative is a shortcut list left naming
+    /// Demysto's Actions in a language the user has stopped reading, which is
+    /// worse in the place it is worst — the one screen where they go to fix a
+    /// Hotkey that does not answer.
     static ASKED: Mutex<Option<Vec<Wanted>>> = Mutex::new(None);
 
     /// How the task holding the portal session open is told to let go, which is
@@ -364,6 +378,7 @@ mod binding {
     pub fn claim(
         app_id: String,
         wanted: Vec<Wanted>,
+        interface: Interface,
         pressed: impl Fn(&str) + Send + Sync + 'static,
         noted: impl Fn(&str) + Send + Sync + 'static,
     ) -> Vec<String> {
@@ -396,7 +411,14 @@ mod binding {
             // Nothing said yet, so whatever this comes to is said: a sequence of
             // askings that ends in a sentence ends because of that sentence, and
             // it belongs in the log however familiar it reads.
-            if let Err(said) = hold(app_id, wanted, pressed, &noted, stopped).await {
+            // The language settled here rather than borrowed from the caller:
+            // this task outlives the call that started it by the whole of the
+            // session, and everything it comes to has to be said in something.
+            // A save that changes the language asks again, through `claim`,
+            // which is where this one is stopped and the next one started.
+            let words = Words::spoken(interface);
+
+            if let Err(said) = hold(app_id, wanted, pressed, &noted, stopped, &words).await {
                 report(vec![said], &noted, &mut Vec::new());
             }
         });
@@ -447,10 +469,13 @@ mod binding {
         pressed: impl Fn(&str),
         noted: &impl Fn(&str),
         mut stopped: Receiver<()>,
+        words: &Words,
     ) -> Result<(), String> {
         say_who_we_are(&app_id).await;
 
-        let portal = GlobalShortcuts::new().await.map_err(unreachable)?;
+        let portal = GlobalShortcuts::new()
+            .await
+            .map_err(|error| unreachable(error, words))?;
 
         // Subscribed before anything is bound, so that a Hotkey pressed the
         // instant the desktop assigns it is not one nobody was listening for.
@@ -458,14 +483,19 @@ mod binding {
         // things this waits on. Once and not once per asking: the signal is the
         // portal's rather than the session's, and a second subscription would
         // answer every keypress twice.
-        let mut activated = Box::pin(portal.receive_activated().await.map_err(unreachable)?);
+        let mut activated = Box::pin(
+            portal
+                .receive_activated()
+                .await
+                .map_err(|error| unreachable(error, words))?,
+        );
 
         let hotkeys: Vec<NewShortcut> = wanted.iter().map(asked_for).collect();
 
         let mut session = portal
             .create_session(CreateSessionOptions::default())
             .await
-            .map_err(unreachable)?;
+            .map_err(|error| unreachable(error, words))?;
 
         // How many askings have happened, which is what decides whether there
         // is another and how long it waits. The asking again lives here rather
@@ -488,7 +518,12 @@ mod binding {
             // asking again about, so everything below says the same of either —
             // because it is the same thing.
             let bound = match tokio::time::timeout(ANSWER_WITHIN, answer).await {
-                Ok(answered) => Some(answered.map_err(unreachable)?.response().map_err(refused)?),
+                Ok(answered) => Some(
+                    answered
+                        .map_err(|error| unreachable(error, words))?
+                        .response()
+                        .map_err(|error| refused(error, words))?,
+                ),
                 Err(_) => None,
             };
             asked += 1;
@@ -514,33 +549,39 @@ mod binding {
             let asking_again = nothing_taken.then(|| before_asking_again(asked)).flatten();
 
             report(
-                what_came_of(&wanted, &held, asking_again.is_some()),
+                what_came_of(&wanted, &held, asking_again.is_some(), words),
                 noted,
                 &mut told,
             );
 
             if !nothing_taken {
                 if asked > 1 {
-                    noted(TAKEN_IN_THE_END);
+                    // The sentences above this one in the log are not the
+                    // last word on it: a Hotkey that arrived on the second
+                    // asking is a Hotkey that arrived.
+                    noted(&words.text("portal-taken-in-the-end"));
                 }
 
                 break;
             }
 
             let Some(before) = asking_again else {
-                noted(&asked_enough(asked));
+                noted(&asked_enough(asked, words));
 
                 break;
             };
 
             if asked == 1 {
-                noted(ASKING_AGAIN);
+                // Once, on the first asking that came to nothing: the line
+                // above it names the Hotkey and says Demysto is asking again,
+                // and this says why and for how long.
+                noted(&words.text("portal-asking-again"));
             }
 
             match waiting(before, &mut activated, &pressed, &mut stopped).await {
                 Waited::Through => {}
                 Waited::Stopped => return closing(&session).await,
-                Waited::PortalGone => return Err(STOPPED_ANSWERING.to_owned()),
+                Waited::PortalGone => return Err(words.text("portal-stopped-answering")),
             }
 
             // Given up before the next one is created, so that the portal is
@@ -551,13 +592,13 @@ mod binding {
             session = portal
                 .create_session(CreateSessionOptions::default())
                 .await
-                .map_err(unreachable)?;
+                .map_err(|error| unreachable(error, words))?;
         }
 
         loop {
             tokio::select! {
                 activation = activated.next() => if !still_speaking(activation, &pressed) {
-                    break Err(STOPPED_ANSWERING.to_owned());
+                    break Err(words.text("portal-stopped-answering"));
                 },
                 _ = stopped.recv() => break closing(&session).await,
             }
@@ -671,45 +712,11 @@ mod binding {
         }
     }
 
-    /// What the user is told when the portal that was holding every Hotkey
-    /// stops speaking — xdg-desktop-portal restarted, or the session was closed
-    /// under Demysto.
-    const STOPPED_ANSWERING: &str =
-        "The desktop's GlobalShortcuts portal stopped answering, so no Hotkey answers either. \
-         Restarting Demysto asks for them again; the tray menu reaches everything the Hotkey \
-         does in the meantime.";
-
-    /// What the user is told the first time the desktop answers with nothing
-    /// where a Hotkey should be, so that a log read afterwards says why the
-    /// sentence above it stopped being true a minute later.
-    ///
-    /// What the report has just said, without saying it twice: the line above
-    /// this one names the Hotkey and says Demysto is asking again, so this one
-    /// says why and for how long.
-    const ASKING_AGAIN: &str =
-        "That is what a desktop still coming up looks like: it takes the request for a Hotkey and \
-         gives it to nothing, or never answers it at all. Demysto keeps asking for a few minutes, \
-         and then leaves the desktop alone.";
-
-    /// What the user is told when asking again is what got the Hotkey, so that
-    /// the sentences above it in the log are not the last word on it.
-    ///
-    /// About the taking and not about the answering: a Hotkey the desktop took
-    /// and gave no keys to still answers to nothing, and the report says so on
-    /// the line above this one.
-    const TAKEN_IN_THE_END: &str =
-        "The desktop took the Hotkeys Demysto asked for when it was asked again.";
-
     /// What the user is told when the desktop has been asked as often as it is
     /// going to be. Which Hotkeys are still missing is the report's to say; this
     /// says only that nothing more is going to happen on its own.
-    fn asked_enough(asked: u32) -> String {
-        format!(
-            "Demysto asked the desktop for its Hotkeys {asked} times over several minutes, and \
-             it did not take them all. It is not asking again until Demysto is restarted — the \
-             desktop's own keyboard shortcut settings are where Demysto's Hotkeys are assigned, \
-             and the tray menu reaches everything the Hotkey does."
-        )
+    fn asked_enough(asked: u32, words: &Words) -> String {
+        say!(words, "portal-asked-enough", "asked" = asked)
     }
 
     /// What the user is told when the desktop answered the request for the
@@ -718,12 +725,8 @@ mod binding {
     ///
     /// Held apart from [`unreachable`], which is about not reaching a portal at
     /// all: a dialog somebody closed is not a desktop to go and upgrade.
-    fn refused(error: ashpd::Error) -> String {
-        format!(
-            "The desktop did not give Demysto the Hotkeys it asked for: {error}. Nothing answers \
-             to one until it does — its keyboard shortcut settings are where they are assigned, \
-             and the tray menu reaches everything the Hotkey does."
-        )
+    fn refused(error: ashpd::Error, words: &Words) -> String {
+        say!(words, "portal-refused", "detail" = error.to_string())
     }
 
     /// What the user is told when the portal is not there at all — which is
@@ -731,13 +734,8 @@ mod binding {
     ///
     /// Names where the portal comes from, because on a desktop old enough not
     /// to have one there is nothing to turn on and the answer is an upgrade.
-    fn unreachable(error: ashpd::Error) -> String {
-        format!(
-            "This is a Wayland session, where Demysto has to ask the desktop's GlobalShortcuts \
-             portal for a Hotkey — and it could not reach one: {error}. No Hotkey answers. The \
-             portal arrives with xdg-desktop-portal, on KDE and on GNOME from version 48. The \
-             tray menu reaches everything the Hotkey does."
-        )
+    fn unreachable(error: ashpd::Error, words: &Words) -> String {
+        say!(words, "portal-unreachable", "detail" = error.to_string())
     }
 }
 
@@ -749,6 +747,14 @@ mod tests {
     //! user reads, and whether the desktop is asked again.
 
     use super::*;
+
+    /// The suite reads its assertions in English, whatever the machine running
+    /// it is set to — the sentences themselves are `i18n`'s to check.
+    fn english() -> Words {
+        use demysto_core::Interface;
+
+        Words::spoken(Interface::English)
+    }
 
     /// One Hotkey asked for, of the shape the Palette's and an Action's both
     /// have: the identifier is what the answer is matched against, and the
@@ -776,7 +782,7 @@ mod tests {
 
     #[test]
     fn a_hotkey_the_desktop_did_not_take_is_reported() {
-        let said = what_came_of(&[wanted("palette")], &[], false);
+        let said = what_came_of(&[wanted("palette")], &[], false, &english());
 
         assert_eq!(said.len(), 1);
         assert!(said[0].contains("did not take"), "{}", said[0]);
@@ -792,7 +798,7 @@ mod tests {
     /// the user off to assign by hand what may yet arrive on its own.
     #[test]
     fn a_hotkey_still_being_asked_for_says_so_instead() {
-        let said = what_came_of(&[wanted("palette")], &[], true);
+        let said = what_came_of(&[wanted("palette")], &[], true, &english());
 
         assert_eq!(said.len(), 1);
         assert!(said[0].contains("asking again"), "{}", said[0]);
@@ -805,7 +811,12 @@ mod tests {
 
     #[test]
     fn a_hotkey_held_under_no_combination_is_reported() {
-        let said = what_came_of(&[wanted("palette")], &[unassigned("palette")], false);
+        let said = what_came_of(
+            &[wanted("palette")],
+            &[unassigned("palette")],
+            false,
+            &english(),
+        );
 
         assert_eq!(said.len(), 1);
         assert!(said[0].contains("under no combination"), "{}", said[0]);
@@ -813,7 +824,7 @@ mod tests {
 
     #[test]
     fn a_hotkey_the_desktop_took_is_not_reported() {
-        let said = what_came_of(&[wanted("palette")], &[taken("palette")], false);
+        let said = what_came_of(&[wanted("palette")], &[taken("palette")], false, &english());
 
         assert!(said.is_empty(), "{said:?}");
     }

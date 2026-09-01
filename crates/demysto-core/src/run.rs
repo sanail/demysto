@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::capture::{CaptureError, CaptureOutcome};
+use crate::i18n::{say, Words};
 
 /// What one Turn produced, failure included: the Run that opened the
 /// Conversation, or a follow-up asked in it.
@@ -196,21 +197,19 @@ impl std::error::Error for RunError {}
 /// A clipboard that could not be read is not among them: it leaves the user
 /// able to select something and press the Hotkey again, which is exactly what
 /// the sentence below tells them to do.
-pub(crate) fn nothing_captured(outcome: Option<&CaptureOutcome>) -> RunError {
+pub(crate) fn nothing_captured(outcome: Option<&CaptureOutcome>, words: &Words) -> RunError {
     match outcome {
-        Some(CaptureOutcome::Failed(CaptureError::Permission(message))) => RunError::Permission {
-            message: message.clone(),
+        Some(CaptureOutcome::Failed(failure @ CaptureError::Permission)) => RunError::Permission {
+            message: failure.message(words),
         },
-        _ => nothing_to_run(),
+        _ => nothing_to_run(words),
     }
 }
 
 /// What the user is told when the Hotkey found nothing to act on.
-pub(crate) fn nothing_to_run() -> RunError {
+pub(crate) fn nothing_to_run(words: &Words) -> RunError {
     RunError::NothingToRun {
-        message: "There is nothing to run an Action on: select some text, or copy it, and press \
-                  the Hotkey again."
-            .to_owned(),
+        message: say!(words, "run-nothing-to-run"),
     }
 }
 
@@ -220,10 +219,9 @@ pub(crate) fn nothing_to_run() -> RunError {
 /// Not reachable from a window showing one, which is the only place a follow-up
 /// can be typed; reachable the moment the Conversation it was typed into has
 /// fallen off the end of the store.
-pub(crate) fn no_conversation() -> RunError {
+pub(crate) fn no_conversation(words: &Words) -> RunError {
     RunError::NothingToRun {
-        message: "There is no Conversation to ask this in. Press the Hotkey to start one."
-            .to_owned(),
+        message: say!(words, "run-no-conversation"),
     }
 }
 
@@ -232,21 +230,17 @@ pub(crate) fn no_conversation() -> RunError {
 /// Not reachable from a Palette showing this build's catalogue, and reachable
 /// the moment an Action is deleted while a Palette listing it is still on
 /// screen.
-pub(crate) fn no_such_action(id: &str) -> RunError {
+pub(crate) fn no_such_action(id: &str, words: &Words) -> RunError {
     RunError::NoSuchAction {
-        message: format!(
-            "There is no Action called \"{id}\". It may have been removed since the Palette \
-             opened; press the Hotkey again."
-        ),
+        message: say!(words, "run-no-such-action", "action" = id.to_owned()),
     }
 }
 
 /// What the user is told when a retry or a continuation arrived with no Turn to
 /// act on — a Conversation whose last Turn is still being answered, or one the
 /// store no longer holds.
-pub(crate) fn nothing_to_retry() -> RunError {
+pub(crate) fn nothing_to_retry(words: &Words) -> RunError {
     RunError::NothingToRun {
-        message: "There is no Turn to try again. Ask the question again to start a new one."
-            .to_owned(),
+        message: say!(words, "run-nothing-to-retry"),
     }
 }

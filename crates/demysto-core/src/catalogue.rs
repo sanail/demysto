@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::{self, Action, Parameter};
 use crate::files;
+use crate::i18n::{say, Words};
 use crate::selection::Kind;
 
 /// The directory Actions are kept in, inside the configuration directory.
@@ -35,10 +36,6 @@ const EXTENSION: &str = "toml";
 /// one was written by a newer Demysto, and guessing at what it means would be
 /// running a prompt nobody wrote.
 const VERSION: u32 = 1;
-
-/// The line every file this writes opens with, so that somebody who comes
-/// across one knows what they are looking at.
-const PREAMBLE: &str = "# An Action Demysto runs. Edit it here, or in Demysto's Settings.";
 
 /// How far the search for an unused identifier goes before it gives up. Far
 /// past anything a person would do by hand, and short of a loop.
@@ -199,8 +196,8 @@ impl DefinedAction {
 /// them, and a catalogue that needed a restart to notice would make "one file
 /// each, portable" a promise with a footnote. It is a handful of small files,
 /// and the Palette opens on a Hotkey — this is measured in microseconds.
-pub(crate) fn runnable(config_dir: &Path) -> Vec<Action> {
-    read(config_dir)
+pub(crate) fn runnable(config_dir: &Path, words: &Words) -> Vec<Action> {
+    read(config_dir, words)
         .actions
         .iter()
         .map(DefinedAction::runnable)
@@ -208,22 +205,22 @@ pub(crate) fn runnable(config_dir: &Path) -> Vec<Action> {
 }
 
 /// The Action an interface asked for, or `None` when there is no such Action.
-pub(crate) fn named(config_dir: &Path, id: &str) -> Option<Action> {
-    runnable(config_dir)
+pub(crate) fn named(config_dir: &Path, id: &str, words: &Words) -> Option<Action> {
+    runnable(config_dir, words)
         .into_iter()
         .find(|action| action.id == id)
 }
 
 /// Every Action there is, with everything about it, for the window that edits
 /// them.
-pub(crate) fn read(config_dir: &Path) -> Catalogue {
+pub(crate) fn read(config_dir: &Path, words: &Words) -> Catalogue {
     let dir = config_dir.join(DIR_NAME);
     let mut unreadable = Vec::new();
-    let mut held = stated(&dir, &mut unreadable);
+    let mut held = stated(&dir, &mut unreadable, words);
 
     // The built-ins first and in their own order, which is how often they are
     // reached for: an Override renames an Action, it does not re-rank it.
-    let mut actions: Vec<DefinedAction> = action::built_in()
+    let mut actions: Vec<DefinedAction> = action::built_in(words)
         .into_iter()
         .map(|built_in| {
             let stated = held.remove(&built_in.id);
@@ -235,7 +232,7 @@ pub(crate) fn read(config_dir: &Path) -> Catalogue {
     // and the order a directory is read in is not an answer.
     let mut authored: Vec<DefinedAction> = held
         .into_iter()
-        .filter_map(|(id, file)| match authored(&id, file, &dir) {
+        .filter_map(|(id, file)| match authored(&id, file, &dir, words) {
             Ok(action) => Some(action),
             Err(message) => {
                 unreadable.push(message);
@@ -260,12 +257,13 @@ pub(crate) fn write(
     config_dir: &Path,
     edit: &ActionEdit,
     offered: &[String],
+    words: &Words,
 ) -> Result<Catalogue, ActionError> {
     let dir = config_dir.join(DIR_NAME);
-    let stated = checked(edit, offered)?;
-    let id = identifier(edit, &dir)?;
+    let stated = checked(edit, offered, words)?;
+    let id = identifier(edit, &dir, words)?;
 
-    let file = match action::built_in()
+    let file = match action::built_in(words)
         .into_iter()
         .find(|built_in| built_in.id == id)
     {
@@ -278,8 +276,8 @@ pub(crate) fn write(
             // instruction as resetting it: there is nothing to hold, so there
             // is no file to hold it in. Whether one was there is not the user's
             // concern, so its absence is not an error here.
-            file if file.states_nothing() => match removing(&dir, &id) {
-                Ok(()) | Err(ActionError::NoSuchAction(_)) => return Ok(read(config_dir)),
+            file if file.states_nothing() => match removing(&dir, &id, words) {
+                Ok(()) | Err(ActionError::NoSuchAction(_)) => return Ok(read(config_dir, words)),
                 Err(error) => return Err(error),
             },
             file => file,
@@ -289,43 +287,45 @@ pub(crate) fn write(
 
     let path = path(&dir, &id);
     let body = toml::to_string(&file)
-        .map_err(|error| ActionError::Refused(unwritable_shape(&path, &error)))?;
+        .map_err(|error| ActionError::Refused(unwritable_shape(&path, &error, words)))?;
 
-    files::replace(&path, &format!("{PREAMBLE}\n{body}"))
-        .map_err(|error| ActionError::Unwritable(unwritable(&path, &error)))?;
+    // The line every file this writes opens with, so that somebody who comes
+    // across one knows what they are looking at — in the language the rest of
+    // the interface is speaking when it is written.
+    let preamble = say!(words, "action-file-preamble");
 
-    Ok(read(config_dir))
+    files::replace(&path, &format!("{preamble}\n{body}"))
+        .map_err(|error| ActionError::Unwritable(unwritable(&path, &error, words)))?;
+
+    Ok(read(config_dir, words))
 }
 
 /// Takes an Action off the user: deletes their own, or removes an Override and
 /// leaves the built-in it was over.
-pub(crate) fn delete(config_dir: &Path, id: &str) -> Result<Catalogue, ActionError> {
+pub(crate) fn delete(config_dir: &Path, id: &str, words: &Words) -> Result<Catalogue, ActionError> {
     let dir = config_dir.join(DIR_NAME);
 
-    removing(&dir, id)?;
+    removing(&dir, id, words)?;
 
-    Ok(read(config_dir))
+    Ok(read(config_dir, words))
 }
 
 /// Deletes the file an Action is in.
-fn removing(dir: &Path, id: &str) -> Result<(), ActionError> {
+fn removing(dir: &Path, id: &str, words: &Words) -> Result<(), ActionError> {
     let path = path(dir, id);
 
     match fs::remove_file(&path) {
         Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            Err(ActionError::NoSuchAction(format!(
-                "There is no Action called \"{id}\" to remove. It may already have been \
-                 deleted; reopen this window."
-            )))
-        }
-        Err(error) => Err(ActionError::Unwritable(unwritable(&path, &error))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(ActionError::NoSuchAction(
+            say!(words, "action-none-to-remove", "action" = id.to_owned()),
+        )),
+        Err(error) => Err(ActionError::Unwritable(unwritable(&path, &error, words))),
     }
 }
 
 /// Every file in `actions/` that parsed, by the identifier its name gives it,
 /// with a sentence pushed onto `unreadable` for every one that did not.
-fn stated(dir: &Path, unreadable: &mut Vec<String>) -> BTreeMap<String, ActionFile> {
+fn stated(dir: &Path, unreadable: &mut Vec<String>, words: &Words) -> BTreeMap<String, ActionFile> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         // Nothing has been authored yet, which is what a fresh installation
@@ -335,7 +335,7 @@ fn stated(dir: &Path, unreadable: &mut Vec<String>) -> BTreeMap<String, ActionFi
         // still something written into it.
         Err(error) if error.kind() == io::ErrorKind::NotFound => return BTreeMap::new(),
         Err(error) => {
-            unreadable.push(unreadable_dir(dir, &error));
+            unreadable.push(unreadable_dir(dir, &error, words));
             return BTreeMap::new();
         }
     };
@@ -346,7 +346,7 @@ fn stated(dir: &Path, unreadable: &mut Vec<String>) -> BTreeMap<String, ActionFi
         let path = match entry {
             Ok(entry) => entry.path(),
             Err(error) => {
-                unreadable.push(unreadable_dir(dir, &error));
+                unreadable.push(unreadable_dir(dir, &error, words));
                 continue;
             }
         };
@@ -364,7 +364,7 @@ fn stated(dir: &Path, unreadable: &mut Vec<String>) -> BTreeMap<String, ActionFi
             continue;
         };
 
-        match parse(&path) {
+        match parse(&path, words) {
             Ok(file) => {
                 held.insert(id, file);
             }
@@ -376,17 +376,18 @@ fn stated(dir: &Path, unreadable: &mut Vec<String>) -> BTreeMap<String, ActionFi
 }
 
 /// One file, checked only for being a shape this build knows.
-fn parse(path: &Path) -> Result<ActionFile, String> {
-    let text = fs::read_to_string(path).map_err(|error| unreadable(path, &error))?;
+fn parse(path: &Path, words: &Words) -> Result<ActionFile, String> {
+    let text = fs::read_to_string(path).map_err(|error| unreadable(path, &error, words))?;
     let file: ActionFile =
-        toml::from_str(&text).map_err(|error| unparseable(path, &text, &error))?;
+        toml::from_str(&text).map_err(|error| unparseable(path, &text, &error, words))?;
 
     if file.version > VERSION {
-        return Err(format!(
-            "{} says it is version {}, and this Demysto understands version {VERSION}. \
-             Update Demysto, or take the file out of that directory.",
-            path.display(),
-            file.version
+        return Err(say!(
+            words,
+            "action-file-newer-version",
+            "path" = path.display().to_string(),
+            "stated" = file.version,
+            "understood" = VERSION
         ));
     }
 
@@ -433,13 +434,19 @@ fn overridden(built_in: Action, file: Option<ActionFile>, dir: &Path) -> Defined
 
 /// An Action of the user's own, which — being in no build — has to state the
 /// two things there is nothing to fall back to.
-fn authored(id: &str, file: ActionFile, dir: &Path) -> Result<DefinedAction, String> {
+fn authored(
+    id: &str,
+    file: ActionFile,
+    dir: &Path,
+    words: &Words,
+) -> Result<DefinedAction, String> {
     let path = path(dir, id);
     let missing = |field: &str| {
-        format!(
-            "{} states no {field}. An Action Demysto does not already have must state its \
-             name and its template.",
-            path.display()
+        say!(
+            words,
+            "action-file-states-no-field",
+            "path" = path.display().to_string(),
+            "field" = field.to_owned()
         )
     };
 
@@ -458,34 +465,29 @@ fn authored(id: &str, file: ActionFile, dir: &Path) -> Result<DefinedAction, Str
 
 /// What an edit states, as a file would state it — before anything is asked
 /// about whether it is an Override or an Action of the user's own.
-fn checked(edit: &ActionEdit, offered: &[String]) -> Result<ActionFile, ActionError> {
+fn checked(
+    edit: &ActionEdit,
+    offered: &[String],
+    words: &Words,
+) -> Result<ActionFile, ActionError> {
     let refused = |reason: String| ActionError::Refused(reason);
 
     let name = edit.name.trim();
     if name.is_empty() {
-        return Err(refused(
-            "An Action needs a name to be listed under.".to_owned(),
-        ));
+        return Err(refused(say!(words, "action-needs-name")));
     }
 
     let template = edit.template.trim();
     if template.is_empty() {
-        return Err(refused(
-            "An Action needs a prompt: what it says to the Model, with {{selection}} where \
-             the Selection goes."
-                .to_owned(),
-        ));
+        return Err(refused(say!(words, "action-needs-prompt")));
     }
 
     if edit.accepts.is_empty() {
-        return Err(refused(
-            "An Action that accepts no kind of Selection could never appear in the Palette."
-                .to_owned(),
-        ));
+        return Err(refused(say!(words, "action-accepts-nothing")));
     }
 
-    let parameters = parameters(&edit.parameters).map_err(refused)?;
-    let model = binding(edit.model.as_deref(), offered).map_err(refused)?;
+    let parameters = parameters(&edit.parameters, words).map_err(refused)?;
+    let model = binding(edit.model.as_deref(), offered, words).map_err(refused)?;
 
     Ok(ActionFile {
         version: VERSION,
@@ -499,7 +501,7 @@ fn checked(edit: &ActionEdit, offered: &[String]) -> Result<ActionFile, ActionEr
 }
 
 /// The Parameters an Action declares, refusing the ones a Run could not collect.
-fn parameters(declared: &[Parameter]) -> Result<Vec<Parameter>, String> {
+fn parameters(declared: &[Parameter], words: &Words) -> Result<Vec<Parameter>, String> {
     let mut seen = BTreeSet::new();
     let mut parameters = Vec::with_capacity(declared.len());
 
@@ -508,28 +510,30 @@ fn parameters(declared: &[Parameter]) -> Result<Vec<Parameter>, String> {
         let label = parameter.label.trim();
 
         if id.is_empty() {
-            return Err(
-                "A Parameter needs a name to be written as {{like_this}} in the prompt.".to_owned(),
-            );
+            return Err(say!(words, "action-parameter-needs-name"));
         }
 
         if action::is_a_variable(id) {
-            return Err(format!(
-                "A Parameter cannot be called \"{id}\": that is what a prompt writes to reach \
-                 something Demysto fills in, so nothing would ever collect it."
+            return Err(say!(
+                words,
+                "action-parameter-reserved",
+                "parameter" = id.to_owned()
             ));
         }
 
         if label.is_empty() {
-            return Err(format!(
-                "The Parameter \"{id}\" needs a label, which is what the Palette asks for it."
+            return Err(say!(
+                words,
+                "action-parameter-needs-label",
+                "parameter" = id.to_owned()
             ));
         }
 
         if !seen.insert(id.to_owned()) {
-            return Err(format!(
-                "Two Parameters are called \"{id}\", so {{{{{id}}}}} in the prompt could mean \
-                 either."
+            return Err(say!(
+                words,
+                "action-parameter-twice",
+                "parameter" = id.to_owned()
             ));
         }
 
@@ -559,7 +563,11 @@ fn trimmed(parameters: &[Parameter]) -> Vec<Parameter> {
 /// asks it of the two defaults: the window had the whole list of Models on
 /// screen as this was written, and a binding that resolves to nothing is a
 /// failure the user would meet at the next Run instead.
-fn binding(model: Option<&str>, offered: &[String]) -> Result<Option<String>, String> {
+fn binding(
+    model: Option<&str>,
+    offered: &[String],
+    words: &Words,
+) -> Result<Option<String>, String> {
     let Some(model) = stated_value(model) else {
         return Ok(None);
     };
@@ -569,13 +577,12 @@ fn binding(model: Option<&str>, offered: &[String]) -> Result<Option<String>, St
     }
 
     Err(match offered.is_empty() {
-        true => {
-            format!("This Action binds the Model \"{model}\", and no Model is configured at all.")
-        }
-        false => format!(
-            "This Action binds the Model \"{model}\", and no Provider offers one by that name. \
-             The Models configured are: {}.",
-            offered.join(", ")
+        true => say!(words, "action-binds-nothing-configured", "model" = model),
+        false => say!(
+            words,
+            "action-binds-unknown-model",
+            "model" = model,
+            "models" = offered.join(", ")
         ),
     })
 }
@@ -626,20 +633,22 @@ fn as_stated(built_in: &DefinedAction) -> ActionFile {
 
 /// What this Action is to be filed under: the one it already had, or one found
 /// for it from its name.
-fn identifier(edit: &ActionEdit, dir: &Path) -> Result<String, ActionError> {
+fn identifier(edit: &ActionEdit, dir: &Path, words: &Words) -> Result<String, ActionError> {
     let Some(id) = edit
         .id
         .as_deref()
         .map(str::trim)
         .filter(|id| !id.is_empty())
     else {
-        return Ok(unused(&edit.name, dir));
+        return Ok(unused(&edit.name, dir, words));
     };
 
     match usable_as_a_file_name(id) {
         true => Ok(id.to_owned()),
-        false => Err(ActionError::Refused(format!(
-            "\"{id}\" cannot be the name of a file, so no Action can be kept under it."
+        false => Err(ActionError::Refused(say!(
+            words,
+            "action-id-not-a-file-name",
+            "action" = id.to_owned()
         ))),
     }
 }
@@ -650,16 +659,16 @@ fn identifier(edit: &ActionEdit, dir: &Path) -> Result<String, ActionError> {
 /// an Override of one: an Action somebody creates and calls "Explain" is a
 /// second Action called Explain, not a rewriting of the first, so it is filed
 /// under an identifier of its own and both appear.
-fn unused(name: &str, dir: &Path) -> String {
+fn unused(name: &str, dir: &Path, words: &Words) -> String {
     let stem = slug(name);
 
-    if !taken(&stem, dir) {
+    if !taken(&stem, dir, words) {
         return stem;
     }
 
     (2..=ATTEMPTS)
         .map(|at| format!("{stem}-{at}"))
-        .find(|candidate| !taken(candidate, dir))
+        .find(|candidate| !taken(candidate, dir, words))
         // Past a thousand Actions of one name, the file this would overwrite is
         // the least of what has gone wrong.
         .unwrap_or(stem)
@@ -667,10 +676,12 @@ fn unused(name: &str, dir: &Path) -> String {
 
 /// Whether an identifier is spoken for: by a built-in, by a file, or by the
 /// operating system.
-fn taken(id: &str, dir: &Path) -> bool {
+fn taken(id: &str, dir: &Path, words: &Words) -> bool {
     !usable_as_a_file_name(id)
         || path(dir, id).exists()
-        || action::built_in().iter().any(|built_in| built_in.id == id)
+        || action::built_in(words)
+            .iter()
+            .any(|built_in| built_in.id == id)
 }
 
 /// A name as a file can be called, which is what an identifier has to be.
@@ -781,23 +792,40 @@ impl ActionFile {
     }
 }
 
-fn unreadable(path: &Path, error: &io::Error) -> String {
-    format!("{} could not be read: {error}", path.display())
-}
-
-fn unreadable_dir(dir: &Path, error: &io::Error) -> String {
-    format!(
-        "{} could not be read, so the Actions in it are not listed: {error}",
-        dir.display()
+fn unreadable(path: &Path, error: &io::Error, words: &Words) -> String {
+    say!(
+        words,
+        "action-file-unreadable",
+        "path" = path.display().to_string(),
+        "detail" = error.to_string()
     )
 }
 
-fn unwritable(path: &Path, error: &io::Error) -> String {
-    format!("{} could not be written: {error}", path.display())
+fn unreadable_dir(dir: &Path, error: &io::Error, words: &Words) -> String {
+    say!(
+        words,
+        "action-dir-unreadable",
+        "path" = dir.display().to_string(),
+        "detail" = error.to_string()
+    )
 }
 
-fn unwritable_shape(path: &Path, error: &toml::ser::Error) -> String {
-    format!("{} could not be written as TOML: {error}", path.display())
+fn unwritable(path: &Path, error: &io::Error, words: &Words) -> String {
+    say!(
+        words,
+        "action-file-unwritable",
+        "path" = path.display().to_string(),
+        "detail" = error.to_string()
+    )
+}
+
+fn unwritable_shape(path: &Path, error: &toml::ser::Error, words: &Words) -> String {
+    say!(
+        words,
+        "action-file-unwritable-shape",
+        "path" = path.display().to_string(),
+        "detail" = error.to_string()
+    )
 }
 
 /// What a parse failure says, and where — but never the line it happened on.
@@ -806,22 +834,25 @@ fn unwritable_shape(path: &Path, error: &toml::ser::Error) -> String {
 /// holds no key, but this sentence is shown in a window beside the settings
 /// file's own errors, and `config::unparseable` withholds the line for a reason
 /// that is worth applying to both rather than remembering the difference.
-fn unparseable(path: &Path, text: &str, error: &toml::de::Error) -> String {
+fn unparseable(path: &Path, text: &str, error: &toml::de::Error, words: &Words) -> String {
     let line = error
         .span()
         .and_then(|span| text.get(..span.start))
         .map(|before| before.matches('\n').count() + 1);
 
     match line {
-        Some(line) => format!(
-            "{} is not a valid Action at line {line}: {}",
-            path.display(),
-            error.message()
+        Some(line) => say!(
+            words,
+            "action-file-invalid-at-line",
+            "path" = path.display().to_string(),
+            "line" = line,
+            "detail" = error.message().to_owned()
         ),
-        None => format!(
-            "{} is not a valid Action: {}",
-            path.display(),
-            error.message()
+        None => say!(
+            words,
+            "action-file-invalid",
+            "path" = path.display().to_string(),
+            "detail" = error.message().to_owned()
         ),
     }
 }

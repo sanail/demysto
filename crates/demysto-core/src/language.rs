@@ -1,24 +1,20 @@
-//! The languages a prompt names: the one Demysto's interface speaks, and the
-//! one a Selection turns out to be written in.
+//! The language a Selection turns out to be written in, by the name a prompt
+//! calls it.
 
 /// A language, by the name a prompt calls it.
 ///
 /// English names throughout, because the name goes into a prompt rather than
 /// onto the screen: a Model asked to answer in "Русский" is being told the same
 /// thing in a less reliable way than one asked to answer in "Russian".
+///
+/// Only the Selection's own language is named here. What the interface speaks
+/// is `i18n`'s — `Interface::prompt_name` is the same idea for the other half
+/// of user story 30, where reading foreign material does not mean reading a
+/// foreign explanation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Language(&'static str);
 
 impl Language {
-    /// The language the interface speaks, and the one an explanation is asked
-    /// for — user story 30, where reading foreign material does not mean
-    /// reading a foreign explanation.
-    ///
-    /// Fixed here rather than taken from the operating system: ticket 14 owns
-    /// the catalogue, the system's choice, the Settings override and the
-    /// environment variable, and this constant is the one thing it replaces.
-    pub(crate) const INTERFACE: Self = Self("English");
-
     /// What a Selection nothing can be told from is called in a prompt.
     ///
     /// A sentence rather than a name, because that is how it reads where it

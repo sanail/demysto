@@ -17,16 +17,24 @@
 
 use std::error::Error;
 
+use demysto_core::Demysto;
 use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
-use tauri::{App, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
 /// Builds the menu bar Demysto shows while a window of its own is on screen.
 ///
 /// Which is exactly when it is a `Regular` application; while only the Palette
 /// is up the policy is `Accessory` and macOS shows no menu bar at all, so this
 /// costs nothing in the state Demysto spends most of its life in. See `dock`.
+///
+/// Built again whenever the language changes, for the reason the tray menu is:
+/// a menu bar is not a window and nothing redraws it, so without that it would
+/// be the one surface still speaking the language nobody chose.
 #[cfg(target_os = "macos")]
-pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
+pub fn build<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn Error>> {
+    let demysto = app.state::<Demysto>();
+    let words = demysto.words();
+
     // The first submenu becomes the application menu whatever it is called, and
     // macOS puts the application's own name on it regardless of what is written
     // here. It is present for `Cmd+Q` and `Cmd+H`, which a user will reach for
@@ -40,7 +48,12 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
             &PredefinedMenuItem::separator(app)?,
             // Quitting stays a deliberate act, as the tray's own item has it:
             // this is the same act reached by the key people already know.
-            &PredefinedMenuItem::quit(app, Some("Quit Demysto"))?,
+            //
+            // The only item here with a name of Demysto's own. The four below
+            // take macOS's, which macOS has already translated — and better
+            // than a catalogue of ours would, because they are the same words
+            // in every application on the machine.
+            &PredefinedMenuItem::quit(app, Some(&words.text("menu-quit")))?,
         ],
     )?;
 
@@ -50,7 +63,7 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
     // pasting a question does not work.
     let edit = Submenu::with_items(
         app,
-        "Edit",
+        words.text("menu-edit"),
         true,
         &[
             &PredefinedMenuItem::cut(app, None)?,

@@ -20,7 +20,7 @@ const PANE: &str = "x-apple.systempreferences:com.apple.preference.security?Priv
 /// offered the button is where the failure is reported — the same bargain
 /// `folder::open` makes.
 #[cfg(target_os = "macos")]
-pub fn reveal() -> Result<(), String> {
+pub fn reveal(words: &demysto_core::Words) -> Result<(), String> {
     // Imported here rather than at the top of the module: the platform that has
     // no pane to open has no use for it either, and an import every other
     // platform carries unused is a warning — which CI, running clippy with
@@ -34,9 +34,10 @@ pub fn reveal() -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| {
-            format!(
-                "Demysto could not open System Settings: {error}. The permission is in Privacy \
-                 & Security → Accessibility."
+            demysto_core::say!(
+                words,
+                "accessibility-pane-unreachable",
+                "detail" = error.to_string()
             )
         })
 }
@@ -44,6 +45,6 @@ pub fn reveal() -> Result<(), String> {
 /// No other platform gates a Capture behind a permission, so no other platform
 /// has a pane to be walked to; see `demysto_core`'s `desktop`.
 #[cfg(not(target_os = "macos"))]
-pub fn reveal() -> Result<(), String> {
-    Err("Only macOS asks for a permission before Demysto can read what you selected.".to_owned())
+pub fn reveal(words: &demysto_core::Words) -> Result<(), String> {
+    Err(words.text("accessibility-only-macos"))
 }

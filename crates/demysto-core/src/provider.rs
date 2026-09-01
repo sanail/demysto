@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{say, Words};
 use crate::model::{Endpoint, Resolved};
 use crate::run::{RunError, Stopping};
 use crate::sse;
@@ -62,6 +63,7 @@ pub(crate) fn answer(
     said: &[(&str, String)],
     timeout: Duration,
     stopping: &Stopping,
+    words: &Words,
     mut arriving: impl FnMut(&str),
 ) -> Result<(), RunError> {
     let provider = &resolved.endpoint;
@@ -70,18 +72,18 @@ pub(crate) fn answer(
     // собственный таймаут, а не Provider. См. `broke_off`.
     let started = Instant::now();
 
-    let mut response = asking(provider, &resolved.model, said, timeout)?
+    let mut response = asking(provider, &resolved.model, said, timeout, words)?
         .send()
-        .map_err(|error| sending(provider, timeout, &error))?;
+        .map_err(|error| sending(provider, timeout, &error, words))?;
 
     // A refusal is not a stream: it is one body, and one worth showing whole.
     let status = response.status();
     if !status.is_success() {
         let body = response
             .text()
-            .map_err(|error| sending(provider, timeout, &error))?;
+            .map_err(|error| sending(provider, timeout, &error, words))?;
 
-        return Err(refusal(provider, status.as_u16(), &body));
+        return Err(refusal(provider, status.as_u16(), &body, words));
     }
 
     let mut events = sse::Events::new();
@@ -105,7 +107,7 @@ pub(crate) fn answer(
         // user's answer as far as it got (user story 46).
         let read = response
             .read(&mut buffer)
-            .map_err(|error| broke_off(provider, started.elapsed(), timeout, &error))?;
+            .map_err(|error| broke_off(provider, started.elapsed(), timeout, &error, words))?;
 
         let chunk = &buffer[..read];
         keep(&mut body_start, chunk);
@@ -125,7 +127,7 @@ pub(crate) fn answer(
                 break 'reading;
             }
 
-            let carried = carried(&payload)?;
+            let carried = carried(&payload, words)?;
 
             // The Model saying it has finished is the other way a stream ends
             // on purpose. Not every service sends the sentinel above — several
@@ -156,8 +158,9 @@ pub(crate) fn answer(
     // A stream that said nothing is not an answer, however tidily it ended.
     if !delivered {
         return Err(malformed(
-            "it holds no answer",
+            &say!(words, "provider-no-answer-in-it"),
             &String::from_utf8_lossy(&body_start),
+            words,
         ));
     }
 
@@ -168,7 +171,7 @@ pub(crate) fn answer(
     // ends anywhere.
     match finished {
         true => Ok(()),
-        false => Err(cut_short(provider)),
+        false => Err(cut_short(provider, words)),
     }
 }
 
@@ -179,27 +182,31 @@ pub(crate) fn answer(
 /// not something the contract reports, and guessing it here is exactly what the
 /// `vision` flag exists to stop. The user picks from this list and says what
 /// each one can do.
-pub(crate) fn models(provider: &Endpoint, timeout: Duration) -> Result<Vec<String>, RunError> {
+pub(crate) fn models(
+    provider: &Endpoint,
+    timeout: Duration,
+    words: &Words,
+) -> Result<Vec<String>, RunError> {
     let response = authenticated(
-        client()?
+        client(words)?
             .get(joined(&provider.base_url, MODELS))
             .timeout(timeout),
         provider.api_key.as_deref(),
     )
     .send()
-    .map_err(|error| sending(provider, timeout, &error))?;
+    .map_err(|error| sending(provider, timeout, &error, words))?;
 
     let status = response.status();
     let body = response
         .text()
-        .map_err(|error| sending(provider, timeout, &error))?;
+        .map_err(|error| sending(provider, timeout, &error, words))?;
 
     if !status.is_success() {
-        return Err(refusal(provider, status.as_u16(), &body));
+        return Err(refusal(provider, status.as_u16(), &body, words));
     }
 
     let offered: Offered =
-        serde_json::from_str(&body).map_err(|error| malformed(&error.to_string(), &body))?;
+        serde_json::from_str(&body).map_err(|error| malformed(&error.to_string(), &body, words))?;
 
     Ok(offered.data.into_iter().map(|model| model.id).collect())
 }
@@ -216,12 +223,17 @@ pub(crate) fn models(provider: &Endpoint, timeout: Duration) -> Result<Vec<Strin
 ///
 /// The stream is dropped at the headers rather than read to its end, so the
 /// Model is cut off after the few tokens it takes a connection to close.
-pub(crate) fn verify(provider: &Endpoint, model: &str, timeout: Duration) -> Result<(), RunError> {
+pub(crate) fn verify(
+    provider: &Endpoint,
+    model: &str,
+    timeout: Duration,
+    words: &Words,
+) -> Result<(), RunError> {
     let said = [("user", "Hi".to_owned())];
 
-    let response = asking(provider, model, &said, timeout)?
+    let response = asking(provider, model, &said, timeout, words)?
         .send()
-        .map_err(|error| sending(provider, timeout, &error))?;
+        .map_err(|error| sending(provider, timeout, &error, words))?;
 
     let status = response.status();
     if status.is_success() {
@@ -230,9 +242,9 @@ pub(crate) fn verify(provider: &Endpoint, model: &str, timeout: Duration) -> Res
 
     let body = response
         .text()
-        .map_err(|error| sending(provider, timeout, &error))?;
+        .map_err(|error| sending(provider, timeout, &error, words))?;
 
-    Err(refusal(provider, status.as_u16(), &body))
+    Err(refusal(provider, status.as_u16(), &body, words))
 }
 
 /// The request both a Run and a verification make: the Conversation so far, put
@@ -242,9 +254,10 @@ fn asking(
     model: &str,
     said: &[(&str, String)],
     timeout: Duration,
+    words: &Words,
 ) -> Result<reqwest::blocking::RequestBuilder, RunError> {
     let request = authenticated(
-        client()?
+        client(words)?
             .post(joined(&provider.base_url, ANSWERING))
             .timeout(timeout),
         provider.api_key.as_deref(),
@@ -269,9 +282,9 @@ struct Carried {
     finished: bool,
 }
 
-fn carried(payload: &str) -> Result<Carried, RunError> {
-    let chunk: Chunk =
-        serde_json::from_str(payload).map_err(|error| malformed(&error.to_string(), payload))?;
+fn carried(payload: &str, words: &Words) -> Result<Carried, RunError> {
+    let chunk: Chunk = serde_json::from_str(payload)
+        .map_err(|error| malformed(&error.to_string(), payload, words))?;
 
     let choice = chunk.choices.into_iter().next();
 
@@ -317,7 +330,7 @@ fn joined(base_url: &str, endpoint: &str) -> String {
 ///
 /// Built once and kept: it carries the connection pool and the TLS setup, and
 /// building one per Run would put a handshake in front of every answer.
-fn client() -> Result<&'static reqwest::blocking::Client, RunError> {
+fn client(words: &Words) -> Result<&'static reqwest::blocking::Client, RunError> {
     static CLIENT: OnceLock<Result<reqwest::blocking::Client, String>> = OnceLock::new();
 
     CLIENT
@@ -330,7 +343,7 @@ fn client() -> Result<&'static reqwest::blocking::Client, RunError> {
         })
         .as_ref()
         .map_err(|error| RunError::Unreachable {
-            message: format!("Demysto could not open a connection: {error}"),
+            message: say!(words, "provider-no-connection", "detail" = error.clone()),
         })
 }
 
@@ -340,17 +353,28 @@ fn client() -> Result<&'static reqwest::blocking::Client, RunError> {
 /// The two are held apart because only one of them is worth trying again
 /// unchanged: an address nobody answers at is a setting to fix, and a Model
 /// that thought for too long is a Model to ask a second time.
-fn sending(provider: &Endpoint, waited: Duration, error: &reqwest::Error) -> RunError {
+fn sending(
+    provider: &Endpoint,
+    waited: Duration,
+    error: &reqwest::Error,
+    words: &Words,
+) -> RunError {
     match error.is_timeout() {
         true => RunError::TimedOut {
-            message: format!(
-                "{} did not answer within {} seconds, so Demysto stopped waiting.",
-                provider.base_url,
-                waited.as_secs()
+            message: say!(
+                words,
+                "provider-timed-out",
+                "provider" = provider.base_url.clone(),
+                "seconds" = waited.as_secs()
             ),
         },
         false => RunError::Unreachable {
-            message: format!("{} could not be reached: {error}", provider.base_url),
+            message: say!(
+                words,
+                "provider-unreachable",
+                "provider" = provider.base_url.clone(),
+                "detail" = error.to_string()
+            ),
         },
     }
 }
@@ -362,6 +386,7 @@ fn broke_off(
     waited: Duration,
     timeout: Duration,
     error: &std::io::Error,
+    words: &Words,
 ) -> RunError {
     // Истёкший срок — самый надёжный признак, и стоит он первым.
     //
@@ -382,15 +407,18 @@ fn broke_off(
 
     match timed_out {
         true => RunError::TimedOut {
-            message: format!(
-                "{} went quiet part-way through the answer, so Demysto stopped waiting.",
-                provider.base_url
+            message: say!(
+                words,
+                "provider-went-quiet",
+                "provider" = provider.base_url.clone()
             ),
         },
         false => RunError::Unreachable {
-            message: format!(
-                "{} stopped answering part-way through: {error}",
-                provider.base_url
+            message: say!(
+                words,
+                "provider-stopped-answering",
+                "provider" = provider.base_url.clone(),
+                "detail" = error.to_string()
             ),
         },
     }
@@ -430,11 +458,12 @@ fn timed_out_beneath(error: &std::io::Error) -> bool {
 /// A stream the Provider closed without the contract's full stop, having said
 /// something first. Nothing went wrong at the socket, which is why this is not
 /// [`broke_off`]: the connection ended cleanly in the middle of a sentence.
-fn cut_short(provider: &Endpoint) -> RunError {
+fn cut_short(provider: &Endpoint, words: &Words) -> RunError {
     RunError::Unreachable {
-        message: format!(
-            "{} closed the connection before the answer was finished.",
-            provider.base_url
+        message: say!(
+            words,
+            "provider-closed-early",
+            "provider" = provider.base_url.clone()
         ),
     }
 }
@@ -447,8 +476,8 @@ fn cut_short(provider: &Endpoint) -> RunError {
 /// settings, and the window is expected to offer the way there (user story 45).
 /// 401 and 403 are the contract's two ways of saying it — one for a key that is
 /// wrong, one for a key that is right and not allowed here.
-fn refusal(provider: &Endpoint, status: u16, body: &str) -> RunError {
-    let message = refused(status, body);
+fn refusal(provider: &Endpoint, status: u16, body: &str, words: &Words) -> RunError {
+    let message = refused(status, body, words);
 
     match status {
         401 | 403 => RunError::Authentication {
@@ -464,7 +493,7 @@ fn refusal(provider: &Endpoint, status: u16, body: &str) -> RunError {
 /// Its message is the one worth showing: it is the only party that knows
 /// whether the key is wrong, the Model does not exist, or the account is out of
 /// credit, and paraphrasing it would lose exactly that.
-fn refused(status: u16, body: &str) -> String {
+fn refused(status: u16, body: &str, words: &Words) -> String {
     let message = serde_json::from_str::<Refusal>(body)
         .map(|refusal| refusal.error.message)
         .ok()
@@ -472,8 +501,13 @@ fn refused(status: u16, body: &str) -> String {
         .unwrap_or_else(|| snippet(body));
 
     match message.is_empty() {
-        true => format!("The Provider refused the request (HTTP {status})."),
-        false => format!("The Provider refused the request (HTTP {status}): {message}"),
+        true => say!(words, "provider-refused", "status" = status),
+        false => say!(
+            words,
+            "provider-refused-saying",
+            "status" = status,
+            "detail" = message
+        ),
     }
 }
 
@@ -483,11 +517,13 @@ fn refused(status: u16, body: &str) -> String {
 /// Two halves rather than one because they go to different places: the user
 /// gets the reason and what arrived, so they can see for themselves; the log
 /// gets the reason alone, what arrived being the Model's own words (ADR-0010).
-fn malformed(reason: &str, body: &str) -> RunError {
+fn malformed(reason: &str, body: &str, words: &Words) -> RunError {
     RunError::Malformed {
-        message: format!(
-            "The Provider's answer was not one Demysto could read ({reason}): {}",
-            snippet(body)
+        message: say!(
+            words,
+            "provider-malformed",
+            "reason" = reason.to_owned(),
+            "body" = snippet(body)
         ),
         reason: reason.to_owned(),
     }

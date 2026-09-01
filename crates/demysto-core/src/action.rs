@@ -9,7 +9,8 @@
 
 use std::collections::BTreeMap;
 
-use crate::language::{self, Language};
+use crate::i18n::{say, Interface, Words};
+use crate::language;
 use crate::selection::{Kind, Selection};
 
 /// What a template writes around the value it wants.
@@ -79,11 +80,11 @@ pub struct Parameter {
 ///
 /// Ordered by how often they are reached for rather than alphabetically: the
 /// first is the one Enter runs without the user reading anything.
-pub(crate) fn built_in() -> Vec<Action> {
+pub(crate) fn built_in(words: &Words) -> Vec<Action> {
     vec![
         Action {
             id: "explain".to_owned(),
-            name: "Explain".to_owned(),
+            name: say!(words, "action-explain-name"),
             parameters: Vec::new(),
             model: None,
             accepts: vec![Kind::Text],
@@ -91,15 +92,18 @@ pub(crate) fn built_in() -> Vec<Action> {
         },
         Action {
             id: "translate".to_owned(),
-            name: "Translate".to_owned(),
+            name: say!(words, "action-translate-name"),
             parameters: vec![Parameter {
                 id: "target".to_owned(),
-                label: "Into which language?".to_owned(),
+                label: say!(words, "action-translate-target-label"),
                 // The overwhelmingly common translation is into the language
                 // the user reads, so the field comes up holding it and the
                 // Action costs one more keystroke than one with no Parameter
                 // at all. Typing over it is what the other cases are for.
-                default: Language::INTERFACE.name().to_owned(),
+                //
+                // The English name of that language and not its own, because
+                // this goes into the prompt: see `Interface::prompt_name`.
+                default: words.interface().prompt_name().to_owned(),
             }],
             model: None,
             accepts: vec![Kind::Text],
@@ -107,7 +111,7 @@ pub(crate) fn built_in() -> Vec<Action> {
         },
         Action {
             id: "summarize".to_owned(),
-            name: "Summarize".to_owned(),
+            name: say!(words, "action-summarize-name"),
             parameters: Vec::new(),
             model: None,
             accepts: vec![Kind::Text],
@@ -164,10 +168,15 @@ impl Action {
 
     /// The prompt this Action sends for `selection`, with `given` standing in
     /// for the Parameters the Palette collected.
-    pub(crate) fn prompt(&self, selection: &Selection, given: &BTreeMap<String, String>) -> String {
+    pub(crate) fn prompt(
+        &self,
+        selection: &Selection,
+        given: &BTreeMap<String, String>,
+        interface: Interface,
+    ) -> String {
         render(&self.template, |name| match name {
             SELECTION => Some(selection.as_text().to_owned()),
-            UI_LANGUAGE => Some(Language::INTERFACE.name().to_owned()),
+            UI_LANGUAGE => Some(interface.prompt_name().to_owned()),
             // Detected here rather than at Capture, and only when a template
             // asks: most Actions never mention it, and every Selection would
             // otherwise be read twice for a variable nobody used.

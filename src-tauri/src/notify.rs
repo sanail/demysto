@@ -10,7 +10,7 @@
 //! Only there. Every other failure has a Conversation to appear in, and the
 //! spec is explicit that errors are entries rather than dialogs.
 
-use demysto_core::RunOutcome;
+use demysto_core::{Demysto, RunOutcome};
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
@@ -35,9 +35,11 @@ pub fn a_failure_nobody_can_see<R: Runtime>(app: &AppHandle<R>, outcome: &RunOut
     // An answer that broke off part-way is not an answer that never came, and
     // the window it is waiting in has the rest of it on offer. Said differently
     // because the two ask for different things of whoever reads them.
+    let demysto = app.state::<Demysto>();
+    let words = demysto.words();
     let title = match outcome.text() {
-        Some(_) => "Demysto stopped part-way through",
-        None => "Demysto could not answer",
+        Some(_) => words.text("notification-stopped-part-way"),
+        None => words.text("notification-could-not-answer"),
     };
 
     // The Provider's own sentence, which is the one worth reading — the same

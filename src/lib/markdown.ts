@@ -22,6 +22,7 @@ import toml from "highlight.js/lib/languages/ini";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
+import { t } from "./i18n.svelte";
 
 /**
  * The languages code blocks are highlighted in.
@@ -71,9 +72,6 @@ for (const [name, language] of Object.entries(LANGUAGES)) {
 const BLOCK = "md-code";
 const COPY = "data-copy";
 
-/** What a code block's copy button says once it has been pressed. */
-export const COPIED = "Copied";
-
 const md = MarkdownIt({
   // Model output is untrusted content, and this window renders it beside the
   // user's own selection. Raw HTML in it is text, not markup (the spec's
@@ -101,7 +99,7 @@ md.renderer.rules.fence = (tokens, index) => {
   const label = language ? md.utils.escapeHtml(language) : "";
 
   return `<div class="${BLOCK} not-prose"><div class="${BLOCK}-bar"><span>${label}</span>\
-<button type="button" ${COPY}>Copy</button></div>\
+<button type="button" ${COPY}>${md.utils.escapeHtml(t("code-copy"))}</button></div>\
 <pre><code class="hljs">${code}</code></pre></div>\n`;
 };
 

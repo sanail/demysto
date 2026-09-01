@@ -8,6 +8,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use demysto_core::{say, Words};
+
 /// Opens `path` in the desktop's file manager, creating it first where it is
 /// not there yet.
 ///
@@ -17,9 +19,15 @@ use std::process::Command;
 ///
 /// Answers with what went wrong, in a whole sentence, so that the window that
 /// offered the button is where the failure is reported.
-pub fn open(path: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(path)
-        .map_err(|error| format!("{} could not be created: {error}", path.display()))?;
+pub fn open(path: &Path, words: &Words) -> Result<(), String> {
+    std::fs::create_dir_all(path).map_err(|error| {
+        say!(
+            words,
+            "folder-uncreatable",
+            "path" = path.display().to_string(),
+            "detail" = error.to_string()
+        )
+    })?;
 
     let opener = match () {
         _ if cfg!(target_os = "macos") => "open",
@@ -35,9 +43,11 @@ pub fn open(path: &Path) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| {
-            format!(
-                "Demysto could not open a file manager: {error}. The folder is {}.",
-                path.display()
+            say!(
+                words,
+                "folder-no-file-manager",
+                "detail" = error.to_string(),
+                "path" = path.display().to_string()
             )
         })
 }

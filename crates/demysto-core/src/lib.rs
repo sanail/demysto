@@ -18,6 +18,7 @@ mod conversation;
 mod desktop;
 mod files;
 mod hotkey;
+mod i18n;
 mod language;
 mod log;
 mod model;
@@ -34,6 +35,8 @@ pub use capture::{Capture, CaptureError, CaptureOutcome, Captured, Capturing};
 pub use catalogue::{ActionEdit, ActionError, ActionStanding, Catalogue, DefinedAction};
 pub use config::{ConfigError, DEFAULT_LARGE_SELECTION};
 pub use conversation::{Conversation, Summary, Turn};
+pub use fluent::FluentArgs as Args;
+pub use i18n::{Interface, Words, LANGUAGE_ENV};
 pub use paths::{config_dir, ConfigDirError, CONFIG_DIR_ENV};
 pub use run::{RunError, RunOutcome};
 pub use selection::{Kind, Selection};
@@ -93,6 +96,13 @@ pub struct Demysto {
     /// Where this session says what it did, for a bug report to carry. What it
     /// records and what it deliberately does not is `log`'s.
     log: log::Log,
+    /// Demysto's own words, in the language this session speaks them.
+    ///
+    /// Behind a lock for the reason the settings are: the settings window
+    /// changes the language, and everything that says anything — a Run
+    /// composing a failure, the tray menu being rebuilt, the window asking what
+    /// to draw itself in — reads it through this.
+    words: RwLock<Words>,
 }
 
 /// What one Turn asks, before anything has been put to a Provider: which Model
@@ -158,23 +168,48 @@ pub struct Status {
     pub large_selection_default: u64,
     /// What a Capture on this desktop can read. Everywhere but Wayland this is
     /// the Selection, and the windows that show it say nothing; on Wayland it
-    /// carries the sentence they show instead.
+    /// is the fact the window says a sentence about.
     pub capturing: Capturing,
+    /// The interface language the environment fixes, `None` where nothing is
+    /// exported.
+    ///
+    /// Reported for the reason a key found in a variable is: the field in
+    /// Settings would otherwise invite somebody to choose a language that goes
+    /// on being ignored, and never say why.
+    pub language_env: Option<Exported>,
+}
+
+/// A setting the environment has already decided, and the variable that decided
+/// it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Exported {
+    pub variable: &'static str,
+    pub value: String,
 }
 
 /// A count with its thousands marked off, because the number in a warning about
 /// size is the whole of what the warning says and "43120" is not a size anybody
 /// reads at a glance.
-fn grouped(count: u64) -> String {
-    let digits = count.to_string();
+///
+/// Grouped here rather than by Fluent, which formats a number without grouping
+/// it: the catalogue is handed the digits already marked off, and separately the
+/// count itself, which is what chooses between "символ", "символа" and
+/// "символов". The separator is the one the language writes — a comma in
+/// English, a non-breaking space in Russian.
+fn grouped(count: u64, interface: Interface) -> String {
+    let separator = match interface {
+        Interface::English => ",",
+        Interface::Russian => "\u{a0}",
+    };
 
-    digits
+    count
+        .to_string()
         .as_bytes()
         .rchunks(3)
         .rev()
         .map(|group| String::from_utf8_lossy(group).into_owned())
         .collect::<Vec<_>>()
-        .join(",")
+        .join(separator)
 }
 
 impl Demysto {
@@ -206,15 +241,44 @@ impl Demysto {
 
         // Taken once, here, and nowhere else in the crate: the environment
         // holds the key, and a key that can change under a running Demysto is a
-        // key nobody can reason about (the spec's *Core modules*).
+        // key nobody can reason about (the spec's *Core modules*). It holds the
+        // language too, which is why it is read before anything else happens.
         let env = Environment::snapshot();
 
+        // Settled before the settings are read, because reading them is already
+        // something that has to be said in a language: every sentence about a
+        // file that could not be parsed is one. The language the file states is
+        // taken out of it first, on its own, and a file that states none — or
+        // one nobody can parse — leaves the operating system deciding.
+        let words = Words::spoken(i18n::chosen(
+            env.get(i18n::LANGUAGE_ENV),
+            config::stated_language(&config_dir).as_deref(),
+            i18n::system_language(),
+        ));
+
+        Self::speaking(config_dir, version, capture, capturing, env, words)
+    }
+
+    /// The same facade with the language settled rather than looked up.
+    ///
+    /// Which is what the suite builds: every assertion about a sentence would
+    /// otherwise be an assertion about the language the machine running the
+    /// tests happens to be set to.
+    fn speaking(
+        config_dir: PathBuf,
+        version: impl Into<String>,
+        capture: Box<dyn Capture>,
+        capturing: Capturing,
+        env: Environment,
+        words: Words,
+    ) -> Self {
         let version = version.into();
         let log = log::Log::new(&config_dir);
         log.started(&version, &config_dir);
 
         Self {
-            config: RwLock::new(config::load(&config_dir, &env)),
+            config: RwLock::new(config::load(&config_dir, &env, &words)),
+            words: RwLock::new(words),
             env,
             config_dir,
             version,
@@ -249,7 +313,35 @@ impl Demysto {
     /// change them under a Conversation as the settings window does.
     #[cfg(test)]
     fn settings_changed(&self) {
-        *self.config.write().unwrap() = config::load(&self.config_dir, &self.env);
+        self.reload();
+    }
+
+    /// Re-reads the settings, and with them the language the interface speaks.
+    ///
+    /// The two together because the second is stated in the first: a save that
+    /// changed the language leaves everything Demysto has yet to say owed in
+    /// the new one, and the tray menu and the windows ask for it again.
+    fn reload(&self) {
+        let words = Words::spoken(i18n::chosen(
+            self.env.get(i18n::LANGUAGE_ENV),
+            config::stated_language(&self.config_dir).as_deref(),
+            i18n::system_language(),
+        ));
+
+        *self.config.write().unwrap() = config::load(&self.config_dir, &self.env, &words);
+        *self.words.write().unwrap() = words;
+    }
+
+    /// Demysto's own words, for the parts of the interface that are native and
+    /// have to say something.
+    pub fn words(&self) -> std::sync::RwLockReadGuard<'_, Words> {
+        self.words.read().unwrap()
+    }
+
+    /// The language the interface speaks, so that the windows can pick the same
+    /// catalogue this side of the channel is reading.
+    pub fn language(&self) -> Interface {
+        self.words().interface()
     }
 
     pub fn config_dir(&self) -> &Path {
@@ -344,7 +436,7 @@ impl Demysto {
             return Vec::new();
         };
 
-        catalogue::runnable(&self.config_dir)
+        catalogue::runnable(&self.config_dir, &self.words())
             .into_iter()
             .filter(|action| action.accepts(selection.kind()))
             .collect()
@@ -357,7 +449,7 @@ impl Demysto {
     /// Palette lists depends on what was captured, and what can be edited does
     /// not.
     pub fn catalogue(&self) -> Catalogue {
-        catalogue::read(&self.config_dir)
+        catalogue::read(&self.config_dir, &self.words())
     }
 
     /// Writes one Action, and answers with the catalogue as the directory then
@@ -369,13 +461,18 @@ impl Demysto {
     /// disk afterwards, for the reason a saved settings file is read back: a
     /// save is only finished when it reads back.
     pub fn save_action(&self, edit: &ActionEdit) -> Result<Catalogue, ActionError> {
-        catalogue::write(&self.config_dir, edit, &self.models_configured())
+        catalogue::write(
+            &self.config_dir,
+            edit,
+            &self.models_configured(),
+            &self.words(),
+        )
     }
 
     /// Takes an Action off the user: deletes one of their own, or removes an
     /// Override and leaves the built-in it was over.
     pub fn delete_action(&self, id: &str) -> Result<Catalogue, ActionError> {
-        catalogue::delete(&self.config_dir, id)
+        catalogue::delete(&self.config_dir, id, &self.words())
     }
 
     /// Every Model configured, by the name one is bound by, so that an Action
@@ -389,7 +486,7 @@ impl Demysto {
     /// Demysto ran would otherwise be offered by the window and refused by the
     /// save.
     fn models_configured(&self) -> Vec<String> {
-        match config::load(&self.config_dir, &self.env) {
+        match config::load(&self.config_dir, &self.env, &self.words()) {
             Ok(config) => config
                 .models()
                 .map(|(provider, model)| config::qualified(provider, model))
@@ -441,7 +538,7 @@ impl Demysto {
         let (id, asking) = {
             let mut store = self.store.lock().unwrap();
             let Some(conversation) = store.follow_up(question) else {
-                return RunOutcome::Failed(run::no_conversation());
+                return RunOutcome::Failed(run::no_conversation(&self.words()));
             };
 
             (
@@ -511,7 +608,7 @@ impl Demysto {
     /// one: a retry, or a continuation.
     fn again(&self, asked: Option<conversation::Asked>, showing: impl FnMut(&str)) -> RunOutcome {
         let Some(asked) = asked else {
-            return RunOutcome::Failed(run::nothing_to_retry());
+            return RunOutcome::Failed(run::nothing_to_retry(&self.words()));
         };
 
         let id = asked.id;
@@ -561,7 +658,7 @@ impl Demysto {
             .and_then(|selection| self.warning(selection));
 
         self.store.lock().unwrap().open(
-            catalogue::named(&self.config_dir, action),
+            catalogue::named(&self.config_dir, action, &self.words()),
             selection,
             warning,
         )
@@ -582,14 +679,19 @@ impl Demysto {
         let characters = selection.as_text().chars().count() as u64;
 
         (characters > at).then(|| {
-            format!(
-                "This Selection is {} characters long, which is over the {} that \
-                 {} in {} is set to. It was sent whole — nothing was cut — so it costs what \
-                 that costs.",
-                grouped(characters),
-                grouped(at),
-                config::LARGE_SELECTION_SETTING,
-                config.path.display(),
+            let words = self.words();
+            let interface = words.interface();
+
+            say!(
+                &words,
+                "run-large-selection",
+                // The count as a number as well as as digits: the first is what
+                // chooses the word after it, and the second is what is read.
+                "characters" = characters,
+                "shown" = grouped(characters, interface),
+                "limit" = grouped(at, interface),
+                "setting" = config::LARGE_SELECTION_SETTING,
+                "path" = config.path.display().to_string(),
             )
         })
     }
@@ -605,15 +707,21 @@ impl Demysto {
     ) -> RunOutcome {
         let captured = self.last_capture();
         let Some(selection) = captured.as_ref().and_then(CaptureOutcome::selection) else {
-            return RunOutcome::Failed(run::nothing_captured(captured.as_ref()));
+            return RunOutcome::Failed(run::nothing_captured(captured.as_ref(), &self.words()));
         };
 
         // The Palette offers only the Actions that accept what was captured, and
         // is the only gate on that today: with one Selection kind there is no
         // Action a Run could reach that would refuse it. The kind images bring
         // is where this needs a check of its own.
-        let Some(action) = catalogue::named(&self.config_dir, action) else {
-            return RunOutcome::Failed(run::no_such_action(action));
+        // Read into a binding rather than matched on directly, so that the
+        // words the catalogue was read with are let go of before the words the
+        // failure is said in are asked for: two live read guards on one lock
+        // deadlock against a write that queued between them.
+        let named = catalogue::named(&self.config_dir, action, &self.words());
+
+        let Some(action) = named else {
+            return RunOutcome::Failed(run::no_such_action(action, &self.words()));
         };
 
         self.ask(
@@ -621,7 +729,7 @@ impl Demysto {
             Asking {
                 binding: action.model.clone(),
                 kind: selection.kind(),
-                prompt: action.prompt(selection, parameters),
+                prompt: action.prompt(selection, parameters, self.language()),
                 delivered: String::new(),
             },
             showing,
@@ -644,7 +752,7 @@ impl Demysto {
         } = asking;
 
         let Some(said) = self.store.lock().unwrap().asking(id, prompt) else {
-            return RunOutcome::stopped_short(delivered, run::no_conversation());
+            return RunOutcome::stopped_short(delivered, run::no_conversation(&self.words()));
         };
 
         // Everything the request needs comes out of the settings here, and the
@@ -672,12 +780,25 @@ impl Demysto {
         let stopping = Stopping::default();
         *self.stopping.lock().unwrap() = Some(stopping.clone());
 
+        // Taken out of the lock before the request rather than read through it,
+        // for the reason the settings are taken out before one: a Provider has
+        // two minutes to answer, and a save must not wait on it. What the words
+        // cost is one parse of a file measured in kilobytes, once per Turn.
+        let words = Words::spoken(self.language());
+
         let mut assembly = Assembly::continuing(self.throttle, delivered);
-        let asked = provider::answer(&resolved, &said, self.timeout, &stopping, |fragment| {
-            if let Some(answer) = assembly.push(fragment) {
-                showing(&answer);
-            }
-        });
+        let asked = provider::answer(
+            &resolved,
+            &said,
+            self.timeout,
+            &stopping,
+            &words,
+            |fragment| {
+                if let Some(answer) = assembly.push(fragment) {
+                    showing(&answer);
+                }
+            },
+        );
 
         *self.stopping.lock().unwrap() = None;
 
@@ -703,7 +824,7 @@ impl Demysto {
             Err(error) => Err(RunError::Configuration {
                 message: error.to_string(),
             }),
-            Ok(config) => model::resolve(config, binding, kind),
+            Ok(config) => model::resolve(config, binding, kind, &self.words()),
         }
     }
 
@@ -720,9 +841,13 @@ impl Demysto {
     /// what Demysto is running on is an error until a Provider is configured,
     /// which would lose a Hotkey stated by somebody who has not got that far.
     pub fn palette_hotkey(&self) -> Option<String> {
-        let (path, text) = config::read(&self.config_dir).ok()?;
+        // One guard rather than two: a second `read` taken while the first is
+        // still held deadlocks against a `write` that queued between them, and
+        // saving the settings is exactly that write.
+        let words = self.words();
+        let (path, text) = config::read(&self.config_dir, &words).ok()?;
 
-        config::stated(config::parse(&path, &text).ok()?.palette_hotkey)
+        config::stated(config::parse(&path, &text, &words).ok()?.palette_hotkey)
     }
 
     /// The keys a Hotkey may be on its own, for the window that records one.
@@ -741,7 +866,7 @@ impl Demysto {
     /// the window edits the file, and the file may have been edited by hand
     /// since Demysto started. Keys are not in what comes back — see `settings`.
     pub fn settings(&self) -> Result<Settings, ConfigError> {
-        settings::read(&self.config_dir, &self.env)
+        settings::read(&self.config_dir, &self.env, &self.words())
     }
 
     /// Writes what the window edited, and runs on it from here on.
@@ -751,13 +876,15 @@ impl Demysto {
     pub fn save_settings(&self, edit: &Edit) -> Result<Settings, ConfigError> {
         self.verifying(edit)?;
 
-        let saved = settings::write(&self.config_dir, &self.env, edit)?;
+        let saved = settings::write(&self.config_dir, &self.env, edit, &self.words())?;
 
         // Read again from the file just written rather than composed from the
         // edit, so that what Demysto runs on is exactly what its next start
         // would read — including the failure a saved file can still be, which
-        // the Run is where the user is told about.
-        *self.config.write().unwrap() = config::load(&self.config_dir, &self.env);
+        // the Run is where the user is told about. The language comes with it:
+        // a save that changed it is a save after which everything Demysto has
+        // yet to say is owed in the new one (user story 59).
+        self.reload();
 
         Ok(saved)
     }
@@ -821,9 +948,13 @@ impl Demysto {
     /// moment to want the list is while configuring a Provider that has not
     /// been saved yet.
     pub fn models_offered_by(&self, provider: &ProviderEdit) -> Result<Vec<String>, RunError> {
+        // Out of the lock before the request, for the reason a Run's are.
+        let words = Words::spoken(self.language());
+
         provider::models(
-            &settings::endpoint(&self.config_dir, &self.env, provider)?,
+            &settings::endpoint(&self.config_dir, &self.env, provider, &words)?,
             self.timeout,
+            &words,
         )
     }
 
@@ -833,10 +964,13 @@ impl Demysto {
     /// Against a Model, because that is the request a Run makes and the only
     /// one that proves the key rather than the endpoint — ADR-0008.
     pub fn verify(&self, provider: &ProviderEdit, model: &str) -> Result<(), RunError> {
+        let words = Words::spoken(self.language());
+
         provider::verify(
-            &settings::endpoint(&self.config_dir, &self.env, provider)?,
+            &settings::endpoint(&self.config_dir, &self.env, provider, &words)?,
             model,
             self.timeout,
+            &words,
         )
     }
 
@@ -846,6 +980,18 @@ impl Demysto {
             config_dir: self.config_dir.clone(),
             large_selection_default: DEFAULT_LARGE_SELECTION,
             capturing: self.capturing.clone(),
+            // Only where it names a language Demysto speaks. `i18n::chosen`
+            // passes over one that does not and lets the settings decide, so
+            // reporting it would have the window say the field it is beside
+            // changes nothing — at the moment it is the thing deciding.
+            language_env: self
+                .env
+                .get(LANGUAGE_ENV)
+                .filter(|value| Interface::matching(value).is_some())
+                .map(|value| Exported {
+                    variable: LANGUAGE_ENV,
+                    value,
+                }),
         }
     }
 }
@@ -907,7 +1053,14 @@ mod tests {
     fn as_a_session(config_dir: &Path, desktop: fake::Reading) -> Demysto {
         let (capture, capturing) = desktop;
 
-        Demysto::with_capture(config_dir, "1.2.3", capture, capturing)
+        Demysto::speaking(
+            config_dir.to_owned(),
+            "1.2.3",
+            capture,
+            capturing,
+            Environment::snapshot(),
+            i18n::english(),
+        )
     }
 
     /// A Demysto with nothing configured to talk to.
@@ -930,7 +1083,15 @@ mod tests {
         let (capture, capturing) = desktop;
 
         Rooted {
-            demysto: Demysto::with_capture(dir.path(), "1.2.3", capture, capturing).unthrottled(),
+            demysto: Demysto::speaking(
+                dir.path().to_owned(),
+                "1.2.3",
+                capture,
+                capturing,
+                Environment::snapshot(),
+                i18n::english(),
+            )
+            .unthrottled(),
             _dir: dir,
         }
     }
@@ -1024,6 +1185,45 @@ mod tests {
         ready_with(&one_provider(&format!("{}/v1", server.url())), selection)
     }
 
+    /// The same, speaking whatever language its settings file states.
+    ///
+    /// The one facade the suite does not hand English to. Neither the variable
+    /// nor the operating system is asked — an assertion about a sentence must
+    /// not turn on the machine the suite is running on — so what is left is the
+    /// leg this exists to exercise: the file (user story 59).
+    fn ready_speaking(settings: &str, selection: &str) -> Rooted {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join(config::FILE_NAME),
+            format!("version = 1\n\n{settings}"),
+        )
+        .unwrap();
+
+        let desktop = Arc::new(FakeDesktop::new(None, Some(selection)));
+        let (capture, capturing) = fake::over(&desktop);
+
+        let demysto = Rooted {
+            demysto: Demysto::speaking(
+                dir.path().to_owned(),
+                "1.2.3",
+                capture,
+                capturing,
+                Environment::snapshot(),
+                Words::spoken(i18n::chosen(
+                    None,
+                    config::stated_language(dir.path()).as_deref(),
+                    None,
+                )),
+            )
+            .unthrottled(),
+            _dir: dir,
+        };
+
+        demysto.capture();
+
+        demysto
+    }
+
     /// A Demysto whose settings file holds exactly `settings`, having captured
     /// `selection`.
     fn ready_with(settings: &str, selection: &str) -> Rooted {
@@ -1068,7 +1268,9 @@ mod tests {
     fn captured(demysto: &Demysto) -> Captured {
         match demysto.capture() {
             CaptureOutcome::Captured(captured) => captured,
-            CaptureOutcome::Failed(error) => panic!("the Capture failed: {error}"),
+            CaptureOutcome::Failed(error) => {
+                panic!("the Capture failed: {}", error.message(&i18n::english()))
+            }
         }
     }
 
@@ -1218,7 +1420,7 @@ mod tests {
         // it is one the user can do something about.
         assert_eq!(
             demysto(fake::over(&desktop)).capture(),
-            CaptureOutcome::Failed(CaptureError::Permission(fake::REFUSED.to_owned()))
+            CaptureOutcome::Failed(CaptureError::Permission)
         );
     }
 
@@ -1265,7 +1467,7 @@ mod tests {
         assert_eq!(
             demysto.run("explain", &BTreeMap::new(), |_| {}).error(),
             Some(&RunError::Permission {
-                message: fake::REFUSED.to_owned()
+                message: CaptureError::Permission.message(&i18n::english())
             })
         );
     }
@@ -1323,7 +1525,7 @@ mod tests {
             demysto(fake::clipboard_only_over(&desktop))
                 .status()
                 .capturing,
-            Capturing::ClipboardOnly(fake::COPY_IT_YOURSELF.to_owned())
+            Capturing::ClipboardOnly
         );
     }
 
@@ -1834,6 +2036,230 @@ mod tests {
         ));
 
         endpoint.assert();
+    }
+
+    /// The other half of user story 30: the language the answer is asked for
+    /// in is the language the interface speaks, which is now something the user
+    /// can change rather than a constant.
+    ///
+    /// Asked for by its English name whatever the interface is drawn in — see
+    /// `Interface::prompt_name`, and `language` for why a Model is told
+    /// "Russian" rather than "Русский".
+    #[test]
+    fn explaining_asks_for_the_answer_in_whatever_language_the_interface_speaks() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![Matcher::Regex("answer in Russian".to_owned())],
+        );
+
+        let settings = format!(
+            "language = \"ru\"\n{}",
+            one_provider(&format!("{}/v1", server.url()))
+        );
+
+        run(&ready_speaking(
+            &settings,
+            "Der Mensch ist frei geschaffen, ist frei",
+        ));
+
+        endpoint.assert();
+    }
+
+    /// The Palette lists the built-ins in the language it is drawn in, and asks
+    /// for their Parameters in it — a Palette that came up in English under a
+    /// Russian interface would be the half of the tool the user reaches most.
+    #[test]
+    fn the_built_in_actions_are_named_in_the_language_the_interface_speaks() {
+        let demysto = ready_speaking("language = \"ru\"\n", "a paragraph");
+
+        let named: Vec<String> = demysto
+            .actions()
+            .into_iter()
+            .map(|action| action.name)
+            .collect();
+
+        assert_eq!(named, ["Объяснить", "Перевести", "Пересказать"]);
+    }
+
+    /// And the language the translation offers to translate into is the one the
+    /// user reads, by the name a Model is told it in.
+    #[test]
+    fn translating_offers_the_interface_language_as_what_to_translate_into() {
+        let demysto = ready_speaking("language = \"ru\"\n", "a paragraph");
+
+        let offered = demysto
+            .actions()
+            .into_iter()
+            .find(|action| action.id == "translate")
+            .expect("Translate is a built-in");
+
+        assert_eq!(offered.parameters[0].default, "Russian");
+        assert_eq!(offered.parameters[0].label, "На какой язык?");
+    }
+
+    /// User story 59: the language is changed in Settings, and everything
+    /// Demysto has yet to say is owed in it — without a restart, and without
+    /// the window that changed it being the only one that notices.
+    #[test]
+    fn a_language_saved_in_settings_is_the_one_demysto_speaks() {
+        let demysto = unconfigured("a paragraph");
+
+        assert_eq!(demysto.language(), Interface::English);
+
+        let written = saved(
+            &demysto,
+            &Edit {
+                language: Some("ru".to_owned()),
+                ..edited(Vec::new(), None)
+            },
+        );
+
+        assert_eq!(written.language.as_deref(), Some("ru"));
+        assert_eq!(demysto.language(), Interface::Russian);
+
+        // Which is not a fact about the facade alone: the tray menu is rebuilt
+        // from the catalogue, and the Palette from the Actions.
+        assert!(
+            demysto.catalogue().actions[0].name == "Объяснить",
+            "{:?}",
+            demysto.catalogue().actions[0].name
+        );
+    }
+
+    /// And it is stated in the file, which is where the next start reads it.
+    #[test]
+    fn the_language_saved_is_written_where_the_next_start_reads_it() {
+        let demysto = unconfigured("a paragraph");
+
+        saved(
+            &demysto,
+            &Edit {
+                language: Some("ru".to_owned()),
+                ..edited(Vec::new(), None)
+            },
+        );
+
+        assert!(
+            stated_in(&settings_file(&demysto)).contains("language = \"ru\""),
+            "{}",
+            settings_file(&demysto)
+        );
+    }
+
+    /// Following the operating system is the setting taken out of the file, not
+    /// a language written into it: somebody who chose one and changed their
+    /// mind is back where a fresh installation starts (user story 58).
+    #[test]
+    fn choosing_to_follow_the_system_takes_the_language_out_of_the_file() {
+        let demysto = unconfigured("a paragraph");
+
+        saved(
+            &demysto,
+            &Edit {
+                language: Some("ru".to_owned()),
+                ..edited(Vec::new(), None)
+            },
+        );
+
+        let written = saved(&demysto, &edited(Vec::new(), None));
+
+        assert_eq!(written.language, None);
+        assert!(
+            !stated_in(&settings_file(&demysto)).contains("language"),
+            "{}",
+            settings_file(&demysto)
+        );
+    }
+
+    /// A tag no catalogue answers to is not written and not reported: the
+    /// window offers a list of two, so anything else came from somewhere that
+    /// is not the window, and writing it would put a setting in the file that
+    /// nothing acts on.
+    #[test]
+    fn a_language_demysto_does_not_speak_is_not_written() {
+        let demysto = unconfigured("a paragraph");
+
+        let written = saved(
+            &demysto,
+            &Edit {
+                language: Some("xh".to_owned()),
+                ..edited(Vec::new(), None)
+            },
+        );
+
+        assert_eq!(written.language, None);
+    }
+
+    /// The window is told about the variable only where it is deciding
+    /// something.
+    ///
+    /// One naming a language Demysto does not speak decides nothing —
+    /// `i18n::chosen` passes it over and lets the settings answer — and saying
+    /// so beside a field that does work would have the window report the
+    /// opposite of what it is doing.
+    #[test]
+    fn a_language_variable_demysto_cannot_honour_is_not_reported_as_deciding() {
+        let exported = |value: &str| {
+            let dir = TempDir::new().unwrap();
+            let desktop = Arc::new(FakeDesktop::new(None, None));
+            let (capture, capturing) = fake::over(&desktop);
+
+            Demysto::speaking(
+                dir.path().to_owned(),
+                "1.2.3",
+                capture,
+                capturing,
+                config::Environment::holding(&[(LANGUAGE_ENV, value)]),
+                i18n::english(),
+            )
+            .status()
+            .language_env
+        };
+
+        assert_eq!(exported("xh"), None);
+        assert_eq!(
+            exported("ru"),
+            Some(Exported {
+                variable: LANGUAGE_ENV,
+                value: "ru".to_owned()
+            })
+        );
+    }
+
+    /// A file that states one, by hand, in a language Demysto does not speak is
+    /// read the same way: English, and nothing said about it. Refusing to start
+    /// over a two-letter typo would be worse than speaking English.
+    #[test]
+    fn a_file_naming_a_language_demysto_does_not_speak_is_english() {
+        let demysto = ready_speaking("language = \"xh\"\n", "a paragraph");
+
+        assert_eq!(demysto.language(), Interface::English);
+        assert_eq!(demysto.settings().unwrap().language, None);
+    }
+
+    /// The whole of what a Russian interface is for, in one sentence: the
+    /// warning about a large Selection counts in it, and counts grammatically
+    /// (user story 60).
+    #[test]
+    fn the_warning_about_a_large_selection_counts_in_the_interface_language() {
+        let settings = format!(
+            "language = \"ru\"\nlarge_selection = 3\n{}",
+            // Nothing is asked of it: the warning is composed before the Model
+            // is, which is the whole of what "before you spend tokens on it"
+            // means for something that does not block.
+            one_provider("http://127.0.0.1:1/v1")
+        );
+
+        let demysto = ready_speaking(&settings, "четыре символа");
+
+        demysto.run("explain", &BTreeMap::new(), |_| {});
+
+        let warning = showing(&demysto)
+            .warning
+            .expect("a Selection over the stated length is warned about");
+
+        assert!(warning.contains("14 символов"), "{warning}");
     }
 
     #[test]
@@ -2544,6 +2970,7 @@ mod tests {
             default_vision_model: None,
             palette_hotkey: None,
             large_selection: None,
+            language: None,
         }
     }
 
@@ -2656,6 +3083,7 @@ mod tests {
             default_vision_model: Some("openai/gpt-4o".to_owned()),
             palette_hotkey: Some("Ctrl+Alt+Space".to_owned()),
             large_selection: Some(1_000),
+            language: Some("ru".to_owned()),
         };
 
         let written = saved(&demysto, &edit);
@@ -3724,7 +4152,7 @@ mod tests {
 
         let held = catalogued(&demysto);
 
-        for built_in in action::built_in() {
+        for built_in in action::built_in(&i18n::english()) {
             assert!(held.contains(&built_in.id), "{} is missing", built_in.id);
         }
     }
@@ -4005,6 +4433,7 @@ mod tests {
                 default_vision_model: Some("   ".to_owned()),
                 palette_hotkey: Some("   ".to_owned()),
                 large_selection: None,
+                language: Some(String::new()),
             },
         );
 

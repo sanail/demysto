@@ -24,6 +24,7 @@ use toml_edit::{value, Array, ArrayOfTables, DocumentMut, InlineTable, Item, Tab
 use crate::config::{
     self, Auth, Config, ConfigError, Environment, Key, ModelEntry, Origin, ProviderEntry,
 };
+use crate::i18n::{say, Interface, Words};
 use crate::model::{self, Endpoint};
 use crate::run::RunError;
 
@@ -45,6 +46,17 @@ pub struct Settings {
     /// where the file states nothing and Demysto's own figure decides — which
     /// [`crate::Status`] reports, so that the window can name it.
     pub large_selection: Option<u64>,
+    /// The language the file asks the interface to speak, `None` where it asks
+    /// for none and the operating system decides.
+    ///
+    /// Also `None` where the file names one no catalogue answers to. The window
+    /// offers a closed list of two, and there is no field on it that could show
+    /// a third: a file hand-edited to `language = "de"` is reported as asking
+    /// for nothing, which is what Demysto is in fact doing about it — and the
+    /// next save from that window takes the line out. Unlike a Hotkey, which is
+    /// carried as written because only the desktop can judge it, the set of
+    /// languages Demysto speaks is a set of files in this repository.
+    pub language: Option<String>,
 }
 
 /// One Provider as the file states it — with where its key is, and not the key.
@@ -103,6 +115,9 @@ pub struct Edit {
     /// different thing and is written.
     #[serde(default)]
     pub large_selection: Option<u64>,
+    /// The language to speak, `None` for following the operating system.
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 /// One Provider as the window would have it.
@@ -193,9 +208,13 @@ pub(crate) fn presets() -> Vec<Preset> {
 }
 
 /// The settings as the file now holds them.
-pub(crate) fn read(config_dir: &Path, env: &Environment) -> Result<Settings, ConfigError> {
-    let (path, text) = config::read(config_dir)?;
-    let file = config::parse(&path, &text)?;
+pub(crate) fn read(
+    config_dir: &Path,
+    env: &Environment,
+    words: &Words,
+) -> Result<Settings, ConfigError> {
+    let (path, text) = config::read(config_dir, words)?;
+    let file = config::parse(&path, &text, words)?;
 
     let providers = file
         .providers
@@ -205,7 +224,7 @@ pub(crate) fn read(config_dir: &Path, env: &Environment) -> Result<Settings, Con
             base_url: entry.base_url.clone(),
             preset: entry.preset.map(|preset| preset.spec().name.to_owned()),
             api_key_env: entry.api_key_env.clone(),
-            key: standing(&config::resolve_key(entry, env, &path)),
+            key: standing(&config::resolve_key(entry, env, &path, words)),
             models: entry
                 .models
                 .iter()
@@ -227,6 +246,12 @@ pub(crate) fn read(config_dir: &Path, env: &Environment) -> Result<Settings, Con
         // then refuse to be claimed, for a reason nothing on screen could show.
         palette_hotkey: config::stated(file.palette_hotkey),
         large_selection: file.large_selection,
+        // Only a language Demysto speaks reaches the window: it has no field
+        // that could show a third, and `i18n::chosen` is already passing the
+        // same value over and letting the desktop decide.
+        language: config::stated(file.language)
+            .and_then(|tag| Interface::matching(&tag))
+            .map(|language| language.tag().to_owned()),
     })
 }
 
@@ -240,15 +265,16 @@ pub(crate) fn write(
     config_dir: &Path,
     env: &Environment,
     edit: &Edit,
+    words: &Words,
 ) -> Result<Settings, ConfigError> {
-    let (path, text) = config::read(config_dir)?;
+    let (path, text) = config::read(config_dir, words)?;
 
     // Asked of the file before it is edited, so that a file nobody can parse is
     // reported in `config`'s own words — which name the line it failed on
     // without quoting it back, that line being the key as often as not.
-    config::parse(&path, &text)?;
+    config::parse(&path, &text, words)?;
 
-    let rewritten = rewritten(&text, edit, &path)?;
+    let rewritten = rewritten(&text, edit, &path, words)?;
 
     // Checked before anything reaches the disk. A window that had written a
     // file Demysto cannot read would be a window that could no longer open it,
@@ -256,22 +282,24 @@ pub(crate) fn write(
     // spare them. It is also what checks the field names [`rewritten`] writes,
     // which serde cannot: the file denies unknown fields, so a name misspelt
     // there fails to parse here rather than reaching anybody's disk.
-    let written = config::resolve(&path, config::parse(&path, &rewritten)?, env)?;
+    let written = config::resolve(&path, config::parse(&path, &rewritten, words)?, env, words)?;
 
     nominating(
         &written,
         config::MODEL_SETTING,
         edit.default_model.as_deref(),
+        words,
     )?;
     nominating(
         &written,
         config::VISION_SETTING,
         edit.default_vision_model.as_deref(),
+        words,
     )?;
 
-    config::write(&path, &rewritten)?;
+    config::write(&path, &rewritten, words)?;
 
-    read(config_dir, env)
+    read(config_dir, env, words)
 }
 
 /// Where a request would reach the Provider a draft describes, and what it
@@ -286,13 +314,14 @@ pub(crate) fn endpoint(
     config_dir: &Path,
     env: &Environment,
     draft: &ProviderEdit,
+    words: &Words,
 ) -> Result<Endpoint, RunError> {
     let configuration = |error: ConfigError| RunError::Configuration {
         message: error.to_string(),
     };
 
-    let (path, text) = config::read(config_dir).map_err(configuration)?;
-    let held = config::parse(&path, &text).map_err(configuration)?;
+    let (path, text) = config::read(config_dir, words).map_err(configuration)?;
+    let held = config::parse(&path, &text, words).map_err(configuration)?;
 
     // "Leave the key alone" means the key the file holds under the name this
     // Provider had, which is the one thing about a draft that is not in it.
@@ -305,12 +334,12 @@ pub(crate) fn endpoint(
         _ => None,
     };
 
-    let entry = entry(draft, stored).map_err(configuration)?;
+    let entry = entry(draft, stored, words).map_err(configuration)?;
 
     model::endpoint_for(
         &draft.name,
-        &config::base_url(&entry, &path).map_err(configuration)?,
-        &config::resolve_key(&entry, env, &path),
+        &config::base_url(&entry, &path, words).map_err(configuration)?,
+        &config::resolve_key(&entry, env, &path, words),
     )
 }
 
@@ -322,7 +351,12 @@ pub(crate) fn endpoint(
 /// screen as it was written. It is also how renaming a Provider would silently
 /// break the Default Model that named it: the key follows a rename, and the
 /// nomination cannot, so this is where the user is asked to pick again.
-fn nominating(config: &Config, setting: &str, name: Option<&str>) -> Result<(), ConfigError> {
+fn nominating(
+    config: &Config,
+    setting: &str,
+    name: Option<&str>,
+    words: &Words,
+) -> Result<(), ConfigError> {
     // Blank is nothing, for the reason `stating` writes a blank field as an
     // absent one: the window sends "None" as an empty string, and the two have
     // to agree — otherwise the file that is about to be written, which states
@@ -343,11 +377,18 @@ fn nominating(config: &Config, setting: &str, name: Option<&str>) -> Result<(), 
         .collect();
 
     Err(ConfigError::Malformed(match offered.is_empty() {
-        true => format!("{setting} names the Model \"{name}\", and no Model is configured at all."),
-        false => format!(
-            "{setting} names the Model \"{name}\", and no Provider offers one by that name. \
-             The Models configured are: {}.",
-            offered.join(", ")
+        true => say!(
+            words,
+            "model-nomination-none-configured",
+            "setting" = setting.to_owned(),
+            "model" = name.to_owned()
+        ),
+        false => say!(
+            words,
+            "model-nomination-unknown",
+            "setting" = setting.to_owned(),
+            "model" = name.to_owned(),
+            "models" = offered.join(", ")
         ),
     }))
 }
@@ -356,11 +397,15 @@ fn nominating(config: &Config, setting: &str, name: Option<&str>) -> Result<(), 
 /// file's own rules decide — the base URL, and which of the three sources the
 /// key comes from — is decided in one place for a draft and a saved Provider
 /// alike.
-fn entry(draft: &ProviderEdit, stored: Option<String>) -> Result<ProviderEntry, ConfigError> {
+fn entry(
+    draft: &ProviderEdit,
+    stored: Option<String>,
+    words: &Words,
+) -> Result<ProviderEntry, ConfigError> {
     Ok(ProviderEntry {
         name: draft.name.clone(),
         base_url: draft.base_url.clone(),
-        preset: preset(draft)?,
+        preset: preset(draft, words)?,
         api_key: match &draft.api_key {
             KeyEdit::Keep => stored,
             KeyEdit::Set { key } => Some(key.clone()),
@@ -386,7 +431,7 @@ fn entry(draft: &ProviderEdit, stored: Option<String>) -> Result<ProviderEntry, 
 /// The preset a draft names. An error where nothing is called that: the window
 /// offers the list, so a name off it is a version of Demysto that no longer has
 /// one — and inventing a base URL for it would be worse than saying so.
-fn preset(draft: &ProviderEdit) -> Result<Option<config::Preset>, ConfigError> {
+fn preset(draft: &ProviderEdit, words: &Words) -> Result<Option<config::Preset>, ConfigError> {
     let Some(name) = draft
         .preset
         .as_deref()
@@ -396,15 +441,19 @@ fn preset(draft: &ProviderEdit) -> Result<Option<config::Preset>, ConfigError> {
         return Ok(None);
     };
 
-    config::Preset::named(name)
-        .map(Some)
-        .ok_or_else(|| ConfigError::Malformed(format!("There is no preset called \"{name}\".")))
+    config::Preset::named(name).map(Some).ok_or_else(|| {
+        ConfigError::Malformed(say!(
+            words,
+            "config-no-such-preset",
+            "preset" = name.to_owned()
+        ))
+    })
 }
 
 /// The file with the window's edits written into it, and everything else about
 /// it left where it was.
-fn rewritten(text: &str, edit: &Edit, path: &Path) -> Result<String, ConfigError> {
-    let mut document: DocumentMut = text.parse().map_err(|_| uneditable(path))?;
+fn rewritten(text: &str, edit: &Edit, path: &Path, words: &Words) -> Result<String, ConfigError> {
+    let mut document: DocumentMut = text.parse().map_err(|_| uneditable(path, words))?;
 
     // Stated outright rather than left to the default a file written by hand
     // gets, so that a file this build wrote says which build wrote it.
@@ -423,6 +472,17 @@ fn rewritten(text: &str, edit: &Edit, path: &Path) -> Result<String, ConfigError
         edit.palette_hotkey.as_deref(),
     );
     counting(root, config::LARGE_SELECTION_SETTING, edit.large_selection);
+    // Only a language Demysto speaks is written. The window offers a list, so
+    // anything else is a field it had no business sending, and writing it would
+    // put a setting in the file that nothing acts on.
+    stating(
+        root,
+        config::LANGUAGE_SETTING,
+        edit.language
+            .as_deref()
+            .and_then(Interface::matching)
+            .map(Interface::tag),
+    );
 
     let held = root
         .get("providers")
@@ -456,7 +516,7 @@ fn rewritten(text: &str, edit: &Edit, path: &Path) -> Result<String, ConfigError
         stating(
             &mut table,
             "preset",
-            preset(draft)?.map(|preset| preset.spec().name),
+            preset(draft, words)?.map(|preset| preset.spec().name),
         );
         stating(&mut table, "api_key_env", draft.api_key_env.as_deref());
 
@@ -549,9 +609,10 @@ fn standing(key: &Key) -> KeyStanding {
 /// it is. Neither the reason nor the line is given: the two parsers disagreeing
 /// is Demysto's problem rather than the user's, and the file's own text is
 /// never quoted into a window that also renders what a Model said.
-fn uneditable(path: &Path) -> ConfigError {
-    ConfigError::Malformed(format!(
-        "{} could not be edited without losing what is written in it, so nothing was saved.",
-        path.display()
+fn uneditable(path: &Path, words: &Words) -> ConfigError {
+    ConfigError::Malformed(say!(
+        words,
+        "config-uneditable",
+        "path" = path.display().to_string()
     ))
 }

@@ -8,7 +8,7 @@
 
 use std::sync::Mutex;
 
-use demysto_core::{DefinedAction, Demysto};
+use demysto_core::{say, DefinedAction, Demysto, Words};
 use tauri::plugin::TauriPlugin;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcut, GlobalShortcutExt, Shortcut, ShortcutState};
@@ -159,6 +159,8 @@ pub fn claim<R: Runtime>(
     let _claiming = CLAIMING.lock().unwrap_or_else(|held| held.into_inner());
 
     let hotkeys = app.global_shortcut();
+    let demysto = app.state::<Demysto>();
+    let words = demysto.words();
     let mut claimed = Vec::new();
     let mut unclaimed = Vec::new();
 
@@ -173,14 +175,14 @@ pub fn claim<R: Runtime>(
     // The Palette's first, so that an Action stating it finds it taken rather
     // than taking it: the Hotkey the whole tool opens with is not something a
     // stray Action file gets to quietly take.
-    unclaimed.append(&mut palettes(app, hotkeys, &mut claimed, palette));
+    unclaimed.append(&mut palettes(app, hotkeys, &mut claimed, palette, &words));
 
     for action in actions {
         let Some(stated) = action.hotkey.as_deref() else {
             continue;
         };
 
-        if let Err(said) = claiming(app, hotkeys, &mut claimed, action, stated) {
+        if let Err(said) = claiming(app, hotkeys, &mut claimed, action, stated, &words) {
             unclaimed.push(said);
         }
     }
@@ -203,6 +205,7 @@ fn palettes<R: Runtime>(
     hotkeys: &GlobalShortcut<R>,
     claimed: &mut Vec<Claim>,
     stated: Option<&str>,
+    words: &Words,
 ) -> Vec<String> {
     let mut said = Vec::new();
 
@@ -214,26 +217,32 @@ fn palettes<R: Runtime>(
         claimed.push(Claim {
             hotkey,
             bound: Bound::Palette,
-            holder: "the Palette".to_owned(),
+            holder: words.text("hotkey-palette-holder"),
         })
     };
 
     if let Some(stated) = stated {
-        match wanted(app, hotkeys, stated) {
+        match wanted(app, hotkeys, stated, words) {
             Ok(hotkey) => {
                 claim(claimed, hotkey);
                 return said;
             }
-            Err(why) => said.push(format!("{why} Demysto is using {PALETTE} instead.")),
+            Err(why) => said.push(say!(
+                words,
+                "hotkey-palette-fell-back",
+                "why" = why,
+                "hotkey" = PALETTE
+            )),
         }
     }
 
     match hotkeys.register(built_in_palette()) {
         Ok(()) => claim(claimed, built_in_palette()),
-        Err(error) => said.push(format!(
-            "Demysto could not claim {PALETTE}, the Hotkey that opens the Palette: {error}. \
-             Another application may already have it. The tray menu reaches everything the \
-             Hotkey does."
+        Err(error) => said.push(say!(
+            words,
+            "hotkey-palette-unclaimable",
+            "hotkey" = PALETTE,
+            "detail" = error.to_string()
         )),
     }
 
@@ -245,26 +254,30 @@ fn wanted<R: Runtime>(
     app: &AppHandle<R>,
     hotkeys: &GlobalShortcut<R>,
     stated: &str,
+    words: &Words,
 ) -> Result<Shortcut, String> {
     let Ok(hotkey) = stated.parse::<Shortcut>() else {
-        return Err(format!(
-            "The settings state the Hotkey \"{stated}\" for the Palette, which is not a \
-             combination Demysto understands."
+        return Err(say!(
+            words,
+            "hotkey-palette-not-a-combination",
+            "hotkey" = stated.to_owned()
         ));
     };
 
     if !claimable_alone(app, &hotkey) {
-        return Err(format!(
-            "The settings state the Hotkey \"{stated}\" for the Palette, which is one key that \
-             types something. A Hotkey is claimed everywhere, so a key on its own has to be one \
-             that reaches nothing you were typing into."
+        return Err(say!(
+            words,
+            "hotkey-palette-types-something",
+            "hotkey" = stated.to_owned()
         ));
     }
 
     hotkeys.register(hotkey).map(|()| hotkey).map_err(|error| {
-        format!(
-            "The settings state the Hotkey \"{stated}\" for the Palette, and Demysto could not \
-             claim it: {error}. Another application may already have it."
+        say!(
+            words,
+            "hotkey-palette-refused",
+            "hotkey" = stated.to_owned(),
+            "detail" = error.to_string()
         )
     })
 }
@@ -276,23 +289,25 @@ fn claiming<R: Runtime>(
     claimed: &mut Vec<Claim>,
     action: &DefinedAction,
     stated: &str,
+    words: &Words,
 ) -> Result<(), String> {
     let name = &action.name;
 
     let Ok(hotkey) = stated.parse::<Shortcut>() else {
-        return Err(format!(
-            "{name} states the Hotkey \"{stated}\", which is not a combination Demysto \
-             understands. A Hotkey is its modifiers and then one key, written like \
-             \"Ctrl+Shift+E\"."
+        return Err(say!(
+            words,
+            "hotkey-action-not-a-combination",
+            "action" = name.clone(),
+            "hotkey" = stated.to_owned()
         ));
     };
 
     if !claimable_alone(app, &hotkey) {
-        return Err(format!(
-            "{name} states the Hotkey \"{stated}\", which is one key that types something. A \
-             Hotkey is claimed everywhere, so a key on its own has to be one that reaches \
-             nothing you were typing into — Pause, ScrollLock, PrintScreen, F13 and above, or \
-             a volume or media key. Anything else needs a modifier."
+        return Err(say!(
+            words,
+            "hotkey-action-types-something",
+            "action" = name.clone(),
+            "hotkey" = stated.to_owned()
         ));
     }
 
@@ -301,17 +316,22 @@ fn claiming<R: Runtime>(
     // it — and what already has it is the only part of this worth telling
     // somebody.
     if let Some(held) = claimed.iter().find(|claim| claim.hotkey == hotkey) {
-        return Err(format!(
-            "{name} states the Hotkey \"{stated}\", and {} already has it. Only {} answers \
-             to it; give {name} another.",
-            held.holder, held.holder
+        return Err(say!(
+            words,
+            "hotkey-action-already-held",
+            "action" = name.clone(),
+            "hotkey" = stated.to_owned(),
+            "holder" = held.holder.clone()
         ));
     }
 
     if let Err(error) = hotkeys.register(hotkey) {
-        return Err(format!(
-            "{name} states the Hotkey \"{stated}\", and Demysto could not claim it: {error}. \
-             Another application may already have it."
+        return Err(say!(
+            words,
+            "hotkey-action-refused",
+            "action" = name.clone(),
+            "hotkey" = stated.to_owned(),
+            "detail" = error.to_string()
         ));
     }
 
@@ -340,29 +360,44 @@ fn through_the_portal<R: Runtime>(
 ) -> Vec<String> {
     use crate::portal::Wanted;
 
+    let demysto = app.state::<Demysto>();
+    let words = demysto.words();
+
     let mut wanted = vec![Wanted {
         id: crate::portal::OPENS_THE_PALETTE.to_owned(),
-        description: "Demysto — open the Palette".to_owned(),
+        description: words.text("portal-palette-description"),
         trigger: crate::portal::trigger(palette.unwrap_or(PALETTE)),
     }];
 
     wanted.extend(actions.iter().filter_map(|action| {
         Some(Wanted {
             id: crate::portal::for_action(&action.id),
-            description: format!("Demysto — {}", action.name),
+            description: say!(
+                &words,
+                "portal-action-description",
+                "action" = action.name.clone()
+            ),
             trigger: crate::portal::trigger(action.hotkey.as_deref()?),
         })
     }));
+
+    // Off the guard already held rather than asked of the facade again: a
+    // second `read` on the same lock, taken while the first is still held,
+    // deadlocks against a `write` that queued between them — and saving the
+    // settings is exactly that write.
+    let interface = words.interface();
 
     let answering = app.clone();
     let noting = app.clone();
 
     crate::portal::claim(
-        // Идентификатор берётся из конфигурации приложения, а не пишется здесь:
-        // портал ищет по нему установленный desktop-файл, чтобы показать
-        // пользователю имя и значок, и разойтись эти два имени не должны.
+        // The identifier comes from the application's own configuration rather
+        // than being written out here: the portal finds the installed desktop
+        // entry by it, to show the user a name and an icon, and those two names
+        // must not drift apart.
         app.config().identifier.clone(),
         wanted,
+        interface,
         move |pressed| {
             // The same two paths the handler above takes, off the thread that
             // draws every window for the same reason — except that this one

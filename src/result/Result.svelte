@@ -23,7 +23,8 @@
     type Summary,
     type Turn,
   } from "../lib/ipc";
-  import { copyable, COPIED, render } from "../lib/markdown";
+  import { t } from "../lib/i18n.svelte";
+  import { copyable, render } from "../lib/markdown";
   import { sending } from "../lib/sending";
 
   /** How near the bottom counts as reading along with the answer. */
@@ -358,7 +359,9 @@
     await copy(block.code);
 
     const label = block.button.textContent;
-    acknowledge((landed) => (block.button.textContent = landed ? COPIED : label));
+    acknowledge((landed) => {
+      block.button.textContent = landed ? t("code-copied") : label;
+    });
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -393,7 +396,7 @@
 >
   <header class="relative flex items-baseline justify-between gap-3">
     <h1 class="text-sm font-semibold tracking-tight">
-      {showing?.action?.name ?? "Demysto"}
+      {showing?.action?.name ?? t("app-name")}
     </h1>
 
     <button
@@ -402,7 +405,7 @@
              hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
       onclick={toggle}
     >
-      Conversations
+      {t("result-conversations")}
     </button>
 
     {#if listing}
@@ -420,14 +423,14 @@
               class:font-semibold={held.id === showing?.id}
               onclick={() => goBackTo(held.id)}
             >
-              <span>{held.name ?? "Conversation"}</span>
+              <span>{held.name ?? t("result-conversation-unnamed")}</span>
               {#if held.about !== ""}
                 <span class="w-full truncate opacity-50">{held.about}</span>
               {/if}
             </button>
           </li>
         {:else}
-          <li class="px-3 py-1.5 opacity-50">Nothing asked yet.</li>
+          <li class="px-3 py-1.5 opacity-50">{t("result-nothing-asked-yet")}</li>
         {/each}
       </ul>
     {/if}
@@ -457,7 +460,7 @@
            named region — true of both origins, and nothing added to the window
            (ticket 18). -->
       <section
-        aria-label="The text this Conversation is about"
+        aria-label={t("result-quotation-label")}
         class="flex flex-col items-start gap-1.5"
       >
         <blockquote
@@ -475,7 +478,7 @@
             class="{FOOTER} opacity-40"
             onclick={() => (expanded ? (expanded = false) : expand())}
           >
-            {expanded ? "Show less" : "Show more"}
+            {expanded ? t("result-show-less") : t("result-show-more")}
           </button>
         {/if}
       </section>
@@ -509,7 +512,7 @@
         {/if}
 
         {#if text === null && problem === null}
-          <p class="text-sm opacity-50">Asking the Model…</p>
+          <p class="text-sm opacity-50">{t("result-asking")}</p>
         {:else}
           {#if text !== null && text !== ""}
             <div class="answer select-text">
@@ -534,7 +537,7 @@
                   class="{FOOTER} opacity-40"
                   onclick={() => copyAnswer(at, text)}
                 >
-                  {copied === at ? COPIED : "Copy answer"}
+                  {copied === at ? t("result-copied") : t("result-copy-answer")}
                 </button>
               {/if}
 
@@ -551,7 +554,7 @@
                      whose last Turn was stopped can say the word again — true
                      of what is then on screen, which is why it is a price
                      worth paying rather than a bug. -->
-                <span role="status" class="opacity-40">Stopped</span>
+                <span role="status" class="opacity-40">{t("result-stopped")}</span>
               {/if}
 
               <!-- Offered on the last Turn alone: what is asked again is the
@@ -560,7 +563,7 @@
               {#if last && problem}
                 {#if turn.outcome.status === "interrupted"}
                   <button type="button" class={FOOTER} onclick={carryOn}>
-                    Continue
+                    {t("result-continue")}
                   </button>
                 {/if}
 
@@ -570,7 +573,7 @@
                      would report it as an ordinary failure with a third. -->
                 {#if problem.kind !== "permission"}
                   <button type="button" class={FOOTER} onclick={() => askAgain()}>
-                    Try again
+                    {t("result-try-again")}
                   </button>
 
                   <select
@@ -582,7 +585,7 @@
                       if (picked !== "") askAgain(picked);
                     }}
                   >
-                    <option value="">Ask another Model…</option>
+                    <option value="">{t("result-ask-another-model")}</option>
                     {#each switchable as model (model)}
                       <option value={model}>{model}</option>
                     {/each}
@@ -595,7 +598,7 @@
                        Conversation is where the permission has to be said, and
                        where the way to it has to be offered. -->
                   <button type="button" class={FOOTER} onclick={grant}>
-                    Open Accessibility settings
+                    {t("result-open-accessibility")}
                   </button>
                 {/if}
 
@@ -607,7 +610,9 @@
                     class={FOOTER}
                     onclick={() => fix(problem.provider)}
                   >
-                    Open {problem.provider}'s settings
+                    {t("result-open-provider-settings", {
+                      provider: problem.provider,
+                    })}
                   </button>
                 {/if}
               {/if}
@@ -631,7 +636,7 @@
         bind:value={question}
         onkeydown={onComposerKeydown}
         rows="1"
-        placeholder="Ask a follow-up…"
+        placeholder={t("result-follow-up")}
         class="max-h-32 min-h-8 w-full flex-1 resize-none rounded border border-neutral-300
                bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-500
                dark:border-neutral-700 dark:focus:border-neutral-500"
@@ -644,7 +649,7 @@
                  hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
           onclick={stop}
         >
-          Stop
+          {t("result-stop")}
         </button>
       {:else}
         <button
@@ -656,13 +661,11 @@
           disabled={question.trim() === ""}
           onclick={ask}
         >
-          Ask
+          {t("result-ask")}
         </button>
       {/if}
     </div>
 
-    <p class="text-xs opacity-40">
-      Enter to ask, Shift+Enter for a new line, Esc to close
-    </p>
+    <p class="text-xs opacity-40">{t("result-keys")}</p>
   </footer>
 </main>
