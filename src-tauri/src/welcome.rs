@@ -7,56 +7,63 @@
 //! permission. What each step says is the window's; what this module owns is
 //! when it appears and when it is over (user story 57).
 
-use demysto_core::Demysto;
-use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+use std::time::Duration;
 
-/// The window label. Not declared in `tauri.conf.json` with the other three —
-/// see [`reveal`].
+use demysto_core::Demysto;
+use tauri::{AppHandle, Manager, Runtime};
+
+/// The window label, fixed in `tauri.conf.json`.
 pub const LABEL: &str = "welcome";
 
-/// Brings the flow up, which is what a fresh installation starts with.
+/// Brings the flow up, a moment after the application has started.
 ///
-/// Built here rather than declared in `tauri.conf.json` and hidden, which is
-/// how the Palette, the Conversation and Settings are done. Two reasons, and
-/// the second is the one that decided it:
+/// The moment is the point, and it is the whole of why this is not two lines.
+/// On a Linux desktop with no graphics acceleration — a virtual machine whose
+/// Mesa answers `Accelerated: no`, which is where this was watched — a window
+/// shown in the first instants of the process comes up as a correct, complete,
+/// white rectangle: the page is loaded, the accessibility tree reads every line
+/// of it back, the elements report their places on screen, and not one pixel is
+/// drawn. A resize does not bring it back. Shown a beat later, it draws.
 ///
-/// This window exists once in the life of an installation, so a window loaded
-/// at every launch for it is a page parsed every time to be thrown away.
+/// The three windows Demysto has always had never met this, and that is the
+/// same fact rather than luck: nothing shows any of them until somebody asks
+/// for one, which is never in the first instants. This window is the exception
+/// because it is the one Demysto opens by itself.
 ///
-/// And a window declared hidden and shown at startup does not paint on
-/// WebKitGTK. It comes up as a correct, complete, white rectangle — the page is
-/// there, the accessibility tree reads it back in full, and nothing at all is
-/// on screen; a resize does not bring it back. macOS and Windows draw it
-/// either way. Built visible, it draws on all three.
+/// A second, against a threshold measured under a fifth of one on that desktop.
+/// It is paid once in the life of an installation, by somebody who has just
+/// launched an application and is watching it start.
+///
+/// The alternative was `WEBKIT_DISABLE_DMABUF_RENDERER`, which fixes it
+/// outright — and which every machine with a working graphics card would then
+/// pay for, in a slower path it never needed. Tauri's own guidance is not to
+/// ship such an override for a fault the application can avoid.
 pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
+    let waiting = app.clone();
+
+    std::thread::spawn(move || {
+        std::thread::sleep(SETTLE);
+
+        let showing = waiting.clone();
+        let _ = waiting.run_on_main_thread(move || on_screen(&showing));
+    });
+}
+
+/// How long WebKit is given before the flow is put on screen.
+const SETTLE: Duration = Duration::from_secs(1);
+
+fn on_screen<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = app.get_webview_window(LABEL) else {
+        return;
+    };
+
     // Before it is on screen, for the reason a Conversation is: an accessory
     // application's windows are in no switcher, and this is the first window
     // Demysto ever puts in front of anybody.
     crate::dock::follows_the_windows(app, crate::dock::Change::Showing(LABEL));
 
-    if let Some(window) = app.get_webview_window(LABEL) {
-        let _ = window.show();
-        let _ = window.set_focus();
-        return;
-    }
-
-    let built = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("welcome.html".into()))
-        .title("Demysto")
-        .inner_size(620.0, 560.0)
-        .min_inner_size(460.0, 420.0)
-        .center()
-        // The first window Demysto ever shows anybody, and the one they are
-        // about to type a key into: it comes up in front, not behind whatever
-        // they were doing.
-        .focused(true)
-        .build();
-
-    // A flow that could not be built is a flow nobody sees, and there is
-    // nothing on screen to say so on: the tray is there, Settings configures
-    // everything the flow would have, and the log is where this belongs.
-    if let Err(error) = built {
-        app.state::<Demysto>().note(&error.to_string());
-    }
+    let _ = window.show();
+    let _ = window.set_focus();
 }
 
 /// Records the flow as over when the window that has gone away is its own.

@@ -186,6 +186,7 @@ pub fn run() {
         // invites a press of.
         RunEvent::Ready => {
             if !app.state::<Demysto>().welcomed() {
+                // ВРЕМЕННО, ДЛЯ ОПЫТА: показать через три секунды.
                 welcome::reveal(app);
             }
         }
