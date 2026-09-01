@@ -8,8 +8,8 @@ mod commands;
 mod dock;
 mod folder;
 mod hotkey;
-/// Строка меню: она есть только на macOS и только ради клавишных
-/// эквивалентов — см. модуль.
+/// The menu bar, which exists on macOS alone and only for the key equivalents —
+/// the module says why.
 #[cfg(target_os = "macos")]
 mod menu;
 mod notify;
@@ -72,8 +72,9 @@ pub fn run() {
 
             tray::build(app)?;
 
-            // После трея и до всего остального: без пункта меню с `Cmd+C`
-            // выделение в окне Conversation некуда забрать (user story 15).
+            // After the tray and before everything else: with no menu item
+            // carrying `Cmd+C` there is nowhere to take a selection in the
+            // Conversation window (user story 15).
             #[cfg(target_os = "macos")]
             menu::build(app.handle())?;
 

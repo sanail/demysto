@@ -68,8 +68,9 @@ pub(crate) fn answer(
 ) -> Result<(), RunError> {
     let provider = &resolved.endpoint;
 
-    // Отсчёт с начала запроса: он и есть признак того, что чтение оборвал
-    // собственный таймаут, а не Provider. См. `broke_off`.
+    // Timed from the start of the request, because the elapsed time is what
+    // says a read was cut short by Demysto's own timeout rather than by the
+    // Provider. See `broke_off`.
     let started = Instant::now();
 
     let mut response = asking(provider, &resolved.model, said, timeout, words)?
@@ -388,16 +389,17 @@ fn broke_off(
     error: &std::io::Error,
     words: &Words,
 ) -> RunError {
-    // Истёкший срок — самый надёжный признак, и стоит он первым.
+    // The clock is the most reliable of the three answers, so it is asked
+    // first.
     //
-    // Формы, в которых таймаут доезжает сюда, зависят от того, где именно он
-    // застал чтение: иногда это `ErrorKind::TimedOut`, иногда `reqwest::Error`
-    // в цепочке причин, а иногда — внутренний маркер reqwest, у которого нет
-    // публичного типа и который снаружи опознаётся только по тексту. Три
-    // разных ответа на один и тот же вопрос, и выбор между ними зависел от
-    // загрузки машины: под нагрузкой тот же самый таймаут приезжал третьей
-    // формой и объявлялся оборванным соединением. Часы такой неоднозначности
-    // не знают.
+    // Which shape a timeout arrives in depends on where in the read it caught:
+    // sometimes `ErrorKind::TimedOut`, sometimes a `reqwest::Error` down the
+    // chain of causes, and sometimes an internal marker of reqwest's that has
+    // no public type and can be recognised from outside only by its text. Three
+    // answers to one question, and which of them turned up depended on how busy
+    // the machine was: under load the same timeout arrived in the third shape
+    // and was reported as a connection that broke. A clock knows no such
+    // ambiguity.
     let timed_out = waited >= timeout
         || matches!(
             error.kind(),
