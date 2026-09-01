@@ -209,7 +209,7 @@ settings-reset-by-saving = Saving this with nothing changed puts the built-in ba
 # Hotkey (ticket 15).
 
 welcome-title = Welcome to Demysto
-welcome-step = Step { $at } of { $of }
+welcome-step = Step { $at } of { $total }
 welcome-back = Back
 welcome-continue = Continue
 welcome-finish = Start using Demysto
@@ -226,10 +226,14 @@ welcome-accessibility-later = Demysto asks macOS about this at every Run, so gra
 welcome-autostart-title = Start Demysto when you log in
 welcome-autostart-detail = Demysto waits in the tray for the Hotkey, so it can only answer while it is running. Nothing is registered unless you ask for it here, and your system's own settings take it out again.
 welcome-autostart-choice = Start Demysto at login
-autostart-refused = Demysto could not change whether it starts at login: { $detail }
 welcome-done-title = That is everything
 welcome-done-detail = Select some text anywhere and press { $hotkey }. The Palette opens at your cursor listing what Demysto can do with it, and Enter runs the one that is highlighted.
+welcome-done-clipboard = Copy some text with Ctrl+C, then press { $hotkey }. The Palette opens at your cursor listing what Demysto can do with it, and Enter runs the one that is highlighted.
 welcome-done-tray = Demysto waits in the tray from now on, and its menu reaches the Palette, the Actions and Settings — the Hotkey is the quick way, not the only one.
+
+## What the login items would not do
+
+autostart-refused = Demysto could not change whether it starts at login: { $detail }
 
 ## What a Capture could not do
 #

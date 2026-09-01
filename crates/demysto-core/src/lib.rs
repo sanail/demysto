@@ -3828,6 +3828,21 @@ mod tests {
     }
 
     #[test]
+    fn an_installation_that_is_already_configured_is_not_walked_through_setup() {
+        // Every settings file written before `welcomed` existed says nothing
+        // about it, and the update that brings the flow must not meet somebody
+        // who has been using Demysto for months with a wizard.
+        let mut server = Server::new();
+        let (_accepted, at) = accepting(&mut server);
+        let demysto = rooted(
+            fake::over(&Arc::new(FakeDesktop::default())),
+            Some(&one_provider(&at)),
+        );
+
+        assert!(demysto.welcomed());
+    }
+
+    #[test]
     fn a_settings_file_nobody_can_read_is_no_invitation_to_write_over_it() {
         let demysto = unconfigured("a paragraph");
         std::fs::write(

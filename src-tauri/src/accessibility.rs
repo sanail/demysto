@@ -20,7 +20,7 @@ const PANE: &str = "x-apple.systempreferences:com.apple.preference.security?Priv
 /// first-run flow shows a step about the permission on macOS and nowhere else:
 /// a step walking a Windows user to a pane their desktop has never heard of is
 /// a step that teaches them the tool does not know where it is running.
-pub fn asked_for() -> bool {
+pub fn gates_the_capture() -> bool {
     cfg!(target_os = "macos")
 }
 

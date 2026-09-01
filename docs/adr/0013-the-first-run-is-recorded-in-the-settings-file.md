@@ -1,28 +1,35 @@
----
-status: accepted
----
+# ADR-0013: The first run is recorded in the settings file, and is over when its window closes
 
-# The first run is recorded in the settings file, and by the window closing
+Status: accepted
+
+## Context
 
 The flow a fresh installation is met by has to know two things: whether to
-appear at all, and when it is over. Three answers were available for the first.
+appear at all, and when it is over.
 
-**Whether the settings file exists** is no answer at all: `config::read` creates
-it from the template on the first read, so by the time anything could ask, it is
-there. **Whether anything is configured** is an answer, and the wrong one — it
-would bring the flow back at every launch until a Provider was saved, which is
-the tool nagging somebody who has already said no once, and it would skip the
-flow for anybody restoring a `settings.toml` from another machine only because
-they happened to bring their key with them.
+**Whether the settings file exists** is no answer to the first: `config::read`
+creates it from the template on the first read, so by the time anything could
+ask, it is there. **Whether anything is configured** is not an answer on its own
+either — it would bring the flow back at every launch until a Provider was
+saved, which is the tool nagging somebody who has already said no once.
 
-So it is recorded: `welcomed = true`, written into the settings file through
+## Decision
+
+It is recorded: `welcomed = true`, written into the settings file through
 `toml_edit` like every other save, so that the preamble and the user's own
 comments survive it (ADR-0007). It is the one line in that file Demysto writes
 for its own sake rather than the user's, and the preamble says so — including
 that taking the line out walks them through the flow again, which is the only
 way back to it and cheaper than a button in Settings nobody would look for.
 
-A file that cannot be read or parsed answers *yes*, though nothing has been
+A file that already configures a Provider answers *yes* as well, without the
+record. Every settings file written before this field existed says nothing about
+it, and the update that introduces the flow must not meet somebody who has been
+using Demysto for months with a wizard. It is also what keeps a flow that could
+not succeed from being offered: a Provider the flow configured under a name that
+file already holds is a save the file refuses, and refuses at every attempt.
+
+A file that cannot be read or parsed answers *yes* too, though nothing has been
 through anything. The flow's whole business is writing a Provider into that
 file, and Demysto will not write over one it could not read; Settings is where
 such a file is reported and repaired.

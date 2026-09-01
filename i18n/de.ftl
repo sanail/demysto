@@ -208,7 +208,7 @@ settings-reset-by-saving = Sie ohne Änderung zu speichern stellt die eingebaute
 # Hotkey (ticket 15).
 
 welcome-title = Willkommen bei Demysto
-welcome-step = Schritt { $at } von { $of }
+welcome-step = Schritt { $at } von { $total }
 welcome-back = Zurück
 welcome-continue = Weiter
 welcome-finish = Demysto benutzen
@@ -225,10 +225,14 @@ welcome-accessibility-later = Demysto fragt macOS bei jedem Lauf danach; die Ber
 welcome-autostart-title = Demysto beim Anmelden starten
 welcome-autostart-detail = Demysto wartet im Tray auf das Tastenkürzel und kann nur antworten, solange es läuft. Ohne Ihre Zustimmung hier wird nichts eingetragen, und die Einstellungen Ihres Systems nehmen den Eintrag jederzeit wieder heraus.
 welcome-autostart-choice = Beim Anmelden starten
-autostart-refused = Demysto konnte den Start beim Anmelden nicht ändern: { $detail }
 welcome-done-title = Das war alles
 welcome-done-detail = Markieren Sie irgendwo Text und drücken Sie { $hotkey }. Die Palette öffnet sich an Ihrem Mauszeiger und zeigt, was Demysto damit tun kann; Enter führt die hervorgehobene Aktion aus.
+welcome-done-clipboard = Kopieren Sie Text mit Ctrl+C und drücken Sie dann { $hotkey }. Die Palette öffnet sich an Ihrem Mauszeiger und zeigt, was Demysto damit tun kann; Enter führt die hervorgehobene Aktion aus.
 welcome-done-tray = Demysto wartet von nun an im Tray, und sein Menü führt zur Palette, zu den Aktionen und zu den Einstellungen — das Tastenkürzel ist der schnelle Weg, nicht der einzige.
+
+## What the login items would not do
+
+autostart-refused = Demysto konnte den Start beim Anmelden nicht ändern: { $detail }
 
 ## What a Capture could not do
 #

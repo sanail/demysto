@@ -42,11 +42,18 @@
   ];
 
   /**
-   * The steps this desktop has. Only macOS gates a Capture behind a permission,
-   * and a step walking a Windows user to a pane their system has never heard of
-   * would teach them the tool does not know where it is running.
+   * Whether this desktop gates a Capture behind a permission, which is the one
+   * step not every platform has. `null` until the backend has answered, and the
+   * step is left out until it says yes: only macOS has such a pane, and walking
+   * a Windows user to one their system has never heard of would teach them the
+   * tool does not know where it is running.
    */
-  let steps = $state<Step[]>(ORDER.filter((step) => step !== "accessibility"));
+  let asksForAccessibility = $state(false);
+
+  /** The steps this desktop has, in the order the spec fixes them. */
+  const steps = $derived(
+    ORDER.filter((step) => step !== "accessibility" || asksForAccessibility),
+  );
   let at = $state(0);
   const step = $derived(steps[at]);
 
@@ -176,7 +183,7 @@
     languageFixed = reported.language_env;
     clipboardOnly = cannotRead(reported.capturing);
 
-    if (await accessibilityAskedFor()) steps = [...ORDER];
+    asksForAccessibility = await accessibilityAskedFor();
 
     try {
       show(await configured());
@@ -354,8 +361,21 @@
     accessibilityProblem = await sending(openAccessibility);
   }
 
-  /** Whether the step on screen has been answered well enough to leave. */
-  const settled = $derived(step !== "provider" || verified);
+  /**
+   * Whether the step on screen has been answered well enough to leave.
+   *
+   * The Provider step wants all three: a name to configure it under, a Model to
+   * nominate, and the Provider's own word that the key works. The verification
+   * alone is not enough, and not for a hypothetical reason — it puts its request
+   * to an endpoint rather than to a configured Provider, so it answers just as
+   * happily for a draft with no name at all. That draft is not written by the
+   * save that follows, and the flow would walk on to its last step having
+   * configured nothing.
+   */
+  const settled = $derived(
+    step !== "provider" ||
+      (verified && name.trim() !== "" && model.trim() !== ""),
+  );
 
   async function forward() {
     // The language and the Provider are written as the step that collected them
@@ -398,7 +418,7 @@
   <header class="flex items-baseline justify-between gap-3">
     <h1 class="text-sm font-semibold tracking-tight">{t("welcome-title")}</h1>
     <span class="text-xs opacity-40">
-      {t("welcome-step", { at: at + 1, of: steps.length })}
+      {t("welcome-step", { at: at + 1, total: steps.length })}
     </span>
   </header>
 
@@ -513,7 +533,7 @@
           <button
             type="button"
             class={BUTTON}
-            disabled={asking || model.trim() === ""}
+            disabled={asking || name.trim() === "" || model.trim() === ""}
             onclick={verify}
           >
             {t("settings-verify-key")}
@@ -580,8 +600,13 @@
     {:else}
       <section class="flex flex-col gap-3">
         <h2 class="text-sm font-medium">{t("welcome-done-title")}</h2>
+        <!-- The invitation is adjusted rather than contradicted: on Wayland
+             there is nothing to be gained by telling somebody to select text
+             first and explaining underneath that it will not be read. -->
         <p class="text-sm opacity-60">
-          {t("welcome-done-detail", { hotkey })}
+          {clipboardOnly
+            ? t("welcome-done-clipboard", { hotkey })
+            : t("welcome-done-detail", { hotkey })}
         </p>
         {#if clipboardOnly}
           <p class="text-sm opacity-60">{clipboardOnly}</p>

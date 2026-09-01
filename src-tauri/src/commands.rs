@@ -175,7 +175,7 @@ pub fn open_accessibility(demysto: State<'_, Demysto>) -> Result<(), String> {
 /// first-run flow shows the step about one only where there is one.
 #[tauri::command]
 pub fn accessibility_asked_for() -> bool {
-    crate::accessibility::asked_for()
+    crate::accessibility::gates_the_capture()
 }
 
 /// Whether Demysto is in the login items now, which is what the flow's question

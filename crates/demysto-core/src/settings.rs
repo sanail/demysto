@@ -207,20 +207,30 @@ pub(crate) fn presets() -> Vec<Preset> {
         .collect()
 }
 
-/// Whether the first-run flow has already been through to its end.
+/// Whether there is anybody left to walk through the first run.
 ///
-/// A file that could not be read or parsed answers yes, though nothing has been
-/// through anything. The flow's whole business is writing a Provider into that
-/// file, and Demysto will not write over one it cannot read (ADR-0007): the
-/// window that reports such a file and asks for it to be repaired is Settings,
-/// and walking somebody into a flow whose every step would fail is worse than
-/// leaving them the tray.
+/// Two ways of already being past it. The record the flow leaves behind is one
+/// — that is the whole of ADR-0013 — and a file that already configures a
+/// Provider is the other: every settings file written before `welcomed` existed
+/// says nothing about it, and the update that brings the flow must not meet
+/// somebody who has been using Demysto for months with a wizard. It is also
+/// what keeps a flow that cannot succeed from being offered: a Provider it
+/// configured under a name the file already holds is a save the file refuses,
+/// and refuses at every attempt.
+///
+/// A file that could not be read or parsed answers yes too, though nothing has
+/// been through anything. The flow's whole business is writing a Provider into
+/// that file, and Demysto will not write over one it cannot read (ADR-0007):
+/// the window that reports such a file and asks for it to be repaired is
+/// Settings, and walking somebody into a flow whose every step would fail is
+/// worse than leaving them the tray.
 pub(crate) fn welcomed(config_dir: &Path, words: &Words) -> bool {
     let Ok((path, text)) = config::read(config_dir, words) else {
         return true;
     };
 
-    config::parse(&path, &text, words).map_or(true, |file| file.welcomed)
+    config::parse(&path, &text, words)
+        .map_or(true, |file| file.welcomed || !file.providers.is_empty())
 }
 
 /// Records that it has, so that the next start goes straight to the tray.

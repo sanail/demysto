@@ -204,7 +204,7 @@ settings-reset-by-saving = Сохранение без изменений воз
 # Hotkey (ticket 15).
 
 welcome-title = Добро пожаловать в Demysto
-welcome-step = Шаг { $at } из { $of }
+welcome-step = Шаг { $at } из { $total }
 welcome-back = Назад
 welcome-continue = Дальше
 welcome-finish = Начать работу
@@ -221,10 +221,14 @@ welcome-accessibility-later = Demysto спрашивает об этом macOS �
 welcome-autostart-title = Запускать Demysto при входе в систему
 welcome-autostart-detail = Demysto ждёт горячую клавишу в трее и отвечает только пока запущен. Без вашего согласия здесь ничего не прописывается, а настройки самой системы уберут запись обратно.
 welcome-autostart-choice = Запускать при входе
-autostart-refused = Demysto не смог изменить запуск при входе в систему: { $detail }
 welcome-done-title = Вот и всё
 welcome-done-detail = Выделите где угодно текст и нажмите { $hotkey }. Рядом с курсором откроется палитра с тем, что Demysto может с ним сделать, а Enter запустит выделенное.
+welcome-done-clipboard = Скопируйте текст через Ctrl+C и нажмите { $hotkey }. Рядом с курсором откроется палитра с тем, что Demysto может с ним сделать, а Enter запустит выделенное.
 welcome-done-tray = Дальше Demysto ждёт в трее, и из его меню доступны палитра, действия и настройки: горячая клавиша — быстрый путь, но не единственный.
+
+## What the login items would not do
+
+autostart-refused = Demysto не смог изменить запуск при входе в систему: { $detail }
 
 ## What a Capture could not do
 #

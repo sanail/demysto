@@ -13,6 +13,11 @@ use tauri::{AppHandle, Manager, Runtime};
 /// The window label, fixed in `tauri.conf.json`.
 pub const LABEL: &str = "welcome";
 
+/// How long WebKit is given before the flow is put on screen; [`reveal`] says
+/// what it is for.
+#[cfg(target_os = "linux")]
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Brings the flow up, a moment after the application has started.
 ///
 /// The moment is the point, and it is the whole of why this is not two lines.
@@ -34,9 +39,8 @@ pub const LABEL: &str = "welcome";
 ///
 /// The alternative was `WEBKIT_DISABLE_DMABUF_RENDERER`, which fixes it
 /// outright — and which every machine with a working graphics card would then
-/// pay for, in a slower path it never needed. Tauri's own guidance is not to
-/// ship such an override for a fault the application can avoid. Which is the
-/// same reason the waiting is here and not on the platforms below.
+/// pay for, in a slower path it never needed; ADR-0014 records that trade. It
+/// is the same reason the waiting is here and not on the platforms below.
 #[cfg(target_os = "linux")]
 pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
     let waiting = app.clone();
@@ -48,10 +52,6 @@ pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
         let _ = waiting.run_on_main_thread(move || on_screen(&showing));
     });
 }
-
-/// How long WebKit is given before the flow is put on screen.
-#[cfg(target_os = "linux")]
-const SETTLE: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Everywhere else the flow comes up at once.
 ///

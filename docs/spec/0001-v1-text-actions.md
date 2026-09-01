@@ -160,8 +160,8 @@ same shape and the same standing.
 
 49. As a user, I want the application to live in the tray without cluttering my
     dock or taskbar while idle, so that a resident tool stays out of the way.
-50. As a user, I want a dock or taskbar entry while a Conversation or Settings
-    window is open, so that I can switch back to a Conversation with the same
+50. As a user, I want a dock or taskbar entry while a Conversation, Settings or
+    the first-run window is open, so that I can switch back to one with the same
     keys I use for every other window.
 51. As a user, I want to reach Settings and run Actions from the tray menu, so
     that the tool is usable when I don't remember the Hotkey.
@@ -206,8 +206,10 @@ same shape and the same standing.
 
 The entire product logic lives in a Rust **core** that references no Tauri types.
 The Tauri command layer is a set of thin adapters over the core's public API, and
-the frontend holds no logic beyond rendering. This is what makes a single test
-seam possible; see *Testing Decisions*.
+the frontend holds no logic beyond rendering — with one exception, the first-run
+flow, which owns the order of its own steps and what each of them saves. What it
+saves still goes through the core's façade like every other save. This is what
+makes a single test seam possible; see *Testing Decisions*.
 
 Streaming reaches the frontend over a Tauri channel. Per ADR-0001 the frontend is
 Svelte 5 with Vite and Tailwind v4, and Markdown is rendered by `markdown-it`
@@ -278,9 +280,9 @@ Conversation and Settings windows are ordinary windows.
 
 macOS activation policy is dynamic: accessory while only the Palette is on
 screen, regular while a Conversation, Settings or the first-run window is open,
-back to accessory when the last one closes. The tray icon is always present and its menu
-reaches the Palette, the Actions, and Settings, so the mouse-only path exists
-independently of the dock.
+back to accessory when the last one closes. The tray icon is always present and
+its menu reaches the Palette, the Actions, and Settings, so the mouse-only path
+exists independently of the dock.
 
 Single instance is enforced; a second launch raises the Palette. Autostart is
 offered once during first-run setup, never enabled silently.
@@ -375,9 +377,9 @@ permission flow are interactive operating-system machinery, checked on a live
 desktop per platform rather than in the suite. So is the first-run flow's own
 order of steps, which is the one piece of sequencing that lives in a window
 rather than in the core; what it writes goes through the same façade every other
-save does, and that is where it is tested. No WebDriver end-to-end suite: `tauri-driver` has no
-macOS support, and building one for two platforms out of three does not pay for
-itself on an application with two screens.
+save does, and that is where it is tested. No WebDriver end-to-end suite:
+`tauri-driver` has no macOS support, and building one for two platforms out of
+three does not pay for itself on an application with two screens.
 
 ## Out of Scope
 
