@@ -111,13 +111,6 @@ pub fn run() {
                 palette::into_panel(&window)?;
             }
 
-            // Last, so that a first run is met by the flow over a Demysto that
-            // is already listening: the Hotkey it ends by inviting the user to
-            // press is claimed by the time the invitation is on screen.
-            if !demysto.welcomed() {
-                welcome::reveal(app.handle());
-            }
-
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -179,14 +172,28 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Demysto failed to start");
 
-    app.run(|_app, event| {
+    app.run(|app, event| match event {
+        // A fresh installation is met by the flow rather than by a tray icon it
+        // has to work out for itself (user story 57).
+        //
+        // Here rather than in `setup`, which is where every other window is
+        // prepared: on WebKitGTK a window shown before the event loop is
+        // running never paints. It comes up as a correct, complete, white
+        // rectangle — the page is there, the accessibility tree reads it back
+        // in full, and nothing at all is on screen. macOS and Windows draw it
+        // either way, so this is the one ordering the three platforms disagree
+        // about. By this event the Hotkey has been claimed, which the last step
+        // invites a press of.
+        RunEvent::Ready => {
+            if !app.state::<Demysto>().welcomed() {
+                welcome::reveal(app);
+            }
+        }
         // The last window closing is not a request to quit; an explicit exit,
         // which carries a code, is.
-        if let RunEvent::ExitRequested {
+        RunEvent::ExitRequested {
             code: None, api, ..
-        } = event
-        {
-            api.prevent_exit();
-        }
+        } => api.prevent_exit(),
+        _ => {}
     });
 }

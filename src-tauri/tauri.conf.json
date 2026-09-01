@@ -45,17 +45,6 @@
         "minHeight": 400,
         "center": true,
         "visible": false
-      },
-      {
-        "label": "welcome",
-        "url": "welcome.html",
-        "title": "Demysto",
-        "width": 620,
-        "height": 560,
-        "minWidth": 460,
-        "minHeight": 420,
-        "center": true,
-        "visible": false
       }
     ],
     "security": {
