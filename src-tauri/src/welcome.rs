@@ -45,6 +45,10 @@ pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
         .inner_size(620.0, 560.0)
         .min_inner_size(460.0, 420.0)
         .center()
+        // The first window Demysto ever shows anybody, and the one they are
+        // about to type a key into: it comes up in front, not behind whatever
+        // they were doing.
+        .focused(true)
         .build();
 
     // A flow that could not be built is a flow nobody sees, and there is
