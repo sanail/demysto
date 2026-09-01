@@ -883,6 +883,8 @@ dependencies = [
  "ashpd",
  "demysto-core",
  "futures-util",
+ "gdkx11",
+ "gtk",
  "objc2",
  "objc2-app-kit",
  "serde",
@@ -894,6 +896,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-single-instance",
  "tokio",
+ "x11",
 ]
 
 [[package]]

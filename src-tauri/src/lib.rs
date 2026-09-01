@@ -115,9 +115,11 @@ pub fn run() {
                 );
             }
             // The Palette is not a window anybody should have to manage: losing
-            // the focus is the same instruction as pressing Escape.
+            // the focus is the same instruction as pressing Escape. Which of
+            // the two kinds of losing it this was is the Palette's own
+            // question — see `palette::lost_the_keyboard`.
             WindowEvent::Focused(false) if window.label() == palette::LABEL => {
-                let _ = window.hide();
+                palette::lost_the_keyboard(window);
             }
             _ => {}
         })

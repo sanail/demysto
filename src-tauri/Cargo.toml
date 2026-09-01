@@ -34,6 +34,16 @@ futures-util = { version = "0.3", default-features = false }
 # re-export: waiting on the portal and on being told to let go of it at once,
 # and waiting out the pause before the desktop is asked for a Hotkey again.
 tokio = { version = "1", default-features = false, features = ["macros", "time"] }
+# What the Palette needs to take the keyboard on X11, where an activation is
+# judged by the moment it carries and Tauri's `set_focus` carries none. Both at
+# the versions Tauri itself builds GTK against, so that the window reached
+# through `gtk_window` is the same type this speaks to.
+gdkx11 = "0.18"
+gtk = "0.18"
+# Xlib itself, for the one question neither GDK nor GTK will answer: which
+# window the display has the keyboard on. `gdkx11` re-exports the bindings but
+# links none of the library, so it is asked for here by name.
+x11 = { version = "2", features = ["xlib"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

@@ -3,7 +3,9 @@
 use std::sync::atomic::AtomicBool;
 
 use demysto_core::Demysto;
-use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, Runtime, WebviewWindow};
+use tauri::{
+    AppHandle, Emitter, Manager, Monitor, PhysicalPosition, Runtime, WebviewWindow, Window,
+};
 
 use crate::underway::Underway;
 
@@ -177,10 +179,148 @@ fn holds(screen: &Monitor, point: PhysicalPosition<f64>) -> bool {
 }
 
 /// Brings the Palette up in front of whatever the user is reading.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn show<R: Runtime>(_app: &AppHandle<R>, window: &WebviewWindow<R>) {
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+/// Brings the Palette up, and on X11 carries the one thing an activation there
+/// is judged by, which `set_focus` does not.
+///
+/// Asking is not enough. KWin grants an activation only when the moment it
+/// carries is no older than the moment the focused window last heard from the
+/// user; a request carrying nothing loses that comparison against any
+/// application somebody has just been typing in. The Palette got away with it
+/// exactly once per run — a window the compositor has never managed is
+/// activated as it is mapped — and every Hotkey after that put the Palette on
+/// screen deaf, with the letters going on into the document underneath
+/// (ticket 20).
+///
+/// The moment is asked of the X server here rather than carried from the
+/// keypress, and that is the one surprise in this. A Hotkey has no timestamp
+/// anywhere in it to carry — the handler is given a shortcut and its state and
+/// nothing else — but even a moment recorded when the key was pressed would
+/// lose, because between the press and this line Demysto sends the Capture's
+/// own copy chord to the very window it is about to be compared against, and
+/// that chord is the newer user input. The honest moment is this one: the
+/// Palette is being put on screen now, because of a key the user has just
+/// pressed, and no rule is being suspended to allow it.
+///
+/// On Wayland there is no such window and nothing to carry: the compositor
+/// decides activation and Demysto is a guest in that decision (ADR-0003), so
+/// the plain request stands.
+#[cfg(target_os = "linux")]
+fn show<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
+    let _ = window.show();
+
+    let window = window.clone();
+
+    on_main_thread(app, move |_| {
+        if present_with_server_time(&window).is_none() {
+            let _ = window.set_focus();
+        }
+    });
+}
+
+/// Presents the Palette carrying the X server's own idea of now, or `None`
+/// where this is not an X11 session and there is no such thing to carry.
+///
+/// GTK is what puts the moment on the window: `present_with_time` writes it to
+/// `_NET_WM_USER_TIME` and sends it with the activation. Left to itself GTK
+/// fills that property from the last input event the window received, and the
+/// Palette receives none — the Hotkey is claimed from the whole display, so it
+/// never arrives as an event of this window's at all, and the property stays
+/// at whatever it was the first time the window was drawn.
+#[cfg(target_os = "linux")]
+fn present_with_server_time<R: Runtime>(window: &WebviewWindow<R>) -> Option<()> {
+    use gtk::prelude::GtkWindowExt;
+
+    let frame = window.gtk_window().ok()?;
+    let drawn = on_the_display(&frame)?;
+
+    frame.present_with_time(gdkx11::functions::x11_get_server_time(&drawn));
+
+    Some(())
+}
+
+/// Puts the Palette away, the focus having gone elsewhere — unless on X11 it
+/// has not.
+///
+/// A Hotkey is a keyboard grab, and the X server announces a grab to the window
+/// that had the keyboard as a focus-out, exactly like the user clicking on
+/// something else. GTK passes both on as the same event, so the Palette's own
+/// Hotkey, pressed to put it away, arrives as "you have lost the focus" a
+/// moment before it arrives as a Hotkey: the Palette hides itself, and the
+/// press that follows finds nothing open and opens it again. The Hotkey stops
+/// closing the Palette — which nobody noticed while the Palette was not getting
+/// the keyboard in the first place (ticket 20).
+///
+/// The display is asked rather than GTK, because a grab does not move the input
+/// focus; it only redirects what is typed. The window X names is still this
+/// one, and that is the whole difference between a Hotkey and somebody clicking
+/// away.
+pub fn lost_the_keyboard<R: Runtime>(window: &Window<R>) {
+    #[cfg(target_os = "linux")]
+    if still_has_the_keyboard(window) {
+        return;
+    }
+
+    let _ = window.hide();
+}
+
+/// Whether X still names the Palette's window as the one with the keyboard.
+///
+/// `false` for anything that is not an X11 session, and for anything that
+/// cannot be asked: nowhere else does a focus-out arrive that the Palette
+/// should sit through, and treating silence as "still focused" would leave a
+/// Palette on screen that the user has walked away from.
+#[cfg(target_os = "linux")]
+fn still_has_the_keyboard<R: Runtime>(window: &Window<R>) -> bool {
+    use gtk::glib::prelude::Cast;
+    use gtk::glib::translate::ToGlibPtr;
+
+    let Some(drawn) = window.gtk_window().ok().as_ref().and_then(on_the_display) else {
+        return false;
+    };
+    let on = drawn.upcast_ref::<gtk::gdk::Window>().display();
+    let Ok(display) = on.downcast::<gdkx11::X11Display>() else {
+        return false;
+    };
+
+    let mut has_it = 0;
+    let mut reverts_to = 0;
+
+    // Xlib, because neither GDK nor GTK offers this: everything they say about
+    // the focus is said through the very events being told apart here.
+    unsafe {
+        x11::xlib::XGetInputFocus(
+            gdkx11::ffi::gdk_x11_display_get_xdisplay(display.to_glib_none().0),
+            &mut has_it,
+            &mut reverts_to,
+        );
+    }
+
+    // The window X names is almost never the one asked about, and comparing the
+    // two directly answers `false` to a Palette that plainly has the keyboard:
+    // GTK keeps an unmapped child window inside every toplevel purely to hold
+    // the focus, and that child is what X names. So the answer is taken from
+    // whichever toplevel the named window lives inside.
+    let Some(named) = gdkx11::X11Window::lookup_for_display(&display, has_it) else {
+        return false;
+    };
+
+    named.upcast_ref::<gtk::gdk::Window>().toplevel() == *drawn.upcast_ref::<gtk::gdk::Window>()
+}
+
+/// The Palette's window as X11 knows it, or `None` in a session that is not
+/// X11 — on Wayland this is a `GdkWaylandWindow` and none of it applies.
+#[cfg(target_os = "linux")]
+fn on_the_display(frame: &gtk::ApplicationWindow) -> Option<gdkx11::X11Window> {
+    use gtk::glib::prelude::Cast;
+    use gtk::prelude::WidgetExt;
+
+    frame.window()?.downcast::<gdkx11::X11Window>().ok()
 }
 
 /// Brings the Palette up as the panel it is, which is what keeps macOS from
@@ -196,12 +336,12 @@ fn show<R: Runtime>(app: &AppHandle<R>, _window: &WebviewWindow<R>) {
     });
 }
 
-/// Runs something on the thread AppKit insists on, and waits for it.
+/// Runs something on the thread the windows are drawn on, and waits for it.
 ///
-/// The caller is always a Capture's own thread, never the main one, so the wait
-/// cannot deadlock — and it is what lets the guard in [`open`] stay closed
-/// until the Palette is genuinely up.
-#[cfg(target_os = "macos")]
+/// AppKit insists on it, and so does GTK. The caller is always a Capture's own
+/// thread, never the main one, so the wait cannot deadlock — and it is what
+/// lets the guard in [`open`] stay closed until the Palette is genuinely up.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn on_main_thread<R: Runtime>(
     app: &AppHandle<R>,
     act: impl FnOnce(&AppHandle<R>) + Send + 'static,
