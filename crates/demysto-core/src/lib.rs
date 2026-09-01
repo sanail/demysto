@@ -194,11 +194,16 @@ pub struct Exported {
 /// Grouped here rather than by Fluent, which formats a number without grouping
 /// it: the catalogue is handed the digits already marked off, and separately the
 /// count itself, which is what chooses between "символ", "символа" and
-/// "символов". The separator is the one the language writes — a comma in
-/// English, a non-breaking space in Russian.
+/// "символов". The separator is the one the language writes, which is not the
+/// same mark everywhere: a comma in English, a full stop in German and Spanish,
+/// and a space in French and Russian — narrow in French, ordinary in Russian,
+/// and non-breaking in both, because a number split across a line break is a
+/// number read as two.
 fn grouped(count: u64, interface: Interface) -> String {
     let separator = match interface {
         Interface::English => ",",
+        Interface::German | Interface::Spanish => ".",
+        Interface::French => "\u{202f}",
         Interface::Russian => "\u{a0}",
     };
 
@@ -2260,6 +2265,21 @@ mod tests {
             .expect("a Selection over the stated length is warned about");
 
         assert!(warning.contains("14 символов"), "{warning}");
+    }
+
+    /// Each language marks thousands off with its own mark, and one carrying
+    /// another language's reads as a different number: "1.500" is fifteen
+    /// hundred to a German reader and one and a half to an English one.
+    #[test]
+    fn a_count_is_marked_off_the_way_the_language_writes_it() {
+        assert_eq!(grouped(1_500, Interface::English), "1,500");
+        assert_eq!(grouped(1_500, Interface::German), "1.500");
+        assert_eq!(grouped(1_500, Interface::Spanish), "1.500");
+        assert_eq!(grouped(1_500, Interface::French), "1\u{202f}500");
+        assert_eq!(grouped(1_500, Interface::Russian), "1\u{a0}500");
+
+        // Nothing to mark off, and nothing is marked off for the sake of it.
+        assert_eq!(grouped(999, Interface::French), "999");
     }
 
     #[test]

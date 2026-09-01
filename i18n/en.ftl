@@ -379,9 +379,9 @@ settings-file-preamble =
     # on its own. Settings records one for you if you would rather press it than
     # spell it.
     #
-    # `language` is the language Demysto speaks: "en" or "ru". Leave it out and
-    # Demysto follows the operating system, falling back to English. { $languageEnv }
-    # overrides both.
+    # `language` is the language Demysto speaks: "en", "de", "es", "fr" or "ru".
+    # Leave it out and Demysto follows the operating system, falling back to
+    # English. { $languageEnv } overrides both.
     #
     # `large_selection` is how many characters a Selection may hold before Demysto
     # says so in the Conversation. Nothing is ever cut and nothing is ever refused:

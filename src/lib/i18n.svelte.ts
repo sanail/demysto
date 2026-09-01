@@ -17,10 +17,27 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { FluentBundle, FluentResource } from "@fluent/bundle";
 import english from "../../i18n/en.ftl?raw";
+import german from "../../i18n/de.ftl?raw";
+import spanish from "../../i18n/es.ftl?raw";
+import french from "../../i18n/fr.ftl?raw";
 import russian from "../../i18n/ru.ftl?raw";
 
-/** The catalogues, by the tag the backend names one with. */
-const CATALOGUES: Record<string, string> = { en: english, ru: russian };
+/**
+ * The catalogues, by the tag the backend names one with.
+ *
+ * The same set as `Interface` in the core, and in the same order. A language
+ * added there and forgotten here is a window that stays English while the tray
+ * menu changes — which is the whole failure this file exists to avoid, and the
+ * one thing the suite cannot see, because it reads the catalogues rather than
+ * this list.
+ */
+const CATALOGUES: Record<string, string> = {
+  en: english,
+  de: german,
+  es: spanish,
+  fr: french,
+  ru: russian,
+};
 
 /** What a language with no catalogue of its own falls back to. */
 const ENGLISH = "en";

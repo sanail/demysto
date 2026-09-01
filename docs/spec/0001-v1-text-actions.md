@@ -300,6 +300,14 @@ as text and `demysto-core` compiles them in with `include_str!`; neither derives
 its strings from the other. Fluent rather than flat JSON because Russian plural
 forms are exactly what it exists for.
 
+English, German, Spanish, French and Russian ship. Another is a catalogue and a
+variant of `Interface`, which the compiler then walks through everything that
+matches on one. Nothing else is left to remember: the suite fails the build over
+a message the new catalogue does not hold, over one that names a variable
+English does not, and over the two lists the frontend writes by hand — its map
+of catalogues and the one Settings draws the field from — disagreeing with
+`Interface::ALL`.
+
 Language follows the operating system, falls back to English, and is overridable
 in Settings and by `DEMYSTO_LANGUAGE`, in that order of precedence: the variable,
 then the settings file, then the system. A source naming a language Demysto does

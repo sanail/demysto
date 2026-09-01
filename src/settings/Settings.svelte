@@ -198,10 +198,16 @@
    * The endonyms rather than translations of them: a list of languages written
    * in the language somebody cannot read is a list they cannot use to get out
    * of it. Written here rather than taken from a catalogue for the same
-   * reason — they are the same two words in every one.
+   * reason — they are the same words in every one.
+   *
+   * `Interface::ALL` in the core, in its order: English first, then the rest by
+   * what they call themselves.
    */
   const LANGUAGES = [
     { tag: "en", name: "English" },
+    { tag: "de", name: "Deutsch" },
+    { tag: "es", name: "Español" },
+    { tag: "fr", name: "Français" },
     { tag: "ru", name: "Русский" },
   ];
 

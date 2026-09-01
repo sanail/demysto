@@ -37,6 +37,9 @@ pub const LANGUAGE_ENV: &str = "DEMYSTO_LANGUAGE";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interface {
     English,
+    German,
+    Spanish,
+    French,
     Russian,
 }
 
@@ -56,17 +59,32 @@ pub struct Words {
 }
 
 const ENGLISH: &str = include_str!("../../../i18n/en.ftl");
+const GERMAN: &str = include_str!("../../../i18n/de.ftl");
+const SPANISH: &str = include_str!("../../../i18n/es.ftl");
+const FRENCH: &str = include_str!("../../../i18n/fr.ftl");
 const RUSSIAN: &str = include_str!("../../../i18n/ru.ftl");
 
 impl Interface {
-    /// Every language Demysto speaks, in the order Settings offers them.
-    pub const ALL: [Self; 2] = [Self::English, Self::Russian];
+    /// Every language Demysto speaks, in the order Settings offers them:
+    /// English first, because it is the catalogue every other is written
+    /// against and the one anything missing falls back to, and then the rest by
+    /// what they call themselves.
+    pub const ALL: [Self; 5] = [
+        Self::English,
+        Self::German,
+        Self::Spanish,
+        Self::French,
+        Self::Russian,
+    ];
 
     /// The tag the settings file states this language as, and the one the
     /// windows pick a catalogue by.
     pub fn tag(self) -> &'static str {
         match self {
             Self::English => "en",
+            Self::German => "de",
+            Self::Spanish => "es",
+            Self::French => "fr",
             Self::Russian => "ru",
         }
     }
@@ -79,6 +97,9 @@ impl Interface {
     pub fn endonym(self) -> &'static str {
         match self {
             Self::English => "English",
+            Self::German => "Deutsch",
+            Self::Spanish => "Español",
+            Self::French => "Français",
             Self::Russian => "Русский",
         }
     }
@@ -92,6 +113,9 @@ impl Interface {
     pub(crate) fn prompt_name(self) -> &'static str {
         match self {
             Self::English => "English",
+            Self::German => "German",
+            Self::Spanish => "Spanish",
+            Self::French => "French",
             Self::Russian => "Russian",
         }
     }
@@ -116,6 +140,9 @@ impl Interface {
     fn catalogue(self) -> &'static str {
         match self {
             Self::English => ENGLISH,
+            Self::German => GERMAN,
+            Self::Spanish => SPANISH,
+            Self::French => FRENCH,
             Self::Russian => RUSSIAN,
         }
     }
@@ -425,6 +452,139 @@ mod tests {
         found
     }
 
+    /// Every variable one message names, wherever in it they are named.
+    fn named(catalogue: &str, id: &str) -> BTreeSet<String> {
+        fn walk(pattern: &fluent_syntax::ast::Pattern<&str>, found: &mut BTreeSet<String>) {
+            use fluent_syntax::ast::{Expression, InlineExpression, PatternElement};
+
+            for element in &pattern.elements {
+                let PatternElement::Placeable { expression } = element else {
+                    continue;
+                };
+
+                let inline = match expression {
+                    Expression::Inline(inline) => inline,
+                    Expression::Select { selector, variants } => {
+                        for variant in variants {
+                            walk(&variant.value, found);
+                        }
+
+                        selector
+                    }
+                };
+
+                if let InlineExpression::VariableReference { id } = inline {
+                    found.insert(id.name.to_owned());
+                }
+            }
+        }
+
+        let mut found = BTreeSet::new();
+
+        for entry in fluent_syntax::parser::parse(catalogue)
+            .expect("a catalogue in this repository parses as Fluent")
+            .body
+        {
+            if let fluent_syntax::ast::Entry::Message(message) = entry {
+                if message.id.name == id {
+                    if let Some(value) = &message.value {
+                        walk(value, &mut found);
+                    }
+                }
+            }
+        }
+
+        found
+    }
+
+    /// A translation may leave a variable out — German says "Zeichen" for one
+    /// and for many, and needs no count to choose with — but it may not name one
+    /// English does not have. That is a misspelling rather than a decision, and
+    /// what it produces is a sentence with the placeable's own name in the hole
+    /// where the path or the reason was meant to be.
+    #[test]
+    fn no_catalogue_names_a_variable_english_does_not() {
+        for id in stated(ENGLISH) {
+            let english = named(ENGLISH, &id);
+
+            for language in Interface::ALL {
+                let held = named(language.catalogue(), &id);
+
+                assert_eq!(
+                    held.difference(&english).collect::<Vec<_>>(),
+                    Vec::<&String>::new(),
+                    "{} names something in {id} that English does not",
+                    language.tag()
+                );
+            }
+        }
+    }
+
+    /// What one hand-written list in the frontend holds, between its brackets.
+    fn listed(file: &str, opener: &str, open: char, close: char) -> String {
+        let text =
+            fs::read_to_string(repository().join(file)).expect("a source file in this repository");
+        let from = text
+            .find(opener)
+            .unwrap_or_else(|| panic!("{file} states {opener}"));
+        let body = &text[from..];
+        let body = &body[body.find(open).expect("the list opens") + 1..];
+
+        body[..body.find(close).expect("the list closes")].to_owned()
+    }
+
+    /// The string after each `key` in one such list, in the order they appear.
+    fn quoted(listing: &str, key: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut rest = listing;
+
+        while let Some(at) = rest.find(key) {
+            let after = &rest[at + key.len()..];
+            let end = after.find('"').expect("a quoted value is closed");
+
+            found.push(after[..end].to_owned());
+            rest = &after[end..];
+        }
+
+        found
+    }
+
+    /// A language the core speaks has to be one the windows can read and one
+    /// Settings offers, and both of those are lists somebody writes by hand.
+    /// Nothing else can catch a language added to `Interface` alone: it is not
+    /// a build failure, it is three windows staying English while the tray menu
+    /// changes underneath them, for the one user who chose that language.
+    #[test]
+    fn the_frontend_holds_every_language_the_core_speaks() {
+        let spoken: Vec<&str> = Interface::ALL.into_iter().map(Interface::tag).collect();
+
+        let catalogues: Vec<String> =
+            listed("src/lib/i18n.svelte.ts", "const CATALOGUES", '{', '}')
+                .split(',')
+                .filter_map(|entry| entry.split(':').next())
+                .map(str::trim)
+                .filter(|tag| !tag.is_empty())
+                .map(ToOwned::to_owned)
+                .collect();
+
+        assert_eq!(catalogues, spoken, "the catalogues the windows import");
+
+        let offered = listed("src/settings/Settings.svelte", "const LANGUAGES", '[', ']');
+
+        assert_eq!(quoted(&offered, "tag: \""), spoken, "what Settings offers");
+
+        // And by the name each language calls itself, which is the whole of
+        // what somebody who cannot read the current one has to go on.
+        assert_eq!(
+            quoted(&offered, "name: \""),
+            Interface::ALL
+                .into_iter()
+                .map(Interface::endonym)
+                .collect::<Vec<_>>(),
+            "what Settings calls them"
+        );
+    }
+
     #[test]
     fn every_catalogue_states_the_same_messages() {
         let english = stated(ENGLISH);
@@ -475,7 +635,12 @@ mod tests {
             assert_eq!(Interface::matching(tag), Some(Interface::Russian), "{tag}");
         }
 
+        // A region is not a language, and every one of these is somebody whose
+        // desktop would otherwise have come up in English.
         assert_eq!(Interface::matching("en-GB"), Some(Interface::English));
+        assert_eq!(Interface::matching("de-AT"), Some(Interface::German));
+        assert_eq!(Interface::matching("es_MX.UTF-8"), Some(Interface::Spanish));
+        assert_eq!(Interface::matching("fr-CA"), Some(Interface::French));
     }
 
     /// User story 58: a system language Demysto does not speak is English
@@ -517,24 +682,28 @@ mod tests {
         );
     }
 
+    /// The warning about a large Selection, in one language, for a count.
+    ///
+    /// The one message every catalogue has to get grammatically right, and the
+    /// reason the catalogues are Fluent rather than a map of format strings.
+    fn counted(language: Interface, characters: u64) -> String {
+        say!(
+            &Words::spoken(language),
+            "run-large-selection",
+            "characters" = characters,
+            "shown" = characters.to_string(),
+            "limit" = "100",
+            "setting" = "large_selection",
+            "path" = "settings.toml",
+        )
+    }
+
     /// User story 60. One, few and many are three different words in Russian,
     /// and a catalogue that cannot tell them apart is what makes an interface
     /// read as machine-translated.
     #[test]
     fn russian_counts_read_grammatically() {
-        let words = Words::spoken(Interface::Russian);
-
-        let said = |characters: u64| {
-            say!(
-                &words,
-                "run-large-selection",
-                "characters" = characters,
-                "shown" = characters.to_string(),
-                "limit" = "100",
-                "setting" = "large_selection",
-                "path" = "settings.toml",
-            )
-        };
+        let said = |characters| counted(Interface::Russian, characters);
 
         assert!(said(1).contains("1 символ,"), "{}", said(1));
         assert!(said(2).contains("2 символа,"), "{}", said(2));
@@ -545,22 +714,33 @@ mod tests {
 
     #[test]
     fn english_counts_read_grammatically() {
-        let words = Words::spoken(Interface::English);
-
-        let said = |characters: u64| {
-            say!(
-                &words,
-                "run-large-selection",
-                "characters" = characters,
-                "shown" = characters.to_string(),
-                "limit" = "100",
-                "setting" = "large_selection",
-                "path" = "settings.toml",
-            )
-        };
+        let said = |characters| counted(Interface::English, characters);
 
         assert!(said(1).contains("1 character "), "{}", said(1));
         assert!(said(2).contains("2 characters "), "{}", said(2));
+    }
+
+    /// And so do the three added after, each in its own way: Spanish splits one
+    /// from many where English does, French counts zero as one, and German has
+    /// a single word for any number of them — which is why its message carries
+    /// no selector at all, and why that is checked here rather than assumed.
+    #[test]
+    fn the_languages_added_later_count_grammatically() {
+        let spanish = |characters| counted(Interface::Spanish, characters);
+
+        assert!(spanish(1).contains("1 carácter,"), "{}", spanish(1));
+        assert!(spanish(2).contains("2 caracteres,"), "{}", spanish(2));
+
+        let french = |characters| counted(Interface::French, characters);
+
+        assert!(french(0).contains("0 caractère,"), "{}", french(0));
+        assert!(french(1).contains("1 caractère,"), "{}", french(1));
+        assert!(french(2).contains("2 caractères,"), "{}", french(2));
+
+        let german = |characters| counted(Interface::German, characters);
+
+        assert!(german(1).contains("1 Zeichen lang"), "{}", german(1));
+        assert!(german(2).contains("2 Zeichen lang"), "{}", german(2));
     }
 
     /// User story 56: the sentence is the whole of what a Wayland user is
