@@ -7,8 +7,6 @@
 //! permission. What each step says is the window's; what this module owns is
 //! when it appears and when it is over (user story 57).
 
-use std::time::Duration;
-
 use demysto_core::Demysto;
 use tauri::{AppHandle, Manager, Runtime};
 
@@ -37,7 +35,9 @@ pub const LABEL: &str = "welcome";
 /// The alternative was `WEBKIT_DISABLE_DMABUF_RENDERER`, which fixes it
 /// outright — and which every machine with a working graphics card would then
 /// pay for, in a slower path it never needed. Tauri's own guidance is not to
-/// ship such an override for a fault the application can avoid.
+/// ship such an override for a fault the application can avoid. Which is the
+/// same reason the waiting is here and not on the platforms below.
+#[cfg(target_os = "linux")]
 pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
     let waiting = app.clone();
 
@@ -50,7 +50,19 @@ pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// How long WebKit is given before the flow is put on screen.
-const SETTLE: Duration = Duration::from_secs(1);
+#[cfg(target_os = "linux")]
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Everywhere else the flow comes up at once.
+///
+/// WKWebView and WebView2 draw a window shown in the first instants as readily
+/// as one shown an hour in — watched on both — so there is nothing here for a
+/// wait to fix, and a fresh installation should not be kept looking at an empty
+/// desktop for somebody else's fault.
+#[cfg(not(target_os = "linux"))]
+pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
+    on_screen(app);
+}
 
 fn on_screen<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = app.get_webview_window(LABEL) else {
