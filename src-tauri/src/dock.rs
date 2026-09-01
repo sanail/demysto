@@ -22,8 +22,14 @@ use tauri::{AppHandle, Manager, Runtime};
 ///
 /// The Palette is deliberately not among them: it is a panel that takes the
 /// keyboard without taking activation, and nobody switches back to it — they
-/// press the Hotkey.
-const SWITCHED_BACK_TO: [&str; 2] = [crate::result::LABEL, crate::settings::LABEL];
+/// press the Hotkey. The first-run flow is, and is the first window Demysto
+/// ever shows anybody: one they cannot switch back to would be a flow lost
+/// behind whatever they were reading.
+const SWITCHED_BACK_TO: [&str; 3] = [
+    crate::result::LABEL,
+    crate::settings::LABEL,
+    crate::welcome::LABEL,
+];
 
 /// What is about to happen to the window this is being told about.
 ///
@@ -105,10 +111,11 @@ mod tests {
     const PALETTE: &str = "palette";
     const CONVERSATION: &str = "result";
     const SETTINGS: &str = "settings";
+    const WELCOME: &str = "welcome";
 
-    /// A desktop with neither window that counts on screen, which is Demysto
-    /// waiting: the Palette and nothing else.
-    const NOTHING: [(&str, bool); 2] = [(CONVERSATION, false), (SETTINGS, false)];
+    /// A desktop with none of the windows that count on screen, which is
+    /// Demysto waiting: the Palette and nothing else.
+    const NOTHING: [(&str, bool); 3] = [(CONVERSATION, false), (SETTINGS, false), (WELCOME, false)];
 
     #[test]
     fn a_conversation_on_its_way_up_puts_demysto_in_the_dock() {
@@ -121,6 +128,13 @@ mod tests {
     #[test]
     fn settings_on_its_way_up_does_too() {
         assert!(belongs_in_the_dock(NOTHING, Change::Showing(SETTINGS)));
+    }
+
+    /// The first window a fresh installation ever sees, and the one nobody has
+    /// learned the Hotkey for yet.
+    #[test]
+    fn the_first_run_flow_does_too() {
+        assert!(belongs_in_the_dock(NOTHING, Change::Showing(WELCOME)));
     }
 
     #[test]
@@ -145,7 +159,7 @@ mod tests {
         // whether it is visible would answer yes and leave Demysto in the dock
         // with nothing to switch back to.
         assert!(!belongs_in_the_dock(
-            [(CONVERSATION, true), (SETTINGS, false)],
+            [(CONVERSATION, true), (SETTINGS, false), (WELCOME, false)],
             Change::Hiding(CONVERSATION)
         ));
     }
@@ -153,7 +167,7 @@ mod tests {
     #[test]
     fn closing_one_of_two_leaves_demysto_in_the_dock_for_the_other() {
         assert!(belongs_in_the_dock(
-            [(CONVERSATION, true), (SETTINGS, true)],
+            [(CONVERSATION, true), (SETTINGS, true), (WELCOME, false)],
             Change::Hiding(SETTINGS)
         ));
     }

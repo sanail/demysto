@@ -283,6 +283,27 @@ export function openAccessibility(): Promise<void> {
 }
 
 /**
+ * Whether this desktop gates a Capture behind a permission at all — macOS
+ * alone does, and the first-run flow shows the step about one only there.
+ */
+export function accessibilityAskedFor(): Promise<boolean> {
+  return invoke<boolean>("accessibility_asked_for");
+}
+
+/** Whether Demysto is in the login items now. */
+export function autostart(): Promise<boolean> {
+  return invoke<boolean>("autostart");
+}
+
+/**
+ * Puts Demysto into the login items, or takes it out. Rejects with a whole
+ * sentence when the system would not have it either way.
+ */
+export function setAutostart(wanted: boolean): Promise<void> {
+  return invoke<void>("set_autostart", { wanted });
+}
+
+/**
  * Opens the folder Demysto writes its logs in, so that a bug report can carry
  * them. Rejects with a whole sentence when the file manager could not be
  * reached.

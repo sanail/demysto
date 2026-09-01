@@ -44,6 +44,9 @@ pub(crate) const PALETTE_SETTING: &str = "palette_hotkey";
 pub(crate) const LARGE_SELECTION_SETTING: &str = "large_selection";
 /// And the language the interface is asked to speak.
 pub(crate) const LANGUAGE_SETTING: &str = "language";
+/// And the one line the first-run flow leaves behind it, which is the only
+/// thing in the file Demysto writes for its own sake rather than the user's.
+pub(crate) const WELCOMED_SETTING: &str = "welcomed";
 
 /// How long a Selection has to be, in characters, before Demysto says so —
 /// where the settings state nothing.
@@ -505,6 +508,11 @@ pub(crate) struct File {
     /// catalogue answers to — `i18n::chosen` passes over anything it does not
     /// recognise rather than refusing to start over a two-letter typo.
     pub(crate) language: Option<String>,
+    /// Whether the first-run flow has been through to its end. Absent in every
+    /// file written before it had, which is what makes a fresh installation
+    /// recognisable at all — see `settings::welcomed`.
+    #[serde(default)]
+    pub(crate) welcomed: bool,
 }
 
 fn first_version() -> u32 {

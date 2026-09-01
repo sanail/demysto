@@ -29,6 +29,7 @@
     type Settings,
   } from "../lib/ipc";
   import { combination, reading } from "../lib/hotkey";
+  import { LANGUAGES } from "../lib/languages";
   import { spokenTag, t } from "../lib/i18n.svelte";
   import { saidBy, sending } from "../lib/sending";
   import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -191,25 +192,6 @@
     "hover:bg-neutral-100 disabled:cursor-default disabled:opacity-40 " +
     "disabled:hover:bg-transparent dark:border-neutral-700 " +
     "dark:hover:bg-neutral-800 dark:disabled:hover:bg-transparent";
-
-  /**
-   * The languages Demysto speaks, each written in its own name.
-   *
-   * The endonyms rather than translations of them: a list of languages written
-   * in the language somebody cannot read is a list they cannot use to get out
-   * of it. Written here rather than taken from a catalogue for the same
-   * reason — they are the same words in every one.
-   *
-   * `Interface::ALL` in the core, in its order: English first, then the rest by
-   * what they call themselves.
-   */
-  const LANGUAGES = [
-    { tag: "en", name: "English" },
-    { tag: "de", name: "Deutsch" },
-    { tag: "es", name: "Español" },
-    { tag: "fr", name: "Français" },
-    { tag: "ru", name: "Русский" },
-  ];
 
   onMount(async () => {
     presets = await offeredPresets();

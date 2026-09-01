@@ -277,19 +277,22 @@ often used — and an always-on-top, taskbar-skipping window elsewhere. The
 Conversation and Settings windows are ordinary windows.
 
 macOS activation policy is dynamic: accessory while only the Palette is on
-screen, regular while a Conversation or Settings window is open, back to
-accessory when the last one closes. The tray icon is always present and its menu
+screen, regular while a Conversation, Settings or the first-run window is open,
+back to accessory when the last one closes. The tray icon is always present and its menu
 reaches the Palette, the Actions, and Settings, so the mouse-only path exists
 independently of the dock.
 
 Single instance is enforced; a second launch raises the Palette. Autostart is
 offered once during first-run setup, never enabled silently.
 
-First-run order: confirm the detected language, configure a Provider with a key
-and a Model, verify it with a live request, request the macOS Accessibility
-permission with a button that opens the correct settings pane, offer autostart,
-and finish on an invitation to try the Hotkey. Accessibility is re-checked at
-every Run, because macOS revokes it whenever the binary's signature changes.
+First-run order, in a window of its own: confirm the detected language,
+configure a Provider with a key and a Model, verify it with a live request,
+request the macOS Accessibility permission with a button that opens the correct
+settings pane, offer autostart, and finish on an invitation to try the Hotkey.
+The flow is over when that window closes, whichever way it closes, and the
+settings file records that so it does not come back — ADR-0013. Accessibility is
+re-checked at every Run, because macOS revokes it whenever the binary's
+signature changes.
 
 ### Interface language
 
@@ -305,8 +308,8 @@ variant of `Interface`, which the compiler then walks through everything that
 matches on one. Nothing else is left to remember: the suite fails the build over
 a message the new catalogue does not hold, over one that names a variable
 English does not, and over the two lists the frontend writes by hand — its map
-of catalogues and the one Settings draws the field from — disagreeing with
-`Interface::ALL`.
+of catalogues and the one every window draws its language field from —
+disagreeing with `Interface::ALL`.
 
 Language follows the operating system, falls back to English, and is overridable
 in Settings and by `DEMYSTO_LANGUAGE`, in that order of precedence: the variable,
@@ -367,9 +370,12 @@ the pattern rather than follow one. That is a reason to be deliberate about the
 first module written, not a reason to defer the decision.
 
 **Not in the suite.** Capture's real implementations, global Hotkeys, the tray,
-`NSPanel` behaviour, activation policy, and the Accessibility permission flow are
-interactive operating-system machinery, checked on a live desktop per platform
-rather than in the suite. No WebDriver end-to-end suite: `tauri-driver` has no
+`NSPanel` behaviour, activation policy, the login items, and the Accessibility
+permission flow are interactive operating-system machinery, checked on a live
+desktop per platform rather than in the suite. So is the first-run flow's own
+order of steps, which is the one piece of sequencing that lives in a window
+rather than in the core; what it writes goes through the same façade every other
+save does, and that is where it is tested. No WebDriver end-to-end suite: `tauri-driver` has no
 macOS support, and building one for two platforms out of three does not pay for
 itself on an application with two screens.
 

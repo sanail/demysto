@@ -207,6 +207,40 @@ pub(crate) fn presets() -> Vec<Preset> {
         .collect()
 }
 
+/// Whether the first-run flow has already been through to its end.
+///
+/// A file that could not be read or parsed answers yes, though nothing has been
+/// through anything. The flow's whole business is writing a Provider into that
+/// file, and Demysto will not write over one it cannot read (ADR-0007): the
+/// window that reports such a file and asks for it to be repaired is Settings,
+/// and walking somebody into a flow whose every step would fail is worse than
+/// leaving them the tray.
+pub(crate) fn welcomed(config_dir: &Path, words: &Words) -> bool {
+    let Ok((path, text)) = config::read(config_dir, words) else {
+        return true;
+    };
+
+    config::parse(&path, &text, words).map_or(true, |file| file.welcomed)
+}
+
+/// Records that it has, so that the next start goes straight to the tray.
+///
+/// Written through `toml_edit` like every other save, so that the preamble a
+/// fresh installation is met by — and whatever the user has already written
+/// around it — survives the one line Demysto adds for itself.
+pub(crate) fn finish_welcome(config_dir: &Path, words: &Words) -> Result<(), ConfigError> {
+    let (path, text) = config::read(config_dir, words)?;
+
+    // Asked before it is edited, for the reason a save asks: a file nobody can
+    // parse is reported in `config`'s own words rather than written over.
+    config::parse(&path, &text, words)?;
+
+    let mut document: DocumentMut = text.parse().map_err(|_| uneditable(&path, words))?;
+    document[config::WELCOMED_SETTING] = value(true);
+
+    config::write(&path, &document.to_string(), words)
+}
+
 /// The settings as the file now holds them.
 pub(crate) fn read(
     config_dir: &Path,

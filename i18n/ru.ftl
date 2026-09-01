@@ -196,6 +196,36 @@ settings-save-action = Сохранить это действие
 settings-cancel = Отменить
 settings-reset-by-saving = Сохранение без изменений возвращает встроенное действие.
 
+## The first run
+#
+# The flow a fresh installation is met by, in the order the spec fixes: confirm
+# the language, configure a Provider and prove its key works, walk to the
+# Accessibility permission, answer the login-items question, and finish on the
+# Hotkey (ticket 15).
+
+welcome-title = Добро пожаловать в Demysto
+welcome-step = Шаг { $at } из { $of }
+welcome-back = Назад
+welcome-continue = Дальше
+welcome-finish = Начать работу
+welcome-language-title = Demysto определил ваш язык
+welcome-language-detail = На этом языке вы читаете — так говорит операционная система. Если это не так, поменяйте здесь, а потом хоть когда в настройках.
+welcome-provider-title = Откуда берутся ответы
+welcome-provider-detail = Demysto спрашивает модель, которую вы выбрали сами, через вашу собственную учётную запись. Выберите сервис, вставьте выданный им ключ и спросите, какие модели он предлагает.
+welcome-provider-model = Модель, которую Demysto спрашивает, если действие не говорит иного
+welcome-provider-verify-first = Ключ предъявляется провайдеру до конца этого шага, чтобы неверный обнаружился сейчас, а не при первом вашем вопросе.
+welcome-accessibility-title = Разрешите Demysto читать выделенное
+welcome-accessibility-detail = Demysto читает выделение, отправляя сочетание копирования тому, что вы читаете, а macOS выдаёт это только с разрешением «Универсальный доступ». Откройте «Конфиденциальность и безопасность» → «Универсальный доступ» и включите Demysto.
+welcome-open-accessibility = Открыть настройки Универсального доступа
+welcome-accessibility-later = Demysto спрашивает об этом macOS при каждом запуске, так что выдать разрешение позже — то же самое. После обновления его попросят снова: для macOS это уже другое приложение.
+welcome-autostart-title = Запускать Demysto при входе в систему
+welcome-autostart-detail = Demysto ждёт горячую клавишу в трее и отвечает только пока запущен. Без вашего согласия здесь ничего не прописывается, а настройки самой системы уберут запись обратно.
+welcome-autostart-choice = Запускать при входе
+autostart-refused = Demysto не смог изменить запуск при входе в систему: { $detail }
+welcome-done-title = Вот и всё
+welcome-done-detail = Выделите где угодно текст и нажмите { $hotkey }. Рядом с курсором откроется палитра с тем, что Demysto может с ним сделать, а Enter запустит выделенное.
+welcome-done-tray = Дальше Demysto ждёт в трее, и из его меню доступны палитра, действия и настройки: горячая клавиша — быстрый путь, но не единственный.
+
 ## What a Capture could not do
 #
 # The Palette and Settings say these; the core reports which one happened and
@@ -387,5 +417,8 @@ settings-file-preamble =
     # это нужно затем, чтобы случайное «выделить всё» не было оплачено молча. Не
     # пишите его, чтобы взять { $largeSelection }, или поставьте 0, чтобы не получать
     # предупреждений.
+    #
+    # `welcomed` — собственная пометка Demysto о том, что первый запуск уже
+    # пройден. Уберите строку, чтобы пройти его снова при следующем старте.
 settings-file-preset = #   { $preset }
 settings-file-preset-keyless = #   { $preset } (без ключа)

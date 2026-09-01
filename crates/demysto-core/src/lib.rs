@@ -940,6 +940,26 @@ impl Demysto {
         Ok(())
     }
 
+    /// Whether the first-run flow has already been through to its end.
+    ///
+    /// Asked once, by the shell, before there is a window on screen: a fresh
+    /// installation is met by the flow rather than by a tray icon it has to
+    /// work out for itself (user story 57).
+    pub fn welcomed(&self) -> bool {
+        settings::welcomed(&self.config_dir, &self.words())
+    }
+
+    /// Records that it has, so that the flow does not come back on the next
+    /// start.
+    ///
+    /// Recorded when the flow's window goes away, however it goes: somebody who
+    /// closed it has answered the one question it exists to ask, and asking
+    /// again at every launch would be the tool nagging. Everything the flow
+    /// offers is in Settings afterwards.
+    pub fn welcome_finished(&self) -> Result<(), ConfigError> {
+        settings::finish_welcome(&self.config_dir, &self.words())
+    }
+
     /// Every preset there is, so that the window can offer them.
     pub fn presets(&self) -> Vec<Preset> {
         settings::presets()
@@ -3749,6 +3769,77 @@ mod tests {
                 preset.name
             );
         }
+    }
+
+    // The first run: the flow that ends with the user having run an Action,
+    // and the one thing about it the file has to remember (ticket 15).
+
+    #[test]
+    fn a_fresh_installation_has_not_been_welcomed() {
+        let demysto = unconfigured("a paragraph");
+
+        assert!(!demysto.welcomed());
+    }
+
+    #[test]
+    fn a_flow_that_has_been_through_does_not_come_back_on_the_next_start() {
+        let demysto = unconfigured("a paragraph");
+
+        demysto.welcome_finished().expect("it should have recorded");
+
+        // The next start reads the same directory, which is the whole of what
+        // the record has to survive.
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let again = as_a_session(demysto.config_dir(), fake::over(&desktop));
+
+        assert!(again.welcomed());
+    }
+
+    #[test]
+    fn the_record_of_the_flow_is_a_guest_in_the_file_like_every_other_save() {
+        let demysto = unconfigured("a paragraph");
+        let before = settings_file(&demysto);
+
+        demysto.welcome_finished().expect("it should have recorded");
+        let after = settings_file(&demysto);
+
+        for line in before.lines().filter(|line| line.starts_with('#')) {
+            assert!(after.contains(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn what_the_flow_configured_is_still_there_after_it_records_itself() {
+        let mut server = Server::new();
+        let (_accepted, at) = accepting(&mut server);
+        let demysto = unconfigured("a paragraph");
+
+        // The order the flow itself goes in: the Provider is saved, and the
+        // record comes last.
+        saved(&demysto, &configuring(&at));
+        demysto.welcome_finished().expect("it should have recorded");
+
+        let settings = demysto.settings().expect("the settings should read back");
+        assert_eq!(settings.providers.len(), 1);
+        assert_eq!(
+            settings.default_model.as_deref(),
+            Some("a provider/a-model")
+        );
+    }
+
+    #[test]
+    fn a_settings_file_nobody_can_read_is_no_invitation_to_write_over_it() {
+        let demysto = unconfigured("a paragraph");
+        std::fs::write(
+            demysto.config_dir().join(config::FILE_NAME),
+            "this is not TOML at all",
+        )
+        .unwrap();
+
+        // Demysto will not write over a file it cannot read — which a flow
+        // saving a Provider into it would be asking it to do. The window that
+        // repairs such a file is Settings, and it says what is wrong with it.
+        assert!(demysto.welcomed());
     }
 
     // The Action catalogue on disk: what the user writes, what they change

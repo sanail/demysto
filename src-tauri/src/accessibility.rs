@@ -14,6 +14,16 @@
 #[cfg(target_os = "macos")]
 const PANE: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 
+/// Whether this desktop gates a Capture behind a permission at all.
+///
+/// macOS alone does, which is why the sentence below exists — and why the
+/// first-run flow shows a step about the permission on macOS and nowhere else:
+/// a step walking a Windows user to a pane their desktop has never heard of is
+/// a step that teaches them the tool does not know where it is running.
+pub fn asked_for() -> bool {
+    cfg!(target_os = "macos")
+}
+
 /// Opens the settings pane where the Accessibility permission is granted.
 ///
 /// Answers with what went wrong, in a whole sentence, so that the window that

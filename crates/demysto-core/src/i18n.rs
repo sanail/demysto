@@ -550,9 +550,9 @@ mod tests {
     }
 
     /// A language the core speaks has to be one the windows can read and one
-    /// Settings offers, and both of those are lists somebody writes by hand.
+    /// they offer, and both of those are lists somebody writes by hand.
     /// Nothing else can catch a language added to `Interface` alone: it is not
-    /// a build failure, it is three windows staying English while the tray menu
+    /// a build failure, it is four windows staying English while the tray menu
     /// changes underneath them, for the one user who chose that language.
     #[test]
     fn the_frontend_holds_every_language_the_core_speaks() {
@@ -569,9 +569,13 @@ mod tests {
 
         assert_eq!(catalogues, spoken, "the catalogues the windows import");
 
-        let offered = listed("src/settings/Settings.svelte", "const LANGUAGES", '[', ']');
+        let offered = listed("src/lib/languages.ts", "export const LANGUAGES", '[', ']');
 
-        assert_eq!(quoted(&offered, "tag: \""), spoken, "what Settings offers");
+        assert_eq!(
+            quoted(&offered, "tag: \""),
+            spoken,
+            "what the windows offer"
+        );
 
         // And by the name each language calls itself, which is the whole of
         // what somebody who cannot read the current one has to go on.
@@ -581,7 +585,7 @@ mod tests {
                 .into_iter()
                 .map(Interface::endonym)
                 .collect::<Vec<_>>(),
-            "what Settings calls them"
+            "what the windows call them"
         );
     }
 

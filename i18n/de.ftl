@@ -200,6 +200,36 @@ settings-save-action = Diese Aktion speichern
 settings-cancel = Abbrechen
 settings-reset-by-saving = Sie ohne Änderung zu speichern stellt die eingebaute wieder her.
 
+## The first run
+#
+# The flow a fresh installation is met by, in the order the spec fixes: confirm
+# the language, configure a Provider and prove its key works, walk to the
+# Accessibility permission, answer the login-items question, and finish on the
+# Hotkey (ticket 15).
+
+welcome-title = Willkommen bei Demysto
+welcome-step = Schritt { $at } von { $of }
+welcome-back = Zurück
+welcome-continue = Weiter
+welcome-finish = Demysto benutzen
+welcome-language-title = Demysto hat Ihre Sprache gefunden
+welcome-language-detail = Das ist die Sprache, in der Sie laut Ihrem Betriebssystem lesen. Ändern Sie sie hier, wenn es nicht stimmt — und in den Einstellungen jederzeit wieder.
+welcome-provider-title = Woher die Antworten kommen
+welcome-provider-detail = Demysto fragt ein Modell Ihrer Wahl über Ihr eigenes Konto. Wählen Sie den Dienst, fügen Sie den Schlüssel ein, den er Ihnen gegeben hat, und fragen Sie ihn, welche Modelle er anbietet.
+welcome-provider-model = Das Modell, das Demysto fragt, sofern eine Aktion nichts anderes sagt
+welcome-provider-verify-first = Der Schlüssel wird noch in diesem Schritt beim Anbieter geprüft, damit ein falscher jetzt auffällt und nicht bei Ihrer ersten Frage.
+welcome-accessibility-title = Demysto lesen lassen, was Sie ausgewählt haben
+welcome-accessibility-detail = Demysto liest eine Auswahl, indem es den Tastendruck zum Kopieren an das schickt, was Sie gerade lesen, und macOS knüpft das an die Berechtigung für Bedienungshilfen. Öffnen Sie „Datenschutz & Sicherheit“ → „Bedienungshilfen“ und schalten Sie Demysto ein.
+welcome-open-accessibility = Einstellungen für Bedienungshilfen öffnen
+welcome-accessibility-later = Demysto fragt macOS bei jedem Lauf danach; die Berechtigung später zu erteilen wirkt also genauso. Nach einer Aktualisierung wird sie erneut verlangt, denn für macOS ist das eine andere Anwendung.
+welcome-autostart-title = Demysto beim Anmelden starten
+welcome-autostart-detail = Demysto wartet im Tray auf das Tastenkürzel und kann nur antworten, solange es läuft. Ohne Ihre Zustimmung hier wird nichts eingetragen, und die Einstellungen Ihres Systems nehmen den Eintrag jederzeit wieder heraus.
+welcome-autostart-choice = Beim Anmelden starten
+autostart-refused = Demysto konnte den Start beim Anmelden nicht ändern: { $detail }
+welcome-done-title = Das war alles
+welcome-done-detail = Markieren Sie irgendwo Text und drücken Sie { $hotkey }. Die Palette öffnet sich an Ihrem Mauszeiger und zeigt, was Demysto damit tun kann; Enter führt die hervorgehobene Aktion aus.
+welcome-done-tray = Demysto wartet von nun an im Tray, und sein Menü führt zur Palette, zu den Aktionen und zu den Einstellungen — das Tastenkürzel ist der schnelle Weg, nicht der einzige.
+
 ## What a Capture could not do
 #
 # The Palette and Settings say these; the core reports which one happened and
@@ -393,5 +423,9 @@ settings-file-preamble =
     # abgelehnt: es ist dafür da, dass ein versehentliches „Alles auswählen“ nicht
     # stillschweigend bezahlt wird. Lassen Sie es weg für { $largeSelection }, oder
     # setzen Sie es auf 0, um gar nicht gewarnt zu werden.
+    #
+    # `welcomed` ist Demystos eigene Notiz, dass der Ablauf beim ersten Start
+    # durchlaufen wurde. Nehmen Sie die Zeile heraus, um beim nächsten Start
+    # wieder hindurchgeführt zu werden.
 settings-file-preset = #   { $preset }
 settings-file-preset-keyless = #   { $preset } (ohne Schlüssel)

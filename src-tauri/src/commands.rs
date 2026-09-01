@@ -171,6 +171,27 @@ pub fn open_accessibility(demysto: State<'_, Demysto>) -> Result<(), String> {
     crate::accessibility::reveal(&demysto.words())
 }
 
+/// Whether this desktop gates a Capture behind a permission at all, so that the
+/// first-run flow shows the step about one only where there is one.
+#[tauri::command]
+pub fn accessibility_asked_for() -> bool {
+    crate::accessibility::asked_for()
+}
+
+/// Whether Demysto is in the login items now, which is what the flow's question
+/// about them starts at.
+#[tauri::command]
+pub fn autostart<R: Runtime>(app: AppHandle<R>) -> bool {
+    crate::autostart::enabled(&app)
+}
+
+/// Puts Demysto into the login items, or takes it out — the answer to the one
+/// question the first-run flow asks about them (user story 52).
+#[tauri::command]
+pub fn set_autostart<R: Runtime>(app: AppHandle<R>, wanted: bool) -> Result<(), String> {
+    crate::autostart::set(&app, wanted, &app.state::<Demysto>().words())
+}
+
 /// Opens the folder Demysto writes its logs in, so that a bug report can carry
 /// them.
 #[tauri::command]
@@ -335,4 +356,8 @@ pub fn dismiss<R: Runtime>(window: WebviewWindow<R>) {
         window.app_handle(),
         crate::dock::Change::Hiding(window.label()),
     );
+
+    // Escape out of the first-run flow is as final an answer to it as the
+    // button at the end: `welcome` says why, and answers to nothing else.
+    crate::welcome::gone(window.app_handle(), window.label());
 }

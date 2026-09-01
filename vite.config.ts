@@ -19,6 +19,7 @@ export default defineConfig({
         palette: "palette.html",
         result: "result.html",
         settings: "settings.html",
+        welcome: "welcome.html",
       },
     },
   },

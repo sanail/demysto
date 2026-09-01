@@ -201,6 +201,36 @@ settings-save-action = Save this Action
 settings-cancel = Cancel
 settings-reset-by-saving = Saving this with nothing changed puts the built-in back.
 
+## The first run
+#
+# The flow a fresh installation is met by, in the order the spec fixes: confirm
+# the language, configure a Provider and prove its key works, walk to the
+# Accessibility permission, answer the login-items question, and finish on the
+# Hotkey (ticket 15).
+
+welcome-title = Welcome to Demysto
+welcome-step = Step { $at } of { $of }
+welcome-back = Back
+welcome-continue = Continue
+welcome-finish = Start using Demysto
+welcome-language-title = Demysto found your language
+welcome-language-detail = This is the language your operating system says you read. Change it here if it is not, and change it again in Settings whenever you like.
+welcome-provider-title = Where the answers come from
+welcome-provider-detail = Demysto asks a Model of your own choosing, over your own account. Pick the service, paste the key it gave you, and ask it which Models it offers.
+welcome-provider-model = The Model Demysto asks unless an Action says otherwise
+welcome-provider-verify-first = The key is put to the Provider before this step is over, so that a wrong one is found now rather than at your first question.
+welcome-accessibility-title = Let Demysto read what you have selected
+welcome-accessibility-detail = Demysto reads a Selection by sending the copy keystroke to whatever you are reading, and macOS gates that behind the Accessibility permission. Open Privacy & Security → Accessibility and turn Demysto on.
+welcome-open-accessibility = Open Accessibility settings
+welcome-accessibility-later = Demysto asks macOS about this at every Run, so granting it afterwards works just as well. It is asked for again after an update, which macOS treats as a different application.
+welcome-autostart-title = Start Demysto when you log in
+welcome-autostart-detail = Demysto waits in the tray for the Hotkey, so it can only answer while it is running. Nothing is registered unless you ask for it here, and your system's own settings take it out again.
+welcome-autostart-choice = Start Demysto at login
+autostart-refused = Demysto could not change whether it starts at login: { $detail }
+welcome-done-title = That is everything
+welcome-done-detail = Select some text anywhere and press { $hotkey }. The Palette opens at your cursor listing what Demysto can do with it, and Enter runs the one that is highlighted.
+welcome-done-tray = Demysto waits in the tray from now on, and its menu reaches the Palette, the Actions and Settings — the Hotkey is the quick way, not the only one.
+
 ## What a Capture could not do
 #
 # The Palette and Settings say these; the core reports which one happened and
@@ -387,5 +417,8 @@ settings-file-preamble =
     # says so in the Conversation. Nothing is ever cut and nothing is ever refused:
     # it is there so that an accidental select-all is not silently paid for. Leave
     # it out for { $largeSelection }, or set it to 0 to be told nothing.
+    #
+    # `welcomed` is Demysto's own note that the first-run flow has been through.
+    # Take the line out to be walked through it again on the next start.
 settings-file-preset = #   { $preset }
 settings-file-preset-keyless = #   { $preset } (no key)

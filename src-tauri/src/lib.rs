@@ -4,6 +4,7 @@
 //! lives in `demysto-core`, which knows nothing about Tauri; see ADR-0001.
 
 mod accessibility;
+mod autostart;
 mod commands;
 mod dock;
 mod folder;
@@ -25,6 +26,7 @@ mod result;
 mod settings;
 mod tray;
 mod underway;
+mod welcome;
 
 use demysto_core::Demysto;
 use tauri::{Manager, RunEvent, WindowEvent};
@@ -54,7 +56,16 @@ pub fn run() {
                 palette::reveal(app);
             }))
             .plugin(hotkey::plugin())
-            .plugin(tauri_plugin_notification::init());
+            .plugin(tauri_plugin_notification::init())
+            // A launch agent on macOS rather than a login item added through
+            // System Events: the second is an Automation permission to ask for
+            // on top of the one Demysto already needs, for a list the user can
+            // edit either way. Nothing is registered by loading the plugin —
+            // the first-run flow asks, and `autostart` is the only caller.
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ));
     }
 
     #[cfg(target_os = "macos")]
@@ -100,6 +111,13 @@ pub fn run() {
                 palette::into_panel(&window)?;
             }
 
+            // Last, so that a first run is met by the flow over a Demysto that
+            // is already listening: the Hotkey it ends by inviting the user to
+            // press is claimed by the time the invitation is on screen.
+            if !demysto.welcomed() {
+                welcome::reveal(app.handle());
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -113,6 +131,8 @@ pub fn run() {
                     window.app_handle(),
                     dock::Change::Hiding(window.label()),
                 );
+
+                welcome::gone(window.app_handle(), window.label());
             }
             // The Palette is not a window anybody should have to manage: losing
             // the focus is the same instruction as pressing Escape. Which of
@@ -136,6 +156,9 @@ pub fn run() {
             commands::models,
             commands::open_logs,
             commands::open_accessibility,
+            commands::accessibility_asked_for,
+            commands::autostart,
+            commands::set_autostart,
             commands::open_settings,
             commands::conversation,
             commands::selection,
