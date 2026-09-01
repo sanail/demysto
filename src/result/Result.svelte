@@ -542,7 +542,15 @@
                 <!-- With a role for the reason the Palette's origin caption
                      has one: WebKit keeps no inline run that has neither a
                      role nor a name, and "Stopped" is the whole of what says
-                     this answer is short because the user said so. -->
+                     this answer is short because the user said so.
+
+                     `status` rather than a role that only names it, because
+                     the moment this appears is the moment the user pressed
+                     Stop and heard the answer go quiet: that is worth saying.
+                     The price is that going back to another Conversation
+                     whose last Turn was stopped can say the word again — true
+                     of what is then on screen, which is why it is a price
+                     worth paying rather than a bug. -->
                 <span role="status" class="opacity-40">Stopped</span>
               {/if}
 

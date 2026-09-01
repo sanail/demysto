@@ -224,14 +224,21 @@
   <header class="flex items-baseline justify-between gap-3">
     <h1 class="text-sm font-semibold tracking-tight">Demysto</h1>
 
-    <!-- Drawn as quietly as before and now said as well. Two things it needs
-         to be heard, both learnt the hard way on a live desktop: a role, since
-         WebKit keeps no inline run that has neither one nor a name and this
-         caption reached the accessibility tree nowhere; and a place in the
-         page from the start, since a live region that arrives together with
-         its words is announced by nobody. `role="status"` is both, and it
-         speaks the moment a Capture lands — which is after the window is
-         already up and the focus is in the field below (ticket 18). -->
+    <!-- Drawn as quietly as before and now said as well. The role is what
+         keeps it in the accessibility tree at all: WebKitGTK keeps no inline
+         run that has neither a role nor a name, and this caption reached the
+         tree nowhere. What carries the origin to a screen reader is the
+         region below, named by this.
+
+         That `status` is also a live region is a bonus and not the mechanism.
+         The Capture reaches this window before the window is shown — see
+         `palette.rs`, where the event is emitted ahead of `show` on purpose,
+         so that the Palette never comes up holding the Capture before this
+         one — and words that change while the window is hidden are announced
+         by nobody. It is drawn empty rather than not at all so that the one
+         path that does change them in front of somebody — the tray or a
+         second launch re-opening a Palette already on screen — has a region
+         to speak from (ticket 18). -->
     <span id="capture-origin" role="status" class="text-xs opacity-50"
       >{origin ?? ""}</span
     >
