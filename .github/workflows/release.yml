@@ -64,11 +64,12 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     env:
-      # At the job's level so that the steps below can ask whether a secret is
-      # set at all: `secrets` cannot be read from an `if`, and `env` can.
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      # Whether the certificate is there, rather than the certificate itself:
+      # `secrets` cannot be read from an `if` and `env` can, and this is the
+      # only thing the `if` below needs. The secret is left out on purpose — a
+      # job-level `APPLE_CERTIFICATE` reaches the build too, and the bundler
+      # asks whether that variable exists, not whether it says anything.
+      HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -150,7 +151,11 @@ jobs:
       # Skipped where the secret is unset, and the bundle is then ad-hoc signed
       # as it is on a development machine.
       - name: Trust the macOS signing certificate
-        if: matrix.platform == 'macos-latest' && env.APPLE_CERTIFICATE != ''
+        if: matrix.platform == 'macos-latest' && env.HAS_APPLE_CERTIFICATE == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           keychain="$RUNNER_TEMP/demysto.keychain-db"
           password="$(uuidgen)"
@@ -190,9 +195,13 @@ jobs:
           # second time would put it in a keychain nothing trusts — which is
           # the one thing that would make `codesign` refuse it.
           #
-          # Empty where the secret is unset, and the bundle is then ad-hoc
-          # signed, as it is on a development machine.
-          APPLE_CERTIFICATE: ""
+          # So `APPLE_CERTIFICATE` is not set here at all, not even to an empty
+          # string: the bundler reads the variable's presence as the
+          # instruction to import, and an empty one fails at `security import`
+          # with nothing about the build to explain why.
+          #
+          # Where the secret is unset the identity is empty too, and the bundle
+          # is ad-hoc signed as it is on a development machine.
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         with:
           tagName: ${{ github.ref_name }}
