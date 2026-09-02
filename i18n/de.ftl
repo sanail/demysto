@@ -14,6 +14,7 @@
 app-name = Demysto
 tray-open = Demysto öffnen
 tray-actions = Aktionen
+tray-update = Auf { $version } aktualisieren…
 tray-settings = Einstellungen…
 tray-quit = Demysto beenden
 
@@ -168,6 +169,18 @@ settings-logs = Protokolle
 settings-logs-detail = Demysto führt ein lokales Protokoll darüber, was es getan hat — welche Aktion, welches Modell, was schiefging — und nie darüber, was Sie angesehen oder was ein Modell gesagt hat. Es wird nichts irgendwohin gesendet. Legen Sie diese Dateien einem Fehlerbericht bei.
 settings-open-logs = Den Protokollordner öffnen
 
+### Updates
+
+settings-updates = Aktualisierungen
+settings-updates-detail = Demysto sucht beim Start nach einer neuen Version und bietet an, was es findet — installiert wird nichts, bevor Sie es sagen. Jede Aktualisierung ist mit Demystos eigenem Schlüssel signiert und wird damit geprüft, bevor sie eingespielt wird.
+settings-version = Dies ist Demysto { $version }.
+settings-check-for-update = Nach einer neuen Version suchen
+settings-checking = Wird gesucht…
+settings-up-to-date = Dies ist die neueste Version, die es gibt.
+settings-update-found = Demysto { $version } ist bereit zur Installation.
+settings-install-update = Installieren und neu starten
+settings-installing = Wird installiert…
+
 ### Actions
 
 settings-actions = Aktionen
@@ -230,6 +243,12 @@ welcome-done-detail = Markieren Sie irgendwo Text und drücken Sie { $hotkey }. 
 welcome-done-clipboard = Kopieren Sie Text mit Ctrl+C und drücken Sie dann { $hotkey }. Die Palette öffnet sich an Ihrem Mauszeiger und zeigt, was Demysto damit tun kann; Enter führt die hervorgehobene Aktion aus.
 welcome-done-tray = Demysto wartet von nun an im Tray, und sein Menü führt zur Palette, zu den Aktionen und zu den Einstellungen — das Tastenkürzel ist der schnelle Weg, nicht der einzige.
 
+## What an update could not do
+
+update-refused = Demysto konnte nicht nachfragen, ob es eine neue Version gibt: { $detail }
+update-install-refused = Die Aktualisierung konnte nicht installiert werden: { $detail }
+update-nothing-found = Es gibt keine Aktualisierung zu installieren: suchen Sie zuerst nach einer neuen Version.
+
 ## What the login items would not do
 
 autostart-refused = Demysto konnte den Start beim Anmelden nicht ändern: { $detail }
@@ -242,7 +261,7 @@ autostart-refused = Demysto konnte den Start beim Anmelden nicht ändern: { $det
 capture-clipboard-only = Dies ist eine Wayland-Sitzung, und Wayland lässt eine Anwendung nicht in eine andere schreiben. Demysto kann nicht lesen, was Sie ausgewählt haben: kopieren Sie es selbst mit Ctrl+C, drücken Sie dann das Tastenkürzel, und Demysto liest die Zwischenablage.
 capture-clipboard-unavailable = Die Zwischenablage ist nicht verfügbar: { $detail }
 capture-keystroke-refused = Der Tastendruck zum Kopieren konnte nicht gesendet werden: { $detail }
-capture-no-accessibility = macOS lässt Demysto nicht lesen, was Sie ausgewählt haben: Demysto braucht die Berechtigung für Bedienungshilfen. Öffnen Sie „Datenschutz & Sicherheit“ → „Bedienungshilfen“ und schalten Sie Demysto ein. macOS zieht sie zurück, sobald sich die Anwendung ändert, das kann also nach einer Aktualisierung wiederkommen.
+capture-no-accessibility = macOS lässt Demysto nicht lesen, was Sie ausgewählt haben: Demysto braucht die Berechtigung für Bedienungshilfen. Öffnen Sie „Datenschutz & Sicherheit“ → „Bedienungshilfen“ und schalten Sie Demysto ein.
 accessibility-pane-unreachable = Demysto konnte die Systemeinstellungen nicht öffnen: { $detail }. Die Berechtigung liegt unter „Datenschutz & Sicherheit“ → „Bedienungshilfen“.
 accessibility-only-macos = Nur macOS fragt nach einer Berechtigung, bevor Demysto lesen darf, was Sie ausgewählt haben.
 

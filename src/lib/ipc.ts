@@ -313,6 +313,52 @@ export function openLogs(): Promise<void> {
 }
 
 /**
+ * The newer version the check made on the way up found, `null` where it found
+ * none or has not finished. Asks nothing of the network — this is what Settings
+ * knows the moment it opens.
+ */
+export function updateOffered(): Promise<string | null> {
+  return invoke<string | null>("update_offered");
+}
+
+/**
+ * Follows what the backend's own checks find: the version now on offer, `null`
+ * where there is none.
+ *
+ * Listened to rather than only asked for, because every window loads its page
+ * at startup and the check on the way up answers after that — a window that
+ * only asked as it loaded would go on showing the answer from before there was
+ * one, however much later it is opened.
+ */
+export function onUpdateOffered(
+  handle: (version: string | null) => void,
+): Promise<UnlistenFn> {
+  return listen<string | null>("update://offered", (event) =>
+    handle(event.payload),
+  );
+}
+
+/**
+ * Asks the release manifest whether there is a newer Demysto: the version where
+ * there is one, `null` where this is already the newest. Rejects with a whole
+ * sentence when the manifest could not be reached.
+ */
+export function lookForUpdate(): Promise<string | null> {
+  return invoke<string | null>("look_for_update");
+}
+
+/**
+ * Takes the update the last check found.
+ *
+ * Resolves only by not resolving: where it works this process is replaced by
+ * the version it installed, and where it does not it rejects with a whole
+ * sentence.
+ */
+export function installUpdate(): Promise<void> {
+  return invoke<void>("install_update");
+}
+
+/**
  * The Conversation the window is showing, `null` before there has been one.
  *
  * Asked for rather than carried on the events, because it is the one answer

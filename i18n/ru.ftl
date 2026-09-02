@@ -10,6 +10,7 @@
 app-name = Demysto
 tray-open = Открыть Demysto
 tray-actions = Действия
+tray-update = Обновить до { $version }…
 tray-settings = Настройки…
 tray-quit = Завершить Demysto
 
@@ -164,6 +165,18 @@ settings-logs = Журналы
 settings-logs-detail = Demysto ведёт локальный журнал того, что он делал, — какое действие, какая модель, что пошло не так — и никогда того, что вы читали или что сказала модель. Никуда ничего не отправляется. Прикладывайте эти файлы к сообщению об ошибке.
 settings-open-logs = Открыть папку с журналами
 
+### Updates
+
+settings-updates = Обновления
+settings-updates-detail = Demysto ищет новую версию при запуске и предлагает то, что нашёл, — ничего не устанавливается, пока вы не скажете. Каждое обновление подписано собственным ключом Demysto и сверяется с ним, прежде чем встать на место.
+settings-version = Это Demysto { $version }.
+settings-check-for-update = Проверить, нет ли новой версии
+settings-checking = Проверяю…
+settings-up-to-date = Это самая новая версия, какая есть.
+settings-update-found = Demysto { $version } готов к установке.
+settings-install-update = Установить и перезапустить
+settings-installing = Устанавливаю…
+
 ### Actions
 
 settings-actions = Действия
@@ -226,6 +239,12 @@ welcome-done-detail = Выделите где угодно текст и наж�
 welcome-done-clipboard = Скопируйте текст через Ctrl+C и нажмите { $hotkey }. Рядом с курсором откроется палитра с тем, что Demysto может с ним сделать, а Enter запустит выделенное.
 welcome-done-tray = Дальше Demysto ждёт в трее, и из его меню доступны палитра, действия и настройки: горячая клавиша — быстрый путь, но не единственный.
 
+## What an update could not do
+
+update-refused = Demysto не смог спросить, есть ли новая версия: { $detail }
+update-install-refused = Обновление не удалось установить: { $detail }
+update-nothing-found = Устанавливать нечего: сперва проверьте, нет ли новой версии.
+
 ## What the login items would not do
 
 autostart-refused = Demysto не смог изменить запуск при входе в систему: { $detail }
@@ -238,7 +257,7 @@ autostart-refused = Demysto не смог изменить запуск при �
 capture-clipboard-only = Это сеанс Wayland, а Wayland не позволяет одному приложению печатать в другое. Demysto не может прочитать выделенное вами: скопируйте его сами через Ctrl+C, затем нажмите горячую клавишу — и Demysto прочитает буфер обмена.
 capture-clipboard-unavailable = Буфер обмена недоступен: { $detail }
 capture-keystroke-refused = Не удалось отправить сочетание копирования: { $detail }
-capture-no-accessibility = macOS не даёт Demysto прочитать выделенное: Demysto нужно разрешение «Универсальный доступ». Откройте «Конфиденциальность и безопасность» → «Универсальный доступ» и включите Demysto. macOS отзывает это разрешение при каждом изменении приложения, так что оно может понадобиться снова после обновления.
+capture-no-accessibility = macOS не даёт Demysto прочитать выделенное: Demysto нужно разрешение «Универсальный доступ». Откройте «Конфиденциальность и безопасность» → «Универсальный доступ» и включите Demysto.
 accessibility-pane-unreachable = Demysto не смог открыть Системные настройки: { $detail }. Разрешение находится в «Конфиденциальность и безопасность» → «Универсальный доступ».
 accessibility-only-macos = Только macOS спрашивает разрешение, прежде чем Demysto сможет прочитать выделенное.
 

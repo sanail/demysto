@@ -199,6 +199,32 @@ pub fn open_logs(demysto: State<'_, Demysto>) -> Result<(), String> {
     crate::folder::open(&demysto.logs_dir(), &demysto.words())
 }
 
+/// The newer version the check on the way up found, without asking the manifest
+/// again — which is what Settings shows the moment it is opened.
+#[tauri::command]
+pub fn update_offered<R: Runtime>(app: AppHandle<R>) -> Option<String> {
+    crate::update::offered(&app)
+}
+
+/// Whether a newer Demysto exists, asked of the release manifest — the version
+/// where there is one, `null` where this is already the newest.
+///
+/// Asked here as well as on the way up, because a user who has just read that a
+/// release exists should not have to wait for the next launch to be offered it.
+#[tauri::command]
+pub async fn look_for_update<R: Runtime>(app: AppHandle<R>) -> Result<Option<String>, String> {
+    crate::update::look(&app).await
+}
+
+/// Takes the update the last check found.
+///
+/// Answers only by failing: where it works, this process is replaced by the
+/// version it installed and there is nobody left to answer.
+#[tauri::command]
+pub async fn install_update<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    crate::update::take(&app).await
+}
+
 /// The Conversation the window is showing, for one that mounted after the Turn
 /// it is showing began.
 #[tauri::command]

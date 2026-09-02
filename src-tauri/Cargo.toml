@@ -25,6 +25,16 @@ tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-single-instance = "2"
+# Without its default features, and the one left out is the point:
+# `rustls-tls` pins `rustls` to its `ring` provider, which puts a second crypto
+# library in every build beside the `aws-lc-rs` one `reqwest` already carries for
+# the Provider requests — and puts `ring`'s ARM64 assembly in the way of a
+# Windows build cross-compiled from a Mac. TLS still comes from `reqwest`, whose
+# features are shared across this graph.
+tauri-plugin-updater = { version = "2.11.0", default-features = false, features = [
+    "system-proxy",
+    "zip",
+] }
 
 # Wayland claims no Hotkey of its own: it is asked of the desktop's
 # GlobalShortcuts portal over D-Bus instead (ADR-0003), and only Linux has one.

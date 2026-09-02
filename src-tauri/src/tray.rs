@@ -9,13 +9,14 @@
 
 use std::error::Error;
 
-use demysto_core::{DefinedAction, Demysto};
+use demysto_core::{say, DefinedAction, Demysto};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{App, AppHandle, Manager, Runtime};
 
 /// Menu item ids. Matched in the event handler below.
 const SHOW: &str = "show";
 const SETTINGS: &str = "settings";
+const UPDATE: &str = "update";
 const QUIT: &str = "quit";
 
 /// What an Action's own item is identified by, ahead of the identifier the
@@ -50,11 +51,20 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
 
     tauri::tray::TrayIconBuilder::with_id(TRAY)
         .icon(icon)
+        // What the icon is called. Windows shows it as a tooltip and, more to
+        // the point, hands it to a screen reader — without one the icon is
+        // nameless, and the mouse-only path user story 51 is about starts at an
+        // icon nobody can identify. macOS and the Linux indicators ignore it.
+        .tooltip(demysto.words().text("app-name"))
         .menu(&menu(app, &actions, &demysto)?)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             SHOW => crate::palette::reveal(app),
-            SETTINGS => crate::settings::reveal(app),
+            // Settings rather than the installation itself: taking an update
+            // ends this process and starts another, and that is not something
+            // to set off from a menu with nothing said first. What is said is
+            // in the window this opens.
+            SETTINGS | UPDATE => crate::settings::reveal(app),
             QUIT => app.exit(0),
             id => {
                 if let Some(action) = action_in(id) {
@@ -114,6 +124,22 @@ fn menu<R: Runtime, M: Manager<R>>(
     )?;
     let quit = MenuItem::with_id(manager, QUIT, words.text("tray-quit"), true, None::<&str>)?;
 
+    // Only where there is one. The tray is Demysto's whole presence while it
+    // waits, so it is where news about Demysto itself belongs — and an item
+    // that appears when there is something to say costs nobody a glance on
+    // every other day.
+    let update = crate::update::offered(manager)
+        .map(|version| {
+            MenuItem::with_id(
+                manager,
+                UPDATE,
+                say!(&words, "tray-update", "version" = version),
+                true,
+                None::<&str>,
+            )
+        })
+        .transpose()?;
+
     let runnable = actions
         .iter()
         .map(|action| {
@@ -142,16 +168,17 @@ fn menu<R: Runtime, M: Manager<R>>(
         &items,
     )?;
 
-    Menu::with_items(
-        manager,
-        &[
-            &show,
-            &listed,
-            &PredefinedMenuItem::separator(manager)?,
-            &settings,
-            &quit,
-        ],
-    )
+    let separator = PredefinedMenuItem::separator(manager)?;
+    let mut top: Vec<&dyn tauri::menu::IsMenuItem<R>> = vec![&show, &listed, &separator];
+
+    if let Some(update) = &update {
+        top.push(update);
+    }
+
+    top.push(&settings);
+    top.push(&quit);
+
+    Menu::with_items(manager, &top)
 }
 
 #[cfg(test)]
@@ -181,7 +208,7 @@ mod tests {
         // `settings`: Actions are files in a directory of the user's own, and
         // an item that chose Settings instead of running one would be a fault
         // nobody could see in the file.
-        for reserved in [SHOW, SETTINGS, QUIT] {
+        for reserved in [SHOW, SETTINGS, UPDATE, QUIT] {
             assert_ne!(item_for(reserved), reserved);
             assert_eq!(action_in(&item_for(reserved)), Some(reserved));
             assert_eq!(action_in(reserved), None);

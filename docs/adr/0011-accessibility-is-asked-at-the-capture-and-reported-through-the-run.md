@@ -6,7 +6,8 @@ Status: accepted
 
 macOS gates synthetic input behind the Accessibility permission, and withdraws
 it whenever the binary's signature changes — which is every development build,
-and every update until the application is signed and notarized.
+and was every update until releases were signed with a certificate of their own
+(ADR-0015).
 
 Without it a Capture does not fail. enigo sends the copy chord, nothing receives
 it, the clipboard is left holding whatever it held, and the Capture reports that

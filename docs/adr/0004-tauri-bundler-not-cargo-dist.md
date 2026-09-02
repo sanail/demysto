@@ -32,4 +32,6 @@ Homebrew cask and the `winget` manifest are one milestone, not four.
 In-app updates do not wait for any of this: `tauri-plugin-updater` reads a
 `latest.json` from GitHub Releases and is signed with its own keypair, unrelated
 to Apple or Microsoft certificates. That keypair is generated before the first
-release, because changing it afterwards strands every installed copy.
+release, because changing it afterwards strands every installed copy. The macOS
+bundle is signed too, with a certificate of the project's own — what that is for,
+and what it is not, is ADR-0015.

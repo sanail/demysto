@@ -14,6 +14,7 @@
 app-name = Demysto
 tray-open = Ouvrir Demysto
 tray-actions = Actions
+tray-update = Mettre à jour vers { $version }…
 tray-settings = Réglages…
 tray-quit = Quitter Demysto
 
@@ -168,6 +169,18 @@ settings-logs = Journaux
 settings-logs-detail = Demysto tient un journal local de ce qu'il a fait — quelle action, quel modèle, ce qui a échoué — et jamais de ce que vous regardiez ni de ce qu'un modèle a dit. Rien n'est envoyé nulle part. Joignez ces fichiers à un rapport de bogue.
 settings-open-logs = Ouvrir le dossier des journaux
 
+### Updates
+
+settings-updates = Mises à jour
+settings-updates-detail = Demysto cherche une nouvelle version au démarrage et propose ce qu'il trouve — rien n'est installé tant que vous ne le dites pas. Chaque mise à jour est signée avec la clé propre à Demysto et vérifiée avec elle avant d'être installée.
+settings-version = Ceci est Demysto { $version }.
+settings-check-for-update = Chercher une nouvelle version
+settings-checking = Recherche…
+settings-up-to-date = C'est la version la plus récente qui existe.
+settings-update-found = Demysto { $version } est prêt à être installé.
+settings-install-update = Installer et redémarrer
+settings-installing = Installation…
+
 ### Actions
 
 settings-actions = Actions
@@ -230,6 +243,12 @@ welcome-done-detail = Sélectionnez du texte n'importe où et appuyez sur { $hot
 welcome-done-clipboard = Copiez du texte avec Ctrl+C, puis appuyez sur { $hotkey }. La palette s'ouvre à votre curseur avec ce que Demysto peut en faire, et Entrée exécute ce qui est en surbrillance.
 welcome-done-tray = Demysto attend désormais dans la barre d'état, et son menu mène à la palette, aux actions et aux réglages : le raccourci est le chemin rapide, pas le seul.
 
+## What an update could not do
+
+update-refused = Demysto n'a pas pu demander s'il existe une nouvelle version : { $detail }
+update-install-refused = La mise à jour n'a pas pu être installée : { $detail }
+update-nothing-found = Il n'y a aucune mise à jour à installer : cherchez d'abord une nouvelle version.
+
 ## What the login items would not do
 
 autostart-refused = Demysto n'a pas pu changer son lancement à l'ouverture de session : { $detail }
@@ -242,7 +261,7 @@ autostart-refused = Demysto n'a pas pu changer son lancement à l'ouverture de s
 capture-clipboard-only = Ceci est une session Wayland, et Wayland ne laisse pas une application écrire dans une autre. Demysto ne peut pas lire ce que vous avez sélectionné : copiez-le vous-même avec Ctrl+C, puis appuyez sur le raccourci, et Demysto lira le presse-papiers.
 capture-clipboard-unavailable = Le presse-papiers est indisponible : { $detail }
 capture-keystroke-refused = La frappe de copie n'a pas pu être envoyée : { $detail }
-capture-no-accessibility = macOS ne laisse pas Demysto lire ce que vous avez sélectionné : Demysto a besoin de l'autorisation d'Accessibilité. Ouvrez Confidentialité et sécurité → Accessibilité et activez Demysto. macOS la retire chaque fois que l'application change, ceci peut donc revenir après une mise à jour.
+capture-no-accessibility = macOS ne laisse pas Demysto lire ce que vous avez sélectionné : Demysto a besoin de l'autorisation d'Accessibilité. Ouvrez Confidentialité et sécurité → Accessibilité et activez Demysto.
 accessibility-pane-unreachable = Demysto n'a pas pu ouvrir les Réglages Système : { $detail }. L'autorisation se trouve dans Confidentialité et sécurité → Accessibilité.
 accessibility-only-macos = Seul macOS demande une autorisation avant que Demysto puisse lire ce que vous avez sélectionné.
 

@@ -5,7 +5,10 @@
     deleteAction,
     dismiss,
     hotkeys as allowed,
+    installUpdate,
+    lookForUpdate,
     onProviderWanted,
+    onUpdateOffered,
     openLogs,
     presets as offeredPresets,
     providerModels,
@@ -13,6 +16,7 @@
     saveSettings,
     settings as configured,
     status,
+    updateOffered,
     verifyProvider,
     type ActionEdit,
     type ActionStanding,
@@ -145,10 +149,27 @@
   let languageFixed = $state<Exported | null>(null);
   /** Where the logs are, and what went wrong opening the folder. */
   let logsProblem = $state<string | null>(null);
+  /** The version this is, which is the half of an update question nobody else answers. */
+  let version = $state("");
+  /** The newer version there is, `null` where there is none to be had. */
+  let newer = $state<string | null>(null);
+  /**
+   * Whether a check has been made while this window has been open.
+   *
+   * What separates "up to date" from "not asked yet": the window opens knowing
+   * only what the check on the way up left behind, and that answer is silence
+   * when the machine was offline for it.
+   */
+  let asked = $state(false);
+  let checking = $state(false);
+  let installing = $state(false);
+  let updateProblem = $state<string | null>(null);
   /** The Provider the window was opened at, so that it can be shown as such. */
   let wanted = $state<string | null>(null);
   /** The listener that carries that name, for as long as this window lives. */
   let listening: Promise<UnlistenFn> | null = null;
+  /** The same, for what the backend's own update checks find. */
+  let watching: Promise<UnlistenFn> | null = null;
   /** What opens the Palette when nothing states otherwise, as it is read. */
   let paletteDefault = $state("");
   /** The keys a Hotkey may be on its own — the backend decides which. */
@@ -197,6 +218,7 @@
     presets = await offeredPresets();
 
     const reported = await status();
+    version = reported.version;
     where = reported.config_dir;
     largeSelectionDefault = reported.large_selection_default;
     clipboardOnly = said(reported.capturing);
@@ -208,6 +230,20 @@
       wanted = provider;
       settle(provider);
     });
+
+    // The check on the way up answers after this window has loaded, so what it
+    // finds arrives as an event rather than being waited for here.
+    //
+    // Listened for before what it found is read, and the registration waited
+    // on: an answer landing between the two would otherwise be emitted to
+    // nobody, and the window would go on showing that there is no update until
+    // Demysto is restarted — closing this window hides it rather than
+    // unloading it. Which of the two arrives first costs nothing, because the
+    // version is held before it is announced.
+    watching = onUpdateOffered((version) => (newer = version));
+    await watching;
+
+    newer = await updateOffered();
 
     const may = await allowed();
     paletteDefault = may.palette_default;
@@ -227,7 +263,10 @@
   // Taken down in its own hook rather than by returning one, because the mount
   // above waits on the backend and Svelte takes a cleanup only from one that
   // does not.
-  onDestroy(() => listening?.then((off) => off()));
+  onDestroy(() => {
+    listening?.then((off) => off());
+    watching?.then((off) => off());
+  });
 
   /** Brings the Provider this window was opened for into view. */
   async function settle(provider: string) {
@@ -241,6 +280,40 @@
   /** Opens the folder the logs are written in, so a bug report can carry them. */
   async function showLogs() {
     logsProblem = await sending(openLogs);
+  }
+
+  /** Asks the manifest whether there is a newer Demysto than this one. */
+  async function checkForUpdate() {
+    checking = true;
+    updateProblem = null;
+
+    try {
+      newer = await lookForUpdate();
+      asked = true;
+    } catch (error) {
+      updateProblem = saidBy(error);
+    } finally {
+      checking = false;
+    }
+  }
+
+  /**
+   * Takes the update on offer.
+   *
+   * Nothing follows a success, and nothing can: the process is replaced by the
+   * version it installed. The state is left saying "installing" for exactly
+   * that reason — the only way back from here is a failure.
+   */
+  async function install() {
+    installing = true;
+    updateProblem = null;
+
+    try {
+      await installUpdate();
+    } catch (error) {
+      updateProblem = saidBy(error);
+      installing = false;
+    }
   }
 
   /** Takes the settings as the file holds them as the state of this window. */
@@ -1068,6 +1141,50 @@
 
       {#if logsProblem}
         <p class="text-xs text-red-600 dark:text-red-400">{logsProblem}</p>
+      {/if}
+    </section>
+
+    <section class="flex flex-col gap-3">
+      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
+        {t("settings-updates")}
+      </h2>
+
+      <p class="text-xs opacity-50">{t("settings-updates-detail")}</p>
+
+      <p class="text-xs opacity-60">{t("settings-version", { version })}</p>
+
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class={BUTTON}
+          disabled={checking || installing}
+          onclick={checkForUpdate}
+        >
+          {checking ? t("settings-checking") : t("settings-check-for-update")}
+        </button>
+
+        {#if newer}
+          <button
+            type="button"
+            class={BUTTON}
+            disabled={installing}
+            onclick={install}
+          >
+            {installing
+              ? t("settings-installing")
+              : t("settings-install-update")}
+          </button>
+        {/if}
+      </div>
+
+      {#if newer}
+        <p class="text-xs">{t("settings-update-found", { version: newer })}</p>
+      {:else if asked}
+        <p class="text-xs opacity-50">{t("settings-up-to-date")}</p>
+      {/if}
+
+      {#if updateProblem}
+        <p class="text-xs text-red-600 dark:text-red-400">{updateProblem}</p>
       {/if}
     </section>
 

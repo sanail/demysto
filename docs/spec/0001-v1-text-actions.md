@@ -329,7 +329,9 @@ Per ADR-0004: the Tauri bundler, a universal macOS artifact, `.dmg` / `.msi` and
 NSIS / `.AppImage` and `.deb` from a GitHub Actions matrix, on an Ubuntu runner
 old enough that its glibc does not become the floor for supported distributions.
 In-app updates through `tauri-plugin-updater` against a manifest in GitHub
-Releases, with its keypair generated before the first release.
+Releases, with its keypair generated before the first release. macOS builds are
+signed with a self-signed certificate rather than a Developer ID, which is what
+keeps an update from revoking the Accessibility permission (ADR-0015).
 
 No telemetry, no crash reporting, no analytics of any kind. Local logs with
 rotation, reachable from Settings.
@@ -388,8 +390,9 @@ chunking, map-reduce summarisation, and file type detection. Large Selections ar
 warned about and sent as-is; nothing is truncated or split.
 
 History on disk, and with it search across past Conversations. Keychain storage
-(ADR-0002). Code signing, notarization, the Homebrew cask and a `winget` manifest
-— one later milestone, not four (ADR-0004).
+(ADR-0002). Notarization, a Windows signature, the Homebrew cask and a `winget`
+manifest — one later milestone gated on certificates nobody has bought, not four
+(ADR-0004).
 
 The RemoteDesktop portal on Wayland (ADR-0003). Multiple simultaneous
 Conversation windows. Importing and sharing Action presets as a feature, though
@@ -399,9 +402,11 @@ Mobile, web, and the App Store.
 ## Further Notes
 
 Two commitments are bound to the calendar rather than to readiness. The updater
-keypair must exist before the first release, because changing it afterwards
-strands every installed copy with no path forward. And Homebrew disables casks
-failing Gatekeeper in its main repository from 2026-09-01 and has withdrawn the
+keypair and the macOS signing certificate must both exist before the first
+release: changing either afterwards costs every installed copy something it
+cannot get back on its own — a path forward in the first case, the Accessibility
+permission in the second (ADR-0015). And Homebrew disables casks failing
+Gatekeeper in its main repository from 2026-09-01 and has withdrawn the
 `--no-quarantine` escape, so the Developer ID must precede any Homebrew
 distribution rather than follow it.
 

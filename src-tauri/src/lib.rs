@@ -26,6 +26,7 @@ mod result;
 mod settings;
 mod tray;
 mod underway;
+mod update;
 mod welcome;
 
 use demysto_core::Demysto;
@@ -65,7 +66,11 @@ pub fn run() {
             .plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,
-            ));
+            ))
+            // Nothing is asked of the network by loading the plugin: `update`
+            // decides when to ask, and the answer is offered rather than
+            // applied.
+            .plugin(tauri_plugin_updater::Builder::new().build());
     }
 
     #[cfg(target_os = "macos")]
@@ -75,6 +80,7 @@ pub fn run() {
 
     let app = builder
         .manage(Demysto::new(config_dir, env!("CARGO_PKG_VERSION")))
+        .manage(update::Offered::default())
         .setup(|app| {
             // Accessory to begin with, because at startup the Palette is all
             // there is. From here the policy follows the windows; see `dock`.
@@ -148,6 +154,9 @@ pub fn run() {
             commands::continue_answer,
             commands::models,
             commands::open_logs,
+            commands::update_offered,
+            commands::look_for_update,
+            commands::install_update,
             commands::open_accessibility,
             commands::accessibility_asked_for,
             commands::autostart,
@@ -184,6 +193,10 @@ pub fn run() {
             if !app.state::<Demysto>().welcomed() {
                 welcome::reveal(app);
             }
+
+            // Here for a reason of its own: the answer goes into the tray menu,
+            // and the tray is built by the time this event arrives.
+            update::keeps_looking(app);
         }
         // The last window closing is not a request to quit; an explicit exit,
         // which carries a code, is.
