@@ -78,6 +78,13 @@ jobs:
             patchelf \
             libxdo-dev
 
+      # An AppImage that carries its own `libwayland-client.so.0` answers the
+      # host's Mesa with it, and a Mesa newer than this image cannot start
+      # against a copy this old: every window comes up blank. See ADR-0016.
+      - name: The AppImage leaves the Wayland client to the host
+        if: matrix.platform == 'ubuntu-22.04'
+        run: ./scripts/prepare-appimage.sh
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           # Both halves of the universal artifact. The host's own target comes
@@ -190,3 +197,21 @@ jobs:
           # `releases/latest/download`, which a draft is not part of.
           releaseDraft: true
           args: ${{ matrix.args }}
+
+      # The shim put in place before the build is quiet when it stops working:
+      # should the bundler ever read its output plugin from somewhere else,
+      # nothing errors and the library comes back. So the artifact is asked
+      # rather than trusted. The release is a draft until a human publishes it,
+      # which is what makes a failure here still worth something.
+      - name: The built AppImage is one that will draw
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          shopt -s nullglob
+          images=(target/release/bundle/appimage/*.AppImage)
+          if [ "${#images[@]}" -eq 0 ]; then
+            echo "the Linux job produced no AppImage to check" >&2
+            exit 1
+          fi
+          for image in "${images[@]}"; do
+            ./scripts/check-appimage.sh "$image"
+          done
