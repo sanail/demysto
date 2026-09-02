@@ -39,6 +39,12 @@ jobs:
 
     strategy:
       fail-fast: false
+      # One platform at a time. All three jobs write the same `latest.json`:
+      # each reads the copy already in the release, adds its own platform and
+      # puts it back. Run together, two of them read the same copy and the
+      # second upload is refused — which is what the first attempt at v0.1.0
+      # did, Windows and Linux having finished in the same second.
+      max-parallel: 1
       matrix:
         include:
           # One artifact for both architectures, per ADR-0004: `lipo` runs
