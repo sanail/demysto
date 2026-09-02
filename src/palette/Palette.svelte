@@ -321,6 +321,16 @@
       {/if}
     </section>
 
+    <!--
+      Both fields say `autocorrect="off"`, and that is not a matter of taste.
+      macOS puts a candidate window over a WebKit field as soon as a word is
+      typed into it, and while that window is up every Hotkey Demysto has
+      claimed is held rather than delivered: the Hotkey stops closing the
+      Palette it has just opened, and an Action's own Hotkey stops running it,
+      until a key ends the input session — Escape — and the whole queue arrives
+      at once (ticket 21). Neither field is prose: one filters a list of Actions
+      by name, the other collects a Parameter.
+    -->
     {#if selection}
       {#if collecting && parameter}
         <label class="flex flex-col gap-1">
@@ -331,6 +341,7 @@
             bind:this={field}
             bind:value={answers[parameter.id]}
             class={FIELD}
+            autocorrect="off"
           />
         </label>
       {:else}
@@ -340,6 +351,7 @@
           oninput={() => (highlighted = 0)}
           placeholder={t("palette-filter")}
           class={FIELD}
+          autocorrect="off"
         />
 
         <ul class="min-h-0 flex-1 overflow-y-auto">
