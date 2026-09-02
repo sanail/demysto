@@ -1,0 +1,192 @@
+name: Release
+
+# A tag is the whole of what publishing takes. Everything below happens because
+# one was pushed, and nothing below can be started any other way — a release
+# built from a moving branch is a release nobody can say the contents of.
+on:
+  push:
+    tags: ["v*"]
+
+# The release itself is written here; nothing else in the repository is.
+permissions:
+  contents: write
+
+jobs:
+  # A tag that does not match the version in the manifests would publish a
+  # `latest.json` announcing the version already installed, and every installed
+  # copy would go on believing it is current. Cheaper to refuse the tag than to
+  # explain that afterwards.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag names the version being built
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          cargo="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          # `package.json` carries its own copy and can drift from the manifest
+          # nothing but a human keeps in step with it.
+          node="$(node -p 'require("./package.json").version')"
+
+          if [ "$tagged" != "$cargo" ] || [ "$tagged" != "$node" ]; then
+            echo "the tag says $tagged, Cargo.toml says $cargo, package.json says $node" >&2
+            exit 1
+          fi
+
+  release:
+    needs: version
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # One artifact for both architectures, per ADR-0004: `lipo` runs
+          # inside the build rather than `uname -m` in a README.
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+          # `.msi` and the NSIS installer both, which is what "targets": "all"
+          # in `tauri.conf.json` asks for.
+          - platform: windows-latest
+            args: ""
+          # Ubuntu 22.04 rather than a newer image: the runner's glibc becomes
+          # the oldest distribution the `.AppImage` and `.deb` will run on. The
+          # same reason CI pins it, and ADR-0004 records it.
+          - platform: ubuntu-22.04
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    env:
+      # At the job's level so that the steps below can ask whether a secret is
+      # set at all: `secrets` cannot be read from an `if`, and `env` can.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Both halves of the universal artifact. The host's own target comes
+          # with the toolchain; the other one does not, and `lipo` has nothing
+          # to join without it.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./ -> target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The one mistake in this pipeline that nobody would see: a private key
+      # that does not match the public key compiled into the application. Every
+      # artifact would be signed, the release would look right, and every
+      # installed copy would reject the update in silence. Both halves carry the
+      # same key id, so the two can be compared before anything is built.
+      - name: The signing key is the one this build trusts
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          echo probe > probe.txt
+          npx tauri signer sign probe.txt
+
+          python3 - <<'PYTHON'
+          import base64, json, sys
+
+          def key_id(signed: bytes) -> bytes:
+              # Both files are base64 around a two-line text: a comment, then
+              # the key itself. The key's first two bytes name the algorithm and
+              # the next eight are the id.
+              line = base64.b64decode(signed).decode().splitlines()[1]
+              return base64.b64decode(line)[2:10]
+
+          stated = json.load(open("src-tauri/tauri.conf.json"))["plugins"]["updater"]["pubkey"]
+          signed = open("probe.txt.sig").read()
+
+          if key_id(stated.encode()) != key_id(signed.encode()):
+              sys.exit("the signing secret does not match the public key in tauri.conf.json")
+          PYTHON
+
+          rm -f probe.txt probe.txt.sig
+
+      # A self-signed certificate has to be trusted where the build happens:
+      # `codesign` refuses an identity it does not trust, and neither the Tauri
+      # CLI nor `tauri-action` marks one as trusted — both import it and stop
+      # there. See ADR-0015 for what the certificate buys and what it does not.
+      #
+      # Skipped where the secret is unset, and the bundle is then ad-hoc signed
+      # as it is on a development machine.
+      - name: Trust the macOS signing certificate
+        if: matrix.platform == 'macos-latest' && env.APPLE_CERTIFICATE != ''
+        run: |
+          keychain="$RUNNER_TEMP/demysto.keychain-db"
+          password="$(uuidgen)"
+
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -A -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+
+          # Trusted in the system keychain, which is where a trust setting
+          # applies to whatever runs on this machine. The runner is thrown away
+          # when the job ends.
+          security find-certificate -c "$APPLE_SIGNING_IDENTITY" -p "$keychain" \
+            > "$RUNNER_TEMP/certificate.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/certificate.pem"
+
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/certificate.pem"
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The updater's own keypair, generated for this and nothing else. It
+          # is what makes an update safe to take, and it is unrelated to any
+          # Apple or Microsoft certificate — see ADR-0015.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The identity alone. The certificate is already in a keychain the
+          # step above trusted it in, and letting the Tauri CLI import it a
+          # second time would put it in a keychain nothing trusts — which is
+          # the one thing that would make `codesign` refuse it.
+          #
+          # Empty where the secret is unset, and the bundle is then ad-hoc
+          # signed, as it is on a development machine.
+          APPLE_CERTIFICATE: ""
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Demysto ${{ github.ref_name }}
+          # A draft, and deliberately: publishing is where the release notes are
+          # written, and it is also the moment every installed copy is offered
+          # the update — `latest.json` is read through
+          # `releases/latest/download`, which a draft is not part of.
+          releaseDraft: true
+          args: ${{ matrix.args }}
