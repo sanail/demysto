@@ -384,6 +384,9 @@ pub(crate) fn endpoint(
         &draft.name,
         &config::base_url(&entry, &path, words).map_err(configuration)?,
         &config::resolve_key(&entry, env, &path, words),
+        // Verified as it will be run: a Provider that answers one body and
+        // refuses the other is worth finding out about here.
+        config::skip_reasoning(&entry),
     )
 }
 

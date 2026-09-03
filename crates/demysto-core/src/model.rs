@@ -36,6 +36,9 @@ pub(crate) struct Endpoint {
     pub(crate) base_url: String,
     /// `None` for a service that has no key to send — see [`key_for`].
     pub(crate) api_key: Option<String>,
+    /// Whether the request may tell this service not to reason before it
+    /// answers. See [`config::Reasoning`].
+    pub(crate) skip_reasoning: bool,
 }
 
 /// An Endpoint and the Model on it: everything a Run needs in order to ask
@@ -56,6 +59,7 @@ impl fmt::Debug for Endpoint {
             .field("provider", &self.provider)
             .field("base_url", &self.base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "<not shown>"))
+            .field("skip_reasoning", &self.skip_reasoning)
             .finish()
     }
 }
@@ -82,7 +86,12 @@ pub(crate) fn resolve(
     let (provider, model) = chosen(config, binding, kind, words)?;
 
     Ok(Resolved {
-        endpoint: endpoint_for(&provider.name, &provider.base_url, &provider.key)?,
+        endpoint: endpoint_for(
+            &provider.name,
+            &provider.base_url,
+            &provider.key,
+            provider.skip_reasoning,
+        )?,
         model: model.id.clone(),
     })
 }
@@ -97,11 +106,13 @@ pub(crate) fn endpoint_for(
     provider: &str,
     base_url: &str,
     key: &Key,
+    skip_reasoning: bool,
 ) -> Result<Endpoint, RunError> {
     Ok(Endpoint {
         provider: provider.to_owned(),
         base_url: base_url.to_owned(),
         api_key: key_for(key)?.map(ToOwned::to_owned),
+        skip_reasoning,
     })
 }
 
@@ -253,6 +264,9 @@ mod tests {
                     vision: *vision,
                 })
                 .collect(),
+            // Not what these tests are about: they are about which Model the
+            // chain arrives at. `provider.rs` is where the field is asserted.
+            skip_reasoning: false,
         }
     }
 

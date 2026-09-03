@@ -1654,6 +1654,59 @@ mod tests {
         endpoint.assert();
     }
 
+    /// One Provider on a named preset, answering at the mock server: a stated
+    /// base URL wins over the preset's, so this is a preset's other half under
+    /// test without a request leaving the machine.
+    fn one_preset_provider(preset: &str, base_url: &str) -> String {
+        format!(
+            "default_model = \"a provider/a-model\"\n\n\
+             [[providers]]\nname = \"a provider\"\npreset = \"{preset}\"\n\
+             base_url = \"{base_url}\"\napi_key = \"a-key\"\n\
+             models = [{{ id = \"a-model\" }}]\n"
+        )
+    }
+
+    #[test]
+    fn a_service_whose_model_reasons_is_told_not_to() {
+        let mut server = Server::new();
+        let endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(Matcher::PartialJson(json!({
+                "thinking": { "type": "disabled" },
+            })))
+            .with_body(answering("an answer"))
+            .create();
+
+        run(&ready_with(
+            &one_preset_provider("deepseek", &format!("{}/v1", server.url())),
+            "a paragraph",
+        ));
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn a_service_not_known_to_take_the_field_is_not_sent_it() {
+        // Not a preference but a contract: an endpoint that does not know a
+        // field answers 400 as readily as it ignores one.
+        let mut server = Server::new();
+        let endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .match_request(|request| {
+                let body = request.body().map(|body| String::from_utf8_lossy(body));
+                !body.is_ok_and(|body| body.contains("thinking"))
+            })
+            .with_body(answering("an answer"))
+            .create();
+
+        run(&ready_with(
+            &one_preset_provider("openai", &format!("{}/v1", server.url())),
+            "a paragraph",
+        ));
+
+        endpoint.assert();
+    }
+
     #[test]
     fn a_base_url_with_a_trailing_slash_still_reaches_the_endpoint() {
         let mut server = Server::new();

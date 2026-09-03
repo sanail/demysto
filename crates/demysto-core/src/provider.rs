@@ -271,6 +271,9 @@ fn asking(
             .map(|(role, content)| Message { role, content })
             .collect(),
         stream: true,
+        thinking: provider
+            .skip_reasoning
+            .then_some(SkipReasoning { kind: "disabled" }),
     }))
 }
 
@@ -550,6 +553,22 @@ struct Request<'a> {
     /// Stated rather than left out, so that a Provider defaulting the other way
     /// cannot hand back one body where this is waiting for a stream.
     stream: bool,
+    /// Left out entirely at a service not known to take it, which is what the
+    /// `Option` is for: the field is DeepSeek's and not the contract's, and an
+    /// endpoint that has never heard of it answers 400.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<SkipReasoning>,
+}
+
+/// The one value the request's `thinking` field takes: the instruction not to
+/// reason. See [`config::Reasoning`] for why Demysto sends it.
+///
+/// Named for the concept and not for the field, which is DeepSeek's word and
+/// appears only where [`Request`] spells it.
+#[derive(Serialize)]
+struct SkipReasoning {
+    #[serde(rename = "type")]
+    kind: &'static str,
 }
 
 #[derive(Serialize)]

@@ -158,6 +158,10 @@ pub(crate) struct Provider {
     /// to stop working.
     pub(crate) key: Key,
     pub(crate) models: Vec<Model>,
+    /// Whether a request to this Provider may say not to reason first. Settled
+    /// here, where the preset is still at hand, because a Run resolving a Model
+    /// has only the Provider.
+    pub(crate) skip_reasoning: bool,
 }
 
 /// What Demysto will authenticate a Provider with, once the settings have been
@@ -228,6 +232,7 @@ impl fmt::Debug for Provider {
             .field("name", &self.name)
             .field("base_url", &self.base_url)
             .field("models", &self.models)
+            .field("skip_reasoning", &self.skip_reasoning)
             .field(
                 "key",
                 match &self.key {
@@ -462,6 +467,7 @@ pub(crate) fn resolve(
             name: entry.name.clone(),
             base_url: base_url(entry, path, words)?,
             key: resolve_key(entry, env, path, words),
+            skip_reasoning: skip_reasoning(entry),
             models: entry
                 .models
                 .iter()
@@ -567,6 +573,25 @@ pub(crate) struct Spec {
     pub(crate) name: &'static str,
     pub(crate) base_url: &'static str,
     pub(crate) auth: Auth,
+    pub(crate) reasoning: Reasoning,
+}
+
+/// Whether a service can be told to answer without reasoning first.
+///
+/// A Model that reasons spends the seconds before its first word on a chain of
+/// thought nobody asked for. None of the Actions Demysto ships gains anything
+/// from one — a translation least of all — and the Palette exists to put an
+/// answer on screen in as few keystrokes as possible, so where a service takes
+/// the instruction, Demysto sends it.
+pub(crate) enum Reasoning {
+    /// The service documents a field that turns reasoning off, and its everyday
+    /// Model reasons unless it is sent.
+    Skippable,
+    /// Not known to take the field, which is therefore left out: an endpoint
+    /// that does not know a field refuses the request as readily as it ignores
+    /// the field. A local server and a proxy in front of many services are both
+    /// this until somebody checks.
+    Unmentioned,
 }
 
 /// What a service wants by way of authentication.
@@ -610,29 +635,44 @@ impl Preset {
                 name: "deepseek",
                 base_url: "https://api.deepseek.com/v1",
                 auth: Auth::Variable("DEEPSEEK_API_KEY"),
+                reasoning: Reasoning::Skippable,
             },
             Self::Lmstudio => Spec {
                 name: "lmstudio",
                 base_url: "http://localhost:1234/v1",
                 auth: Auth::Nothing,
+                reasoning: Reasoning::Unmentioned,
             },
             Self::Ollama => Spec {
                 name: "ollama",
                 base_url: "http://localhost:11434/v1",
                 auth: Auth::Nothing,
+                reasoning: Reasoning::Unmentioned,
             },
             Self::Openai => Spec {
                 name: "openai",
                 base_url: "https://api.openai.com/v1",
                 auth: Auth::Variable("OPENAI_API_KEY"),
+                reasoning: Reasoning::Unmentioned,
             },
             Self::Openrouter => Spec {
                 name: "openrouter",
                 base_url: "https://openrouter.ai/api/v1",
                 auth: Auth::Variable("OPENROUTER_API_KEY"),
+                reasoning: Reasoning::Unmentioned,
             },
         }
     }
+}
+
+/// Whether this Provider is one Demysto may tell not to reason before it
+/// answers. Known only through a preset: a bare `base_url` is an endpoint
+/// Demysto knows nothing about, and guessing a field onto it would risk the
+/// refusal [`Reasoning::Unmentioned`] describes.
+pub(crate) fn skip_reasoning(entry: &ProviderEntry) -> bool {
+    entry
+        .preset
+        .is_some_and(|preset| matches!(preset.spec().reasoning, Reasoning::Skippable))
 }
 
 /// What a Provider is reached at: what it states, else what its preset knows.
