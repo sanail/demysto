@@ -200,6 +200,16 @@ same shape and the same standing.
 65. As a Linux and Windows user, I want a build for my platform from the same
     release, so that the tool is not quietly macOS-first.
 
+### Reaching everything with the mouse
+
+66. As a reader working with the mouse, I want every step that asks me
+    something — the Palette's Parameter, a Hotkey being recorded — to offer a
+    control I can click, so that a path begun with the mouse does not end at
+    the keyboard.
+67. As a reader, I want a list opened from a button to close as soon as I click
+    or tab away from it, so that it behaves like every other menu on my
+    desktop.
+
 ## Implementation Decisions
 
 ### Shape

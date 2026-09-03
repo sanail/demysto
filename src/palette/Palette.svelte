@@ -112,6 +112,11 @@
     unreachable = await sending(openAccessibility);
   }
 
+  /** What every button in this window looks like, which is the same. */
+  const BUTTON =
+    "cursor-pointer rounded border border-neutral-300 px-2 py-1 text-xs " +
+    "hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800";
+
   /** What both of those fields look like, which is the same. */
   const FIELD =
     "w-full rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm " +
@@ -129,6 +134,14 @@
   const at = $derived(Math.min(highlighted, Math.max(matching.length - 1, 0)));
   const chosen = $derived(matching[at] ?? null);
   const parameter = $derived(collecting?.parameters[asking] ?? null);
+
+  /**
+   * Whether the Parameter on screen is the last one, which is the difference
+   * between a button that runs the Action and one that asks the next question.
+   */
+  const final = $derived(
+    collecting !== null && asking + 1 >= collecting.parameters.length,
+  );
 
   // Every Capture starts the Palette over: it is hidden rather than unloaded,
   // so without this it comes back up filtered by what was typed into it last.
@@ -163,6 +176,7 @@
   $effect(() => {
     void outcome;
     void collecting;
+    void asking;
 
     tick().then(() => field?.focus());
   });
@@ -171,11 +185,11 @@
     if (event.key === "Escape") {
       event.preventDefault();
 
-      // The way out of a question is the question before it: Escape goes back
-      // to the list of Actions, and only closes the Palette from there.
+      // The way out of a question is the question before it: Escape steps
+      // back through the Parameters, reaches the list of Actions from the
+      // first of them, and only closes the Palette from there.
       if (collecting) {
-        collecting = null;
-        asking = 0;
+        back();
       } else {
         dismiss();
       }
@@ -224,6 +238,22 @@
     answers = Object.fromEntries(
       action.parameters.map((parameter) => [parameter.id, parameter.default]),
     );
+  }
+
+  /**
+   * Goes back to the question before this one, and to the list of Actions from
+   * the first of them.
+   *
+   * What has been answered is kept: stepping back is how a mistyped first
+   * answer is corrected, and clearing the rest would make it cost all of them.
+   */
+  function back() {
+    if (asking > 0) {
+      asking -= 1;
+      return;
+    }
+
+    collecting = null;
   }
 
   /** Moves on to the next Parameter, or runs once there is none. */
@@ -294,8 +324,7 @@
             <button
               type="button"
               onclick={grant}
-              class="cursor-pointer rounded border border-neutral-300 px-2 py-1 text-xs
-                     hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              class={BUTTON}
             >
               {t("palette-open-accessibility")}
             </button>
@@ -344,6 +373,20 @@
             autocorrect="off"
           />
         </label>
+
+        <!-- The mouse's half of this step. Enter and Escape do the same and
+             remain what the footer teaches: whoever reached here from the
+             keyboard needs none of this, and whoever clicked an Action should
+             not be handed back to the keyboard to run it (user story 66). -->
+        <div class="flex justify-end gap-2">
+          <button type="button" class={BUTTON} onclick={back}>
+            {t("palette-back")}
+          </button>
+
+          <button type="button" class={BUTTON} onclick={answered}>
+            {final ? t("palette-run") : t("palette-next")}
+          </button>
+        </div>
       {:else}
         <input
           bind:this={field}
