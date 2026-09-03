@@ -14,6 +14,23 @@ html {
   color-scheme: light dark;
 }
 
+/* A combobox is drawn twice: the closed control by the page, and the open list
+   by the browser, in a window of its own. The list is painted from the
+   control's own colours, and Tailwind's form reset leaves the background
+   transparent — so on a dark desktop the browser fell back to its light
+   default and drew the page's near-white text on white. Stating both colours,
+   on the control and on its options, is what gives the open list somewhere to
+   take them from.
+
+   Outside a layer, so that it settles the colours of every combobox rather
+   than losing to the `bg-transparent` the utilities put on the same element.
+   The values are the window's own background, so the closed control is
+   unchanged; only the list that was unreadable is. */
+select,
+select option {
+  @apply bg-white text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100;
+}
+
 /* The rendered answer.
    
    Plain CSS rather than utility classes because this styles markup the Markdown
