@@ -2,6 +2,24 @@
 
 What each release brought, newest first.
 
+## 0.1.2 — 2026-09-04
+
+A release about the mouse, and three places where it could start something only
+the keyboard could finish.
+
+### The pointer
+
+- Recording a Hotkey can be called off with the pointer: the Record button
+  becomes Cancel while it listens, where before it stood there disabled and the
+  way out was the keyboard alone.
+- The Parameters an Action collects have steps of their own to press, so a
+  translation asking for its language can be walked through and backed out of
+  without the keyboard. Escape now steps back one Parameter at a time instead of
+  abandoning all of them at once.
+- The list of Conversations closes the way a menu closes: a click elsewhere or a
+  Tab away dismisses it, the click still lands where it was aimed, and its items
+  are menu items, so the keyboard reaches them at all.
+
 ## 0.1.1 — 2026-09-03
 
 A release about the seconds before an answer, and about a list on Windows that
