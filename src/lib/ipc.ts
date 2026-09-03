@@ -391,6 +391,14 @@ export function showConversation(id: number): Promise<Conversation | null> {
 }
 
 /**
+ * What can arrive while a Turn is still going: the answer so far, or the news
+ * that the Model is reasoning first and has not gone quiet.
+ */
+export type Arriving =
+  | { arriving: "answer"; answer: string }
+  | { arriving: "reasoning" };
+
+/**
  * Every hand-over of an answer still arriving, carrying the whole of it so far
  * rather than the piece that just landed — so a window that missed one is put
  * right by the next. It is render-ready Markdown: see `demysto_core::stream`
@@ -400,11 +408,14 @@ export function showConversation(id: number): Promise<Conversation | null> {
  * crosses the bridge some hundreds of times and an event would wake the Palette
  * for every one of them. It is opened here so that the window asking for the
  * answer looks the same as the windows listening for everything else.
+ *
+ * The same channel says once that the Model is reasoning before it answers,
+ * which is the only other thing that can arrive mid-Turn.
  */
 export function onStreaming(
-  handle: (answer: string) => void,
+  handle: (arriving: Arriving) => void,
 ): Promise<UnlistenFn> {
-  const channel = new Channel<string>();
+  const channel = new Channel<Arriving>();
   channel.onmessage = handle;
 
   return invoke<void>("show_answers_on", { channel }).then(

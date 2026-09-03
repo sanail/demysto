@@ -63,6 +63,7 @@ result-quotation-label = The text this Conversation is about
 result-show-more = Show more
 result-show-less = Show less
 result-asking = Asking the Model…
+result-reasoning = The Model is reasoning…
 result-copy-answer = Copy answer
 result-copied = Copied
 result-stopped = Stopped

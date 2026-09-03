@@ -58,6 +58,7 @@ result-quotation-label = El texto del que trata esta conversación
 result-show-more = Mostrar más
 result-show-less = Mostrar menos
 result-asking = Preguntando al modelo…
+result-reasoning = El modelo está razonando…
 result-copy-answer = Copiar la respuesta
 result-copied = Copiado
 result-stopped = Detenido

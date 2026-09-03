@@ -65,3 +65,7 @@ _Avoid_: chat, thread, session, dialogue
 **Turn**:
 A single user message and the Model's reply within a Conversation.
 _Avoid_: message, exchange, round
+
+**Reasoning**:
+The chain of thought a Model may produce before its answer. Demysto asks a Provider that takes the instruction not to reason at all, because none of the Actions gains anything from it and the wait is what the user pays. Where reasoning arrives anyway it is never part of the answer and is not kept: the window says only that the Model is working.
+_Avoid_: thinking, deliberation, reflection

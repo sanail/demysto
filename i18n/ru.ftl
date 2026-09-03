@@ -58,6 +58,7 @@ result-quotation-label = Текст, о котором эта беседа
 result-show-more = Показать целиком
 result-show-less = Свернуть
 result-asking = Спрашиваю модель…
+result-reasoning = Модель размышляет…
 result-copy-answer = Скопировать ответ
 result-copied = Скопировано
 result-stopped = Остановлено

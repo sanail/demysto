@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::i18n::{say, Words};
 use crate::model::{Endpoint, Resolved};
-use crate::run::{RunError, Stopping};
+use crate::run::{Arriving, RunError, Stopping};
 use crate::sse;
 
 /// The contract's endpoints, joined onto whatever base URL the user gave.
@@ -64,7 +64,7 @@ pub(crate) fn answer(
     timeout: Duration,
     stopping: &Stopping,
     words: &Words,
-    mut arriving: impl FnMut(&str),
+    mut arriving: impl FnMut(Arriving),
 ) -> Result<(), RunError> {
     let provider = &resolved.endpoint;
 
@@ -92,6 +92,10 @@ pub(crate) fn answer(
     let mut body_start = Vec::new();
     let mut delivered = false;
     let mut finished = false;
+    // Handed over once and not per event: a Model reasons in hundreds of
+    // fragments, and "the Model is reasoning" is one piece of news however many
+    // of them carry it.
+    let mut said_reasoning = false;
 
     'reading: loop {
         // Stop is looked for here as well as after each fragment, so that it is
@@ -138,9 +142,17 @@ pub(crate) fn answer(
             // was already complete.
             finished |= carried.finished;
 
+            // Before the answer and never instead of it: an event may carry
+            // both, and a Model that reasons first is a Model whose window has
+            // been showing "asking" for as long as the reasoning has taken.
+            if carried.reasoning && !said_reasoning {
+                said_reasoning = true;
+                arriving(Arriving::Reasoning);
+            }
+
             if let Some(fragment) = carried.text {
                 delivered = true;
-                arriving(&fragment);
+                arriving(Arriving::Answer(&fragment));
 
                 // Checked per fragment and not per read: a whole answer often
                 // arrives in one read, and a Stop pressed over the second
@@ -282,6 +294,11 @@ struct Carried {
     /// Its text, which is none when the Model sent a fragment with nothing in
     /// it — the first of a stream, carrying only the role, is one.
     text: Option<String>,
+    /// Whether the Model was reasoning rather than answering here. The
+    /// reasoning itself is not kept: what the window needs is that the Model is
+    /// working, and holding a chain of thought nobody asked to read would be
+    /// keeping the one part of the exchange the user never sees.
+    reasoning: bool,
     /// Whether the Model said this is where the answer ends.
     finished: bool,
 }
@@ -296,6 +313,12 @@ fn carried(payload: &str, words: &Words) -> Result<Carried, RunError> {
         finished: choice
             .as_ref()
             .is_some_and(|choice| choice.finish_reason.is_some()),
+        reasoning: choice.as_ref().is_some_and(|choice| {
+            matches!(
+                &choice.delta.reasoning_content,
+                Some(Reasoned::Said(said)) if !said.is_empty()
+            )
+        }),
         text: choice
             .and_then(|choice| choice.delta.content)
             .filter(|fragment| !fragment.is_empty()),
@@ -600,6 +623,32 @@ struct Choice {
 struct Delta {
     /// Absent on the event that opens a stream, which carries only the role.
     content: Option<String>,
+    /// The Model's reasoning, which is not the answer and never joins it.
+    ///
+    /// Three spellings because the contract has none: `reasoning_content` is
+    /// DeepSeek's and llama.cpp's, `reasoning` is OpenRouter's, and `thinking`
+    /// is what several local servers send. Only the first is one Demysto has
+    /// seen on the wire; the others are accepted so that a Model which reasons
+    /// somewhere else is not silently taken for a Model that has gone quiet.
+    #[serde(default, alias = "reasoning", alias = "thinking")]
+    reasoning_content: Option<Reasoned>,
+}
+
+/// Reasoning as it arrives: a string at every service known to stream it, and
+/// anything at all at one that structures it instead.
+///
+/// The second variant is why this is not a `String`: reasoning is not the
+/// answer, so a service carrying something unexpected under one of these names
+/// must not cost the user the answer that came with it. Refusing the event
+/// would do exactly that.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Reasoned {
+    Said(String),
+    /// Anything else, accepted and dropped. `IgnoredAny` rather than a `Value`
+    /// because nothing reads it: the variant exists so that deserialising the
+    /// event succeeds, not so that the shape can be inspected later.
+    Shaped(serde::de::IgnoredAny),
 }
 
 /// What the Model list endpoint answers with.

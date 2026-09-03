@@ -253,7 +253,7 @@ pub fn show_conversation(demysto: State<'_, Demysto>, id: u64) -> Option<Convers
 
 /// Says where a Conversation window wants an answer sent as it arrives.
 #[tauri::command]
-pub fn show_answers_on(channel: Channel<String>) {
+pub fn show_answers_on(channel: Channel<crate::result::Handover>) {
     crate::result::show_answers_on(channel);
 }
 

@@ -9,6 +9,25 @@ use std::sync::Arc;
 use crate::capture::{CaptureError, CaptureOutcome};
 use crate::i18n::{say, Words};
 
+/// What a Run hands over while it is still going.
+///
+/// Two things can arrive before a Turn is finished, and only one of them is the
+/// answer. A Model that reasons first sends nothing else for as long as it
+/// takes, and a window told only about answers has no way to tell that from a
+/// Provider that has gone quiet — so the other is worth a variant rather than
+/// silence (see `provider::Delta`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arriving<'a> {
+    /// The whole answer so far, render-ready, handed over every so often —
+    /// `stream` says what "render-ready" and "so often" mean, and why they are
+    /// decided in the core rather than in the window.
+    Answer(&'a str),
+    /// The Model has begun reasoning before it answers. Handed over once per
+    /// Turn, and carrying none of the reasoning: what is worth saying is that
+    /// the Model is working, not what it is working through.
+    Reasoning,
+}
+
 /// What one Turn produced, failure included: the Run that opened the
 /// Conversation, or a follow-up asked in it.
 ///

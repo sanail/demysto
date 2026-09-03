@@ -3,7 +3,7 @@
 //! A Run launched from an Action's own Hotkey is the path with no window in it:
 //! select, press, read. When such a Run fails and the Conversation window is
 //! not in front of the user — because showing it did not take, or because they
-//! put it away while the Model was thinking — the failure has nowhere to appear.
+//! put it away while the Model was reasoning — the failure has nowhere to appear.
 //! A notification is what stands in, so that a Hotkey never silently does
 //! nothing (user story 47).
 //!

@@ -53,6 +53,16 @@
   let progress = $state<string | null>(null);
 
   /**
+   * Whether the Model is reasoning before it answers, which is what the window
+   * says while there is nothing else to show.
+   *
+   * Cleared by the answer rather than by an event saying reasoning ended: the
+   * first fragment of the answer is what ends it, and no service reports the
+   * moment in between.
+   */
+  let reasoning = $state(false);
+
+  /**
    * Which question the answer on screen came back to, so that an older one
    * resolving late cannot put the window behind a newer one.
    */
@@ -68,6 +78,7 @@
         // what is on screen, and clearing it would blank the answer for as
         // long as the Model takes to say the next word.
         progress = carryingOn ? progress : null;
+        reasoning = false;
         carryingOn = false;
         refresh();
       }),
@@ -77,9 +88,18 @@
         // would keep the next Turn showing the last one's text until its first
         // hand-over arrived. Every Turn ends here, however it ended.
         carryingOn = false;
+        reasoning = false;
         refresh();
       }),
-      onStreaming((answer) => (progress = answer)),
+      onStreaming((arriving) => {
+        if (arriving.arriving === "reasoning") {
+          reasoning = true;
+          return;
+        }
+
+        progress = arriving.answer;
+        reasoning = false;
+      }),
     ];
 
     refresh();
@@ -512,7 +532,12 @@
         {/if}
 
         {#if text === null && problem === null}
-          <p class="text-sm opacity-50">{t("result-asking")}</p>
+          <!-- Two sentences and not one with a suffix: a Model that reasons
+               first is not "asking" any more, and the several seconds it takes
+               are exactly the ones the user would otherwise read as a hang. -->
+          <p class="text-sm opacity-50">
+            {last && reasoning ? t("result-reasoning") : t("result-asking")}
+          </p>
         {:else}
           {#if text !== null && text !== ""}
             <div class="answer select-text">

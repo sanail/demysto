@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
-use demysto_core::{Demysto, RunOutcome};
+use demysto_core::{Arriving, Demysto, RunOutcome};
+use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
 
@@ -41,7 +42,21 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 ///
 /// A `static` rather than managed state for the reason [`RUNNING`] is one:
 /// single instance is enforced, so there is one result window to send to.
-static SHOWING: Mutex<Option<Channel<String>>> = Mutex::new(None);
+static SHOWING: Mutex<Option<Channel<Handover>>> = Mutex::new(None);
+
+/// What goes down that channel, which is [`Arriving`] in the shape the window
+/// reads.
+///
+/// Reasoning travels here rather than as an event for the reason the answer
+/// does — an event reaches every window, and the Palette has no use for either
+/// — and it costs the bridge one message per Turn against the answer's
+/// hundreds.
+#[derive(Clone, Serialize)]
+#[serde(tag = "arriving", rename_all = "snake_case")]
+pub(crate) enum Handover {
+    Answer { answer: String },
+    Reasoning,
+}
 
 /// Takes the channel a result window wants its answers on, replacing whatever
 /// window said so before it.
@@ -49,7 +64,7 @@ static SHOWING: Mutex<Option<Channel<String>>> = Mutex::new(None);
 /// The window says so as it mounts, which may be after the Run it is about to
 /// show has started. Nothing is replayed: every hand-over carries the whole
 /// answer so far, so the first one to arrive after this puts the window right.
-pub fn show_answers_on(channel: Channel<String>) {
+pub fn show_answers_on(channel: Channel<Handover>) {
     *SHOWING.lock().unwrap() = Some(channel);
 }
 
@@ -227,9 +242,20 @@ fn off_thread<R: Runtime>(
 /// Hands the window the whole answer so far, on every hand-over rather than the
 /// piece that just landed: a window still loading when one goes past is put
 /// right by the next rather than left a fragment short.
-fn streaming(answer: &str) {
+///
+/// The news that the Model is reasoning goes the same way, and needs no such
+/// care: a window that misses it is a window whose next hand-over is the answer
+/// itself, which is what it would have replaced the reasoning with anyway.
+fn streaming(arriving: Arriving) {
+    let handover = match arriving {
+        Arriving::Answer(answer) => Handover::Answer {
+            answer: answer.to_owned(),
+        },
+        Arriving::Reasoning => Handover::Reasoning,
+    };
+
     if let Some(showing) = SHOWING.lock().unwrap().as_ref() {
-        let _ = showing.send(answer.to_owned());
+        let _ = showing.send(handover);
     }
 }
 

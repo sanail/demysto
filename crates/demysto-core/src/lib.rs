@@ -38,7 +38,7 @@ pub use conversation::{Conversation, Summary, Turn};
 pub use fluent::FluentArgs as Args;
 pub use i18n::{Interface, Words, LANGUAGE_ENV};
 pub use paths::{config_dir, ConfigDirError, CONFIG_DIR_ENV};
-pub use run::{RunError, RunOutcome};
+pub use run::{Arriving, RunError, RunOutcome};
 pub use selection::{Kind, Selection};
 pub use settings::{
     ConfiguredModel, ConfiguredProvider, Edit, KeyEdit, KeyStanding, Preset, ProviderEdit, Settings,
@@ -511,12 +511,14 @@ impl Demysto {
     ///
     /// `showing` is handed the whole answer so far, render-ready, every so
     /// often — see [`stream`] for what "render-ready" and "so often" mean and
-    /// why they are decided here rather than in the window.
+    /// why they are decided here rather than in the window. It is also told
+    /// once if the Model reasons before it answers, which is the difference
+    /// between a Model that is working and one that has gone quiet.
     pub fn run(
         &self,
         action: &str,
         parameters: &BTreeMap<String, String>,
-        showing: impl FnMut(&str),
+        showing: impl FnMut(Arriving),
     ) -> RunOutcome {
         // Declared here as well as by the interface, so that the window has
         // nothing stale to find however it got here — the interface declares
@@ -536,7 +538,7 @@ impl Demysto {
     /// The question is the whole of what is sent: the Selection and everything
     /// said about it so far travel as the Turns before this one, which is what
     /// makes a follow-up cost nothing but typing.
-    pub fn follow_up(&self, question: &str, showing: impl FnMut(&str)) -> RunOutcome {
+    pub fn follow_up(&self, question: &str, showing: impl FnMut(Arriving)) -> RunOutcome {
         // A follow-up goes to the Model the Conversation resolves to, on the
         // Selection it is about — which is the Action's binding until a retry
         // switched it, and that Model from then on.
@@ -575,7 +577,7 @@ impl Demysto {
     /// The Turn is asked again rather than added to: a retry is the same
     /// question, and a Conversation that accumulated one copy of it per attempt
     /// would send every failed attempt as context for the next.
-    pub fn retry(&self, model: Option<&str>, showing: impl FnMut(&str)) -> RunOutcome {
+    pub fn retry(&self, model: Option<&str>, showing: impl FnMut(Arriving)) -> RunOutcome {
         // Bound rather than passed straight in, so that the store is let go of
         // before the Turn is asked: a temporary guard would live to the end of
         // the whole statement, and the asking takes the same lock.
@@ -589,7 +591,7 @@ impl Demysto {
     ///
     /// What already arrived is put back to the Model as its own words, and what
     /// comes back is added to it, so that the Turn ends up holding one answer.
-    pub fn continue_answer(&self, showing: impl FnMut(&str)) -> RunOutcome {
+    pub fn continue_answer(&self, showing: impl FnMut(Arriving)) -> RunOutcome {
         let asked = self.store.lock().unwrap().continuing();
 
         self.again(asked, showing)
@@ -611,7 +613,7 @@ impl Demysto {
 
     /// Asks a Turn the store has put back to being asked, however it came to be
     /// one: a retry, or a continuation.
-    fn again(&self, asked: Option<conversation::Asked>, showing: impl FnMut(&str)) -> RunOutcome {
+    fn again(&self, asked: Option<conversation::Asked>, showing: impl FnMut(Arriving)) -> RunOutcome {
         let Some(asked) = asked else {
             return RunOutcome::Failed(run::nothing_to_retry(&self.words()));
         };
@@ -708,7 +710,7 @@ impl Demysto {
         id: u64,
         action: &str,
         parameters: &BTreeMap<String, String>,
-        showing: impl FnMut(&str),
+        showing: impl FnMut(Arriving),
     ) -> RunOutcome {
         let captured = self.last_capture();
         let Some(selection) = captured.as_ref().and_then(CaptureOutcome::selection) else {
@@ -743,7 +745,7 @@ impl Demysto {
 
     /// Puts the Conversation to the Model `asking` resolves to, with its prompt
     /// as what the Turn now being asked sends.
-    fn ask(&self, id: u64, asking: Asking, mut showing: impl FnMut(&str)) -> RunOutcome {
+    fn ask(&self, id: u64, asking: Asking, mut showing: impl FnMut(Arriving)) -> RunOutcome {
         // Recorded before anything is resolved, so that a Turn which never
         // reached a Provider is still a Turn — one the user can try again once
         // they have fixed what stopped it (user story 44). Nothing is sent by
@@ -798,10 +800,15 @@ impl Demysto {
             self.timeout,
             &stopping,
             &words,
-            |fragment| {
-                if let Some(answer) = assembly.push(fragment) {
-                    showing(&answer);
+            |arriving| match arriving {
+                Arriving::Answer(fragment) => {
+                    if let Some(answer) = assembly.push(fragment) {
+                        showing(Arriving::Answer(&answer));
+                    }
                 }
+                // Passed straight on: there is nothing to assemble, and the
+                // window is the only thing that acts on it.
+                Arriving::Reasoning => showing(Arriving::Reasoning),
             },
         );
 
@@ -1176,14 +1183,30 @@ mod tests {
             .collect()
     }
 
-    /// Every state a Run put on screen, and what it finally produced.
+    /// Every state of the answer a Run put on screen, and what it finally
+    /// produced. Reasoning is not one of them — `handed_over` is what asserts
+    /// about that.
     fn watching(demysto: &Demysto) -> (Vec<String>, RunOutcome) {
         let mut shown = Vec::new();
-        let outcome = demysto.run("explain", &BTreeMap::new(), |answer| {
-            shown.push(answer.to_owned())
+        let outcome = demysto.run("explain", &BTreeMap::new(), |arriving| {
+            if let Arriving::Answer(answer) = arriving {
+                shown.push(answer.to_owned());
+            }
         });
 
         (shown, outcome)
+    }
+
+    /// Every hand-over a Run made, reasoning included, named so that an
+    /// assertion reads as the sequence the window would have seen.
+    fn handed_over(demysto: &Demysto, action: &str, parameters: &[(&str, &str)]) -> Vec<String> {
+        let mut seen = Vec::new();
+        demysto.run(action, &collected(parameters), |arriving| match arriving {
+            Arriving::Answer(answer) => seen.push(format!("answer: {answer}")),
+            Arriving::Reasoning => seen.push("reasoning".to_owned()),
+        });
+
+        seen
     }
 
     /// The names of the Actions the Palette would list, in its order.
@@ -1664,6 +1687,140 @@ mod tests {
              base_url = \"{base_url}\"\napi_key = \"a-key\"\n\
              models = [{{ id = \"a-model\" }}]\n"
         )
+    }
+
+    /// A stream that reasons before it answers, spelling the reasoning the way
+    /// `field` does.
+    ///
+    /// Shaped as DeepSeek was observed to send one: the two fields travel
+    /// together with whichever is not in use set to `null`, and the reasoning
+    /// opens with an empty fragment. Both are why this is not simply the field
+    /// on its own — a parser that only ever saw the tidy shape would pass a
+    /// stream this suite never sends it.
+    fn reasoning_then_answering(field: &str, thoughts: &[&str], answer: &str) -> String {
+        std::iter::once("")
+            .chain(thoughts.iter().copied())
+            .map(|thought| json!({ "choices": [{ "delta": { "content": null, field: thought } }] }))
+            .chain(std::iter::once(
+                json!({ "choices": [{ "delta": { "content": answer, field: null } }] }),
+            ))
+            .map(|event| format!("data: {event}\n\n"))
+            .chain(std::iter::once("data: [DONE]\n\n".to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn a_model_that_reasons_first_says_so_once_however_long_it_reasons() {
+        // The dead air this exists to end: a Model reasoning for several
+        // seconds hands over nothing, and a window told only about answers
+        // cannot tell that from a Provider that has gone quiet.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(reasoning_then_answering(
+                "reasoning_content",
+                &["Weighing ", "the ", "options"],
+                "an answer",
+            ))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+
+        assert_eq!(
+            handed_over(&demysto, "explain", &[]),
+            ["reasoning", "answer: an answer"],
+        );
+    }
+
+    #[test]
+    fn what_a_model_reasoned_is_no_part_of_the_answer_it_gives() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(reasoning_then_answering(
+                "reasoning_content",
+                &["The word is a noun, so"],
+                "Джерримендеринг",
+            ))
+            .create();
+
+        let outcome = run(&ready_to_run(&server, "gerrymandering"));
+
+        let RunOutcome::Answered(answer) = outcome else {
+            panic!("an answer, not {outcome:?}");
+        };
+        assert_eq!(answer, "Джерримендеринг");
+    }
+
+    #[test]
+    fn reasoning_is_recognised_whichever_of_its_names_a_service_uses() {
+        // The contract names none of them: `reasoning_content` is DeepSeek's,
+        // `reasoning` is OpenRouter's, and `thinking` is what several local
+        // servers send. A Model reasoning under any of them is a Model working.
+        for field in ["reasoning_content", "reasoning", "thinking"] {
+            let mut server = Server::new();
+            let _endpoint = server
+                .mock("POST", "/v1/chat/completions")
+                .with_body(reasoning_then_answering(field, &["thinking"], "an answer"))
+                .create();
+
+            let demysto = ready_to_run(&server, "a paragraph");
+
+            assert_eq!(
+                handed_over(&demysto, "explain", &[]),
+                ["reasoning", "answer: an answer"],
+                "{field}",
+            );
+        }
+    }
+
+    #[test]
+    fn reasoning_that_is_not_text_costs_the_user_nothing() {
+        // A service is free to structure this field however it likes: it is not
+        // the answer, so an unfamiliar shape under its name must not turn an
+        // answer that did arrive into a malformed stream.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(
+                [
+                    json!({ "choices": [{ "delta": { "reasoning": { "summary": ["a thought"] } } }] }),
+                    json!({ "choices": [{ "delta": { "content": "an answer" } }] }),
+                ]
+                .iter()
+                .map(|event| format!("data: {event}\n\n"))
+                .chain(std::iter::once("data: [DONE]\n\n".to_owned()))
+                .collect::<String>(),
+            )
+            .create();
+
+        let outcome = run(&ready_to_run(&server, "a paragraph"));
+
+        let RunOutcome::Answered(answer) = outcome else {
+            panic!("an answer, not {outcome:?}");
+        };
+        assert_eq!(answer, "an answer");
+    }
+
+    #[test]
+    fn a_stream_that_only_ever_reasoned_is_still_no_answer() {
+        // Reasoning is not delivery: a Turn that reasoned and stopped has
+        // nothing to show, and saying so is what offers the user a retry.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(
+                "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"a thought\"}}]}\n\n\
+                 data: [DONE]\n\n",
+            )
+            .create();
+
+        let outcome = run(&ready_to_run(&server, "a paragraph"));
+
+        assert!(
+            matches!(outcome, RunOutcome::Failed(_)),
+            "a failure, not {outcome:?}",
+        );
     }
 
     #[test]
