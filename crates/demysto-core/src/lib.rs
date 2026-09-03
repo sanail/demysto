@@ -613,7 +613,11 @@ impl Demysto {
 
     /// Asks a Turn the store has put back to being asked, however it came to be
     /// one: a retry, or a continuation.
-    fn again(&self, asked: Option<conversation::Asked>, showing: impl FnMut(Arriving)) -> RunOutcome {
+    fn again(
+        &self,
+        asked: Option<conversation::Asked>,
+        showing: impl FnMut(Arriving),
+    ) -> RunOutcome {
         let Some(asked) = asked else {
             return RunOutcome::Failed(run::nothing_to_retry(&self.words()));
         };
