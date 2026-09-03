@@ -2,6 +2,25 @@
 
 What each release brought, newest first.
 
+## 0.1.1 — 2026-09-03
+
+A release about the seconds before an answer, and about a list on Windows that
+could not be read.
+
+### The wait
+
+- Where a service takes the instruction, Demysto asks for an answer with no
+  chain of thought before it. DeepSeek takes it, and a translation that used to
+  spend seconds reasoning now starts straight away.
+- Where reasoning arrives anyway it is still no part of the answer, and the
+  window says the Model is reasoning instead of standing on "Asking the Model…"
+  until the first word.
+
+### Windows
+
+- The open list of a dropdown was white on white. WebView2 paints it from the
+  element's own colours, and the form reset had left them transparent.
+
 ## 0.1.0 — 2026-09-02
 
 The first release. Demysto sits in the tray, and a Hotkey over whatever you are
