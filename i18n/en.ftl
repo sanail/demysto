@@ -160,6 +160,7 @@ settings-hotkeys = Hotkeys
 settings-palette-hotkey = The Palette — what opens it over whatever you are reading
 settings-hotkey-record = Record
 settings-hotkey-clear = Clear
+settings-hotkey-cancel = Cancel
 settings-hotkey-recording = Press a combination… Esc to stop
 settings-hotkey-default = { $hotkey } — what Demysto comes with
 settings-hotkey-none = None — this Action is reached through the Palette

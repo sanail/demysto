@@ -155,6 +155,7 @@ settings-hotkeys = Atajos de teclado
 settings-palette-hotkey = La paleta — lo que la abre sobre aquello que estés leyendo
 settings-hotkey-record = Grabar
 settings-hotkey-clear = Borrar
+settings-hotkey-cancel = Cancelar
 settings-hotkey-recording = Pulsa una combinación… Esc para parar
 settings-hotkey-default = { $hotkey } — lo que trae Demysto
 settings-hotkey-none = Ninguno — a esta acción se llega por la paleta

@@ -155,6 +155,7 @@ settings-hotkeys = Горячие клавиши
 settings-palette-hotkey = Палитра — то, что открывает её поверх того, что вы читаете
 settings-hotkey-record = Записать
 settings-hotkey-clear = Очистить
+settings-hotkey-cancel = Отмена
 settings-hotkey-recording = Нажмите сочетание… Esc — прекратить
 settings-hotkey-default = { $hotkey } — то, с чем Demysto поставляется
 settings-hotkey-none = Нет — это действие вызывается через палитру

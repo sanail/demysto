@@ -730,9 +730,9 @@
   function record(event: KeyboardEvent) {
     const pressed = combination(event, bareKeys);
 
-    // Escape on its own is the way out, and is why the recording does not need
-    // a Cancel button of its own. Escape with a modifier is a combination like
-    // any other.
+    // Escape on its own is the way out — the keyboard's half of the way out
+    // the Record button offers while it is recording (user story 66). Escape
+    // with a modifier is a combination like any other.
     if (event.code === "Escape" && !pressed) {
       recording = null;
       return;
@@ -1099,10 +1099,13 @@
             <button
               type="button"
               class={BUTTON}
-              disabled={recording !== null}
-              onclick={() => (recording = "palette")}
+              disabled={recording !== null && recording !== "palette"}
+              onclick={() =>
+                (recording = recording === "palette" ? null : "palette")}
             >
-              {t("settings-hotkey-record")}
+              {recording === "palette"
+                ? t("settings-hotkey-cancel")
+                : t("settings-hotkey-record")}
             </button>
 
             <button
@@ -1302,10 +1305,13 @@
               <button
                 type="button"
                 class={BUTTON}
-                disabled={recording !== null}
-                onclick={() => (recording = "action")}
+                disabled={recording !== null && recording !== "action"}
+                onclick={() =>
+                  (recording = recording === "action" ? null : "action")}
               >
-                {t("settings-hotkey-record")}
+                {recording === "action"
+                  ? t("settings-hotkey-cancel")
+                  : t("settings-hotkey-record")}
               </button>
 
               <button

@@ -159,6 +159,7 @@ settings-hotkeys = Tastenkürzel
 settings-palette-hotkey = Die Palette — was sie über dem öffnet, was Sie gerade lesen
 settings-hotkey-record = Aufnehmen
 settings-hotkey-clear = Leeren
+settings-hotkey-cancel = Abbrechen
 settings-hotkey-recording = Drücken Sie eine Kombination… Esc zum Beenden
 settings-hotkey-default = { $hotkey } — womit Demysto ausgeliefert wird
 settings-hotkey-none = Keines — diese Aktion wird über die Palette erreicht
