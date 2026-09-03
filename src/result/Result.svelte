@@ -80,6 +80,7 @@
         progress = carryingOn ? progress : null;
         reasoning = false;
         carryingOn = false;
+        close(false);
         refresh();
       }),
       onAnswered(() => {
@@ -301,6 +302,93 @@
   let listing = $state(false);
   let list = $state<Summary[]>([]);
 
+  /**
+   * The button the list opens from and the list itself: focus goes into the
+   * one and back to the other, and between them is what counts as inside.
+   */
+  let opener = $state<HTMLButtonElement>();
+  let menu = $state<HTMLElement>();
+
+  // A pointer put down anywhere else closes the list, because that is what a
+  // menu does (user story 67). In the capture phase so that a handler that
+  // stops propagation cannot leave the list standing, and without preventing
+  // anything: the click the user aimed at also lands, rather than being spent
+  // on dismissing a menu they had already stopped looking at.
+  $effect(() => {
+    if (!listing) return;
+
+    function elsewhere(event: PointerEvent) {
+      const put = event.target;
+      if (!(put instanceof Node)) return;
+
+      if (menu?.contains(put) || opener?.contains(put)) return;
+
+      close(false);
+    }
+
+    window.addEventListener("pointerdown", elsewhere, true);
+
+    return () => window.removeEventListener("pointerdown", elsewhere, true);
+  });
+
+  /** Closes the list when the focus lands outside it — Tab, and nothing else. */
+  function leaving(event: FocusEvent) {
+    const going = event.relatedTarget;
+
+    // Focus that went nowhere is this window losing it to another application,
+    // and that is not leaving the menu: coming back to the window should find
+    // it where it was left. A click inside this window that focuses nothing is
+    // the same event, and is closed by the pointer handler above instead.
+    if (going === null) return;
+
+    if (going instanceof Node && (menu?.contains(going) || opener?.contains(going))) {
+      return;
+    }
+
+    close(false);
+  }
+
+  /**
+   * Closes the list, and by default hands the focus back to the button it
+   * opened from — the way out of a menu is where you came into it.
+   *
+   * `returning` is false wherever the user is already somewhere else: a click
+   * elsewhere, a Tab out, a Run that arrived on its own. Pulling the focus
+   * back there would take it off whatever they had just reached.
+   */
+  function close(returning = true) {
+    if (!listing) return;
+
+    listing = false;
+
+    if (returning) opener?.focus();
+  }
+
+  /** Steps between the Conversations, wrapping round as the Palette's list does. */
+  function onMenuKeydown(event: KeyboardEvent) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+
+    event.preventDefault();
+
+    const items = [
+      ...(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []),
+    ];
+
+    if (items.length === 0) return;
+
+    const by = event.key === "ArrowDown" ? 1 : -1;
+    const at = items.indexOf(document.activeElement as HTMLElement);
+
+    const next =
+      at === -1
+        ? by === 1
+          ? 0
+          : items.length - 1
+        : (at + by + items.length) % items.length;
+
+    items[next].focus();
+  }
+
   // An answer arriving pushes the view down with it, unless the user has
   // scrolled up to read something, in which case it stays where they put it.
   $effect(() => {
@@ -335,14 +423,29 @@
 
   /** Opens the list of this session's Conversations, or closes it again. */
   async function toggle() {
-    listing = !listing;
+    if (listing) {
+      close();
+      return;
+    }
 
-    if (listing) list = await conversations();
+    // Asked for before the list is shown rather than after: a menu that comes
+    // up empty and fills in a moment later has nothing for the focus to land
+    // on at the moment it opens.
+    list = await conversations();
+    listing = true;
+
+    await tick();
+
+    // The list itself where there is nothing in it to focus: Escape has to
+    // come from somewhere, and a button that sometimes opens nothing reachable
+    // is a button that sometimes appears to do nothing.
+    const first = menu?.querySelector<HTMLElement>('[role="menuitem"]');
+    (first ?? menu)?.focus();
   }
 
   /** Goes back to an earlier Conversation, which is then the one asked in. */
   async function goBackTo(id: number) {
-    listing = false;
+    close();
     progress = null;
 
     await show(showConversation(id));
@@ -392,7 +495,7 @@
     // The way out of a list is the list: Escape closes it, and only closes the
     // window from there.
     if (listing) {
-      listing = false;
+      close();
     } else {
       dismiss();
     }
@@ -414,46 +517,65 @@
   class="flex h-screen flex-col gap-3 bg-white p-6 font-sans text-neutral-900
          dark:bg-neutral-900 dark:text-neutral-100"
 >
-  <header class="relative flex items-baseline justify-between gap-3">
+  <header class="flex items-baseline justify-between gap-3">
     <h1 class="text-sm font-semibold tracking-tight">
       {showing?.action?.name ?? t("app-name")}
     </h1>
 
-    <button
-      type="button"
-      class="rounded border border-neutral-300 px-2 py-0.5 text-xs
-             hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-      onclick={toggle}
-    >
-      {t("result-conversations")}
-    </button>
-
-    {#if listing}
-      <ul
-        class="absolute right-0 top-6 z-10 max-h-64 w-80 overflow-y-auto rounded border
-               border-neutral-300 bg-white py-1 text-xs shadow-lg
-               dark:border-neutral-700 dark:bg-neutral-800"
+    <!-- Both halves under one element, because leaving the menu is a matter of
+         where the focus went and only this knows what counts as still inside. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="relative" onfocusout={leaving}>
+      <button
+        bind:this={opener}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={listing}
+        class="rounded border border-neutral-300 px-2 py-0.5 text-xs
+               hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        onclick={toggle}
       >
-        {#each list as held (held.id)}
-          <li>
-            <button
-              type="button"
-              class="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left
-                     hover:bg-neutral-100 dark:hover:bg-neutral-700"
-              class:font-semibold={held.id === showing?.id}
-              onclick={() => goBackTo(held.id)}
-            >
-              <span>{held.name ?? t("result-conversation-unnamed")}</span>
-              {#if held.about !== ""}
-                <span class="w-full truncate opacity-50">{held.about}</span>
-              {/if}
-            </button>
-          </li>
-        {:else}
-          <li class="px-3 py-1.5 opacity-50">{t("result-nothing-asked-yet")}</li>
-        {/each}
-      </ul>
-    {/if}
+        {t("result-conversations")}
+      </button>
+
+      {#if listing}
+        <!-- A menu and not a list of choices: every item takes the window
+             somewhere rather than setting a value. -->
+        <ul
+          bind:this={menu}
+          role="menu"
+          tabindex="-1"
+          aria-label={t("result-conversations")}
+          onkeydown={onMenuKeydown}
+          class="absolute right-0 top-full z-10 mt-1 max-h-64 w-80 overflow-y-auto
+                 rounded border border-neutral-300 bg-white py-1 text-xs shadow-lg
+                 outline-none dark:border-neutral-700 dark:bg-neutral-800"
+        >
+          {#each list as held (held.id)}
+            <li role="none">
+              <button
+                type="button"
+                role="menuitem"
+                class="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left
+                       hover:bg-neutral-100 focus:bg-neutral-100 focus:outline-none
+                       dark:hover:bg-neutral-700 dark:focus:bg-neutral-700"
+                class:font-semibold={held.id === showing?.id}
+                onclick={() => goBackTo(held.id)}
+              >
+                <span>{held.name ?? t("result-conversation-unnamed")}</span>
+                {#if held.about !== ""}
+                  <span class="w-full truncate opacity-50">{held.about}</span>
+                {/if}
+              </button>
+            </li>
+          {:else}
+            <li role="none" class="px-3 py-1.5 opacity-50">
+              {t("result-nothing-asked-yet")}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
   </header>
 
   <!-- svelte-ignore a11y_click_events_have_key_events -->
