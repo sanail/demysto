@@ -2,6 +2,37 @@
 
 What each release brought, newest first.
 
+## 0.1.3 — 2026-09-06
+
+A release about Settings: what it can say about the rest of the system, and what
+it says to a screen reader.
+
+### Starting at login
+
+- Settings turns starting at login on and off, and shows what the login items
+  hold rather than what Demysto last asked of them. The choice had been offered
+  once, during the first run, with nowhere afterwards to change one's mind.
+- The box answers in turn. A click into a window that did not have focus asks
+  the system two questions at once, and the older answer could land last and
+  undo the click. A list that could not be read is no longer reported as a list
+  that says no.
+
+### What Settings knows
+
+- The Provider the first run wrote is in Settings straight away. The window had
+  read the file before the flow finished writing it, and the first Provider
+  appeared only after a restart.
+- A Model is written as it was typed. macOS autocorrection was capitalising
+  identifiers in the first-run and Settings fields, and `mock-small` reached the
+  file as `Mock-small`.
+
+### Reading the window aloud
+
+- The Hotkey row in Settings says what it is for, what is bound now, that a
+  recording is under way, and which combinations are allowed. On Linux the row
+  had been two unlabelled buttons and nothing besides. The per-Action Hotkey row
+  in the Action editor answers the same way.
+
 ## 0.1.2 — 2026-09-04
 
 A release about the mouse, and three places where it could start something only
