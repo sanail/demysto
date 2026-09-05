@@ -451,6 +451,18 @@
         <h2 class="text-sm font-medium">{t("welcome-provider-title")}</h2>
         <p class="text-sm opacity-60">{t("welcome-provider-detail")}</p>
 
+        <!--
+          Every field here says `autocorrect="off"`, for the reason the
+          Palette's fields do (ticket 21) and with a consequence of its own:
+          macOS corrects what is typed into a WebKit field, and none of this is
+          prose. Watched on a live desktop — "mock" was written down as "Mock"
+          and "mock-small" as "Mock-small", which is a Provider refusing a Model
+          the user typed correctly, at the first question they ask.
+
+          The key is left out because it is a password field, which macOS
+          corrects nothing in — watched in the same run, where the key arrived
+          exactly as typed.
+        -->
         <div class="grid grid-cols-2 gap-3">
           <label class="flex flex-col gap-1">
             <span class="text-xs opacity-60">
@@ -476,6 +488,7 @@
               bind:value={name}
               oninput={changed}
               class={FIELD}
+              autocorrect="off"
               placeholder={t("settings-provider-name-example")}
             />
           </label>
@@ -490,6 +503,7 @@
               bind:value={baseUrl}
               oninput={changed}
               class={FIELD}
+              autocorrect="off"
               placeholder={presets.find((it) => it.name === preset)?.base_url ??
                 t("settings-provider-base-url-example")}
             />
@@ -517,7 +531,12 @@
                 {/each}
               </select>
             {:else}
-              <input bind:value={model} oninput={changed} class={FIELD} />
+              <input
+                bind:value={model}
+                oninput={changed}
+                class={FIELD}
+                autocorrect="off"
+              />
             {/if}
           </label>
 

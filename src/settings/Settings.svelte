@@ -799,6 +799,20 @@
         </button>
       </div>
 
+      <!--
+        Every field this window writes an identifier from says
+        `autocorrect="off"`, for the reason the Palette's fields do (ticket 21)
+        and with a consequence of its own: macOS corrects what is typed into a
+        WebKit field, and what it corrects is what gets written. Watched on a
+        live desktop through the first-run flow, whose fields are these ones:
+        "mock" was written down as "Mock" and "mock-small" as "Mock-small" —
+        a Provider refusing a Model the user typed correctly.
+
+        Three fields are left out, and each for a reason of its own: the key is
+        a password field, which macOS corrects nothing in; the warning
+        threshold takes a number; and an Action's prompt is the one thing here
+        that IS prose, written in whole sentences for a Model to read.
+      -->
       {#each drafts as draft, at (at)}
         <!-- Named on the element, so that a window opened for one Provider —
              which is what a refused key does — can bring it into view and say
@@ -816,6 +830,7 @@
               <input
                 bind:value={draft.name}
                 class={FIELD}
+                autocorrect="off"
                 placeholder={t("settings-provider-name-example")}
               />
             </label>
@@ -849,6 +864,7 @@
               <input
                 bind:value={draft.base_url}
                 class={FIELD}
+                autocorrect="off"
                 placeholder={presets.find((it) => it.name === draft.preset)
                   ?.base_url ?? t("settings-provider-base-url-example")}
               />
@@ -872,6 +888,7 @@
               <input
                 bind:value={draft.api_key_env}
                 class={FIELD}
+                autocorrect="off"
                 placeholder={presets.find((it) => it.name === draft.preset)
                   ?.variable ?? t("settings-provider-key-variable-example")}
               />
@@ -921,7 +938,11 @@
             <ul class="flex flex-col gap-1">
               {#each draft.models as model, index (index)}
                 <li class="flex items-center gap-2">
-                  <input bind:value={model.id} class="{FIELD} flex-1" />
+                  <input
+                    bind:value={model.id}
+                    class="{FIELD} flex-1"
+                    autocorrect="off"
+                  />
 
                   <label class="flex items-center gap-1 text-xs opacity-70">
                     <input type="checkbox" bind:checked={model.vision} />
@@ -1287,6 +1308,7 @@
               <input
                 bind:value={editing.draft.name}
                 class={FIELD}
+                autocorrect="off"
                 placeholder={t("settings-action-name-example")}
               />
             </label>
@@ -1376,16 +1398,19 @@
                   <input
                     bind:value={parameter.id}
                     class="{FIELD} flex-1 font-mono text-xs"
+                    autocorrect="off"
                     placeholder={t("settings-parameter-id-example")}
                   />
                   <input
                     bind:value={parameter.label}
                     class="{FIELD} flex-1"
+                    autocorrect="off"
                     placeholder={t("settings-parameter-label-example")}
                   />
                   <input
                     bind:value={parameter.default}
                     class="{FIELD} flex-1"
+                    autocorrect="off"
                     placeholder={t("settings-parameter-default-example")}
                   />
                   <button
