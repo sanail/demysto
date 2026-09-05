@@ -1155,10 +1155,43 @@
       {/if}
 
       {#if !unreadable}
+        <!-- A row of four sentences, and until ticket 26 a screen reader was
+             given two buttons and none of them: what the row is for, what is
+             bound now, that a recording is under way and what may be pressed
+             were bare runs of text, which WebKitGTK keeps in no tree — the
+             same gap ticket 18 found in the Palette's header, in a second
+             place.
+
+             So the combination is the *value* of this row rather than a
+             sentence beside it: the caption names it, and reaching it reads
+             both, in the order somebody would ask. `status` is what keeps it
+             in the tree at all, and here it speaks as well — unlike the
+             Palette's caption, what changes these words is the user pressing
+             Record, so there is somebody listening when they change. The one
+             change nobody asks for — the settings arriving and putting the
+             user's own combination where the built-in one was — happens at
+             startup, while this window is loaded and hidden, which is where
+             18's caption changes too and where an announcement reaches
+             nobody.
+
+             The rule is what may be pressed, so it is on the button that asks
+             for a combination, and the caption is on both buttons: the value
+             is not focusable, and a Tab that arrives at "Record" would
+             otherwise arrive at a word with nothing saying which of the two
+             rows it belongs to. The rule needed no role of its own — it is a
+             paragraph now rather than a run of text inside a row, and a
+             paragraph is kept.
+
+             Nothing here draws anything: the same words stay in the same
+             places at the same size. -->
         <div class="flex flex-col gap-1">
-          <span class="text-xs opacity-60">{t("settings-palette-hotkey")}</span>
+          <span id="palette-hotkey" class="text-xs opacity-60">
+            {t("settings-palette-hotkey")}
+          </span>
           <div class="flex items-center gap-2">
             <span
+              role="status"
+              aria-labelledby="palette-hotkey"
               class="{FIELD} flex-1 truncate {paletteHotkey ||
               recording === 'palette'
                 ? ''
@@ -1178,6 +1211,7 @@
             <button
               type="button"
               class={BUTTON}
+              aria-describedby="palette-hotkey palette-hotkey-rule"
               disabled={recording !== null && recording !== "palette"}
               onclick={() =>
                 (recording = recording === "palette" ? null : "palette")}
@@ -1190,16 +1224,17 @@
             <button
               type="button"
               class={BUTTON}
+              aria-describedby="palette-hotkey"
               disabled={!paletteHotkey}
               onclick={unbindPalette}
             >
               {t("settings-hotkey-clear")}
             </button>
           </div>
-          <span class="text-xs opacity-50">
+          <p id="palette-hotkey-rule" class="text-xs opacity-50">
             {t("settings-hotkey-rule")}
             {t("settings-palette-hotkey-detail")}
-          </span>
+          </p>
         </div>
       {/if}
 
@@ -1385,10 +1420,20 @@
             </label>
           </div>
 
+          <!-- The Palette's Hotkey row, again and identically: the caption
+               names the value, the rule is on the button that asks for a
+               combination, and both buttons say which row they are in — which
+               matters most here, where a second Record and a second Clear are
+               on screen at the same time as the Palette's. See the comment
+               there for why any of it is needed. -->
           <div class="flex flex-col gap-1">
-            <span class="text-xs opacity-60">{t("settings-action-hotkey")}</span>
+            <span id="action-hotkey" class="text-xs opacity-60">
+              {t("settings-action-hotkey")}
+            </span>
             <div class="flex items-center gap-2">
               <span
+                role="status"
+                aria-labelledby="action-hotkey"
                 class="{FIELD} flex-1 truncate {editing.draft.hotkey ||
                 recording === 'action'
                   ? ''
@@ -1406,6 +1451,7 @@
               <button
                 type="button"
                 class={BUTTON}
+                aria-describedby="action-hotkey action-hotkey-rule"
                 disabled={recording !== null && recording !== "action"}
                 onclick={() =>
                   (recording = recording === "action" ? null : "action")}
@@ -1418,16 +1464,17 @@
               <button
                 type="button"
                 class={BUTTON}
+                aria-describedby="action-hotkey"
                 disabled={!editing.draft.hotkey}
                 onclick={unbind}
               >
                 {t("settings-hotkey-clear")}
               </button>
             </div>
-            <span class="text-xs opacity-50">
+            <p id="action-hotkey-rule" class="text-xs opacity-50">
               {t("settings-hotkey-rule")}
               {t("settings-action-hotkey-detail")}
-            </span>
+            </p>
           </div>
 
           <label class="flex flex-col gap-1">
