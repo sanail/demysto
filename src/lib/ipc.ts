@@ -274,6 +274,21 @@ export function onProviderWanted(
 }
 
 /**
+ * The settings as the file holds them, every time they are written — by this
+ * window or by another.
+ *
+ * Listened to as well as asked for, because Settings loads its page at startup
+ * and is hidden rather than closed for the rest of the session: the first-run
+ * flow configures a Provider after that reading, and a window that only asked
+ * as it loaded would show none until Demysto is restarted.
+ */
+export function onSettingsSaved(
+  handle: (settings: Settings) => void,
+): Promise<UnlistenFn> {
+  return listen<Settings>("settings://saved", (event) => handle(event.payload));
+}
+
+/**
  * Opens the settings pane where the Accessibility permission is granted, which
  * is how a Capture the system refused is fixed from where it is reported.
  * Rejects with a whole sentence when the pane could not be reached.

@@ -8,6 +8,7 @@
     installUpdate,
     lookForUpdate,
     onProviderWanted,
+    onSettingsSaved,
     onUpdateOffered,
     openLogs,
     presets as offeredPresets,
@@ -170,6 +171,8 @@
   let listening: Promise<UnlistenFn> | null = null;
   /** The same, for what the backend's own update checks find. */
   let watching: Promise<UnlistenFn> | null = null;
+  /** The same, for the settings as each save leaves them. */
+  let following: Promise<UnlistenFn> | null = null;
   /** What opens the Palette when nothing states otherwise, as it is read. */
   let paletteDefault = $state("");
   /** The keys a Hotkey may be on its own — the backend decides which. */
@@ -243,6 +246,20 @@
     watching = onUpdateOffered((version) => (newer = version));
     await watching;
 
+    // Every save, whoever made it — which is how the Provider the first-run
+    // flow configures reaches a window that loaded its page before there was
+    // one. Registered before the file is read below and waited on for the
+    // reason above: a save landing between the two would be emitted to nobody.
+    //
+    // A settings file that arrives is a settings file that was read, so a
+    // window that had nothing to offer because it could not be read has
+    // something to offer now.
+    following = onSettingsSaved((settings) => {
+      unreadable = null;
+      show(settings);
+    });
+    await following;
+
     newer = await updateOffered();
 
     const may = await allowed();
@@ -266,6 +283,7 @@
   onDestroy(() => {
     listening?.then((off) => off());
     watching?.then((off) => off());
+    following?.then((off) => off());
   });
 
   /** Brings the Provider this window was opened for into view. */

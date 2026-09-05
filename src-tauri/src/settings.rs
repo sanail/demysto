@@ -3,7 +3,7 @@
 //! An ordinary window rather than the Palette's panel — it is somewhere the
 //! user works for a minute, not something that floats over what they were doing.
 
-use demysto_core::Demysto;
+use demysto_core::{Demysto, Settings};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 /// The window label, fixed in `tauri.conf.json`.
@@ -12,6 +12,27 @@ pub const LABEL: &str = "settings";
 /// Emitted with the name of the Provider Settings should open at, so that a
 /// refused key can be fixed where it is reported (user story 45).
 const PROVIDER_EVENT: &str = "settings://provider";
+
+/// Emitted with the settings as the file now holds them, every time they are
+/// written.
+const SAVED_EVENT: &str = "settings://saved";
+
+/// Hands the window the settings as the file now holds them.
+///
+/// Told rather than asked for, for the reason the language beside it is: this
+/// window's page is loaded at startup and hidden rather than closed for the
+/// rest of the session, so it reads the file once and would go on showing that
+/// reading for ever. The first-run flow is the other writer, and the Provider
+/// it configures is written after Settings has read a file that had none —
+/// which is a Settings window with no Provider in it until Demysto is
+/// restarted.
+///
+/// The window that saved is told too, and shows what it has already shown: the
+/// alternative is a rule about who is being told, for an assignment of the same
+/// values.
+pub fn saved<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
+    let _ = app.emit_to(LABEL, SAVED_EVENT, settings);
+}
 
 /// Brings Settings in front of the user, wherever it was left.
 ///

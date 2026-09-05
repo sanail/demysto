@@ -320,6 +320,12 @@ pub async fn save_settings<R: Runtime>(
     // `catalogued`, which the window asks for straight after a save.
     let _ = app.emit(LANGUAGE_EVENT, app.state::<Demysto>().language().tag());
 
+    // And the settings themselves, to the window that shows them — which is not
+    // always the window that saved them: the first-run flow writes the first
+    // Provider there will ever be, and Settings has had its page loaded since
+    // startup. `settings::saved` says the rest.
+    crate::settings::saved(&app, &saved);
+
     // The two native surfaces no webview redraws, put back beside the event
     // that redraws the rest: the window's own title, and — on macOS — the menu
     // bar. The tray menu is the third, and is rebuilt where the catalogue is
