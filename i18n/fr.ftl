@@ -168,6 +168,12 @@ settings-palette-hotkey-detail = Enregistré par le bouton Enregistrer ci-dessou
 settings-action-hotkey-detail = Les paramètres ne sont pas demandés par ce chemin — chacun prend ce qu'il propose.
 settings-wayland-hotkeys = Wayland ne laisse pas non plus une application réserver un raccourci pour elle. Demysto demande les combinaisons ci-dessous au portail GlobalShortcuts du bureau, et c'est le bureau qui décide à quoi chacune répond — changez-les dans les réglages de raccourcis clavier du bureau lui-même, où elles sont listées sous Demysto.
 
+### Startup
+
+settings-autostart = Démarrage
+settings-autostart-choice = Le lancer à l'ouverture de session
+settings-autostart-detail = Demysto attend le raccourci dans la barre d'état : il ne peut répondre que tant qu'il tourne. Cette case prend effet dès que vous la cochez et non à l'enregistrement : les ouvertures automatiques sont la liste de votre système et non une ligne des réglages de Demysto, et cette même liste se modifie aussi dans les réglages du système.
+
 ### Logs
 
 settings-logs = Journaux

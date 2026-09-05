@@ -36,6 +36,12 @@ _Avoid_: launcher, menu, popup, command bar
 A global key combination. One opens the Palette; an Action may additionally own a Hotkey that runs it directly, skipping the Palette.
 _Avoid_: shortcut, keybinding, accelerator
 
+### What keeps Demysto running
+
+**Autostart**:
+Whether Demysto is in the operating system's login items, so that a resident tool is already running by the time it is wanted. The answer belongs to the system rather than to Demysto: it is asked for rather than remembered, and it changes whenever somebody edits that list in the system's own settings. Demysto offers the choice once in the first-run flow, and holds it in Settings for anybody who changes their mind.
+_Avoid_: login item, startup entry, auto-launch, launch at login
+
 ### What answers
 
 **Provider**:

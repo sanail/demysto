@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
   import {
+    autostart,
     catalogue as catalogued,
     deleteAction,
     dismiss,
@@ -15,6 +16,7 @@
     providerModels,
     saveAction,
     saveSettings,
+    setAutostart,
     settings as configured,
     status,
     updateOffered,
@@ -148,6 +150,12 @@
    * the file says, and is what will be spoken the moment the variable is not.
    */
   let languageFixed = $state<Exported | null>(null);
+  /**
+   * Whether Demysto is in the login items, as the system last answered, and
+   * what it said the last time it would not change them.
+   */
+  let autostartWanted = $state(false);
+  let autostartProblem = $state<string | null>(null);
   /** Where the logs are, and what went wrong opening the folder. */
   let logsProblem = $state<string | null>(null);
   /** The version this is, which is the half of an update question nobody else answers. */
@@ -226,6 +234,7 @@
     largeSelectionDefault = reported.large_selection_default;
     clipboardOnly = said(reported.capturing);
     languageFixed = reported.language_env;
+    autostartWanted = await autostart();
 
     // A refused key is reported in the Conversation and fixed here, so the
     // window is told which Provider it was opened for.
@@ -293,6 +302,37 @@
     document
       .querySelector(`[data-provider="${CSS.escape(provider)}"]`)
       ?.scrollIntoView({ block: "center" });
+  }
+
+  /**
+   * Puts Demysto into the login items, or takes it out, as the box is ticked.
+   *
+   * Not held for the Save button, alone among the fields above it: the login
+   * items are the operating system's list and not a line in the settings file,
+   * so a save would have nothing of this to write, and a box waiting for one
+   * would be a choice with nowhere to land. The sentence below it says so.
+   */
+  async function autostartIs(wanted: boolean) {
+    autostartWanted = wanted;
+    autostartProblem = await sending(() => setAutostart(wanted));
+
+    // What the system says it did, rather than what it was asked for: a
+    // refusal leaves the box where it was rather than lying about it.
+    if (autostartProblem !== null) autostartWanted = await autostart();
+  }
+
+  /**
+   * Asks the login items again, because they are edited somewhere else too.
+   *
+   * This window's page is loaded once at startup and hidden rather than closed,
+   * so the reading taken at mount would otherwise stand for the whole session —
+   * and this is the one thing here that the operating system's own settings
+   * change as readily as Demysto does. Focus is what catches both ways back:
+   * the window being shown, and somebody returning from that pane to a window
+   * that never went away.
+   */
+  async function readAutostart() {
+    autostartWanted = await autostart();
   }
 
   /** Opens the folder the logs are written in, so a bug report can carry them. */
@@ -768,7 +808,7 @@
   }
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onfocus={readAutostart} />
 
 <main
   class="flex h-screen flex-col gap-4 bg-white p-6 font-sans text-neutral-900
@@ -1166,6 +1206,27 @@
       {#each unclaimedHotkeys as said (said)}
         <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
       {/each}
+    </section>
+
+    <section class="flex flex-col gap-3">
+      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
+        {t("settings-autostart")}
+      </h2>
+
+      <p class="text-xs opacity-50">{t("settings-autostart-detail")}</p>
+
+      <label class="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={autostartWanted}
+          onchange={(event) => autostartIs(event.currentTarget.checked)}
+        />
+        {t("settings-autostart-choice")}
+      </label>
+
+      {#if autostartProblem}
+        <p class="text-xs text-red-600 dark:text-red-400">{autostartProblem}</p>
+      {/if}
     </section>
 
     <section class="flex flex-col gap-3">

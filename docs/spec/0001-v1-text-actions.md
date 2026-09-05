@@ -165,8 +165,9 @@ same shape and the same standing.
     keys I use for every other window.
 51. As a user, I want to reach Settings and run Actions from the tray menu, so
     that the tool is usable when I don't remember the Hotkey.
-52. As a user, I want to be asked once whether to start Demysto at login, so that
-    it neither installs itself silently nor stops working after a reboot.
+52. As a user, I want to be asked once whether to start Demysto at login and to
+    turn that on or off in Settings afterwards, so that it neither installs
+    itself silently nor stops working after a reboot.
 53. As a user, I want launching a second copy to raise the Palette instead of
     starting a second instance, so that the tool cannot end up fighting itself.
 54. As a macOS user, I want to be walked to the Accessibility permission during
@@ -295,7 +296,10 @@ its menu reaches the Palette, the Actions, and Settings, so the mouse-only path
 exists independently of the dock.
 
 Single instance is enforced; a second launch raises the Palette. Autostart is
-offered once during first-run setup, never enabled silently.
+offered once during first-run setup and turned on or off in Settings after that,
+never enabled silently. Neither window remembers the answer: both ask the
+operating system's login items, Settings asking again whenever it is focused,
+because that list is edited in the system's own settings as readily as here.
 
 First-run order, in a window of its own: confirm the detected language,
 configure a Provider with a key and a Model, verify it with a live request,

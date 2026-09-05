@@ -169,6 +169,12 @@ settings-palette-hotkey-detail = Saved by the Save button below, and answered to
 settings-action-hotkey-detail = Parameters are not asked for on this path — each takes what it offers.
 settings-wayland-hotkeys = Wayland also lets no application claim a Hotkey for itself. Demysto asks the desktop's GlobalShortcuts portal for the combinations below, and the desktop decides what each one answers to — change them in the desktop's own keyboard shortcut settings, where they are listed under Demysto.
 
+### Startup
+
+settings-autostart = Startup
+settings-autostart-choice = Start Demysto at login
+settings-autostart-detail = Demysto waits in the tray for the Hotkey, so it can only answer while it is running. This one takes effect as you tick it rather than when you save: the login items are your system's own list rather than a line in Demysto's settings, and that same list is edited in the system's settings too.
+
 ### Logs
 
 settings-logs = Logs

@@ -168,6 +168,12 @@ settings-palette-hotkey-detail = Wird mit „Speichern“ unten gespeichert und 
 settings-action-hotkey-detail = Auf diesem Weg wird nach Parametern nicht gefragt — jeder nimmt, was er anbietet.
 settings-wayland-hotkeys = Wayland lässt außerdem keine Anwendung ein Tastenkürzel für sich beanspruchen. Demysto bittet das GlobalShortcuts-Portal der Arbeitsumgebung um die Kombinationen unten, und die Arbeitsumgebung entscheidet, worauf jede antwortet — ändern Sie sie in deren eigenen Tastenkürzel-Einstellungen, wo sie unter Demysto aufgeführt sind.
 
+### Startup
+
+settings-autostart = Start
+settings-autostart-choice = Beim Anmelden starten
+settings-autostart-detail = Demysto wartet im Tray auf das Tastenkürzel und kann nur antworten, solange es läuft. Dies wirkt beim Anklicken und nicht erst beim Speichern: die Anmeldeobjekte sind die Liste Ihres Systems und keine Zeile in Demystos Einstellungen, und dieselbe Liste lässt sich auch dort ändern.
+
 ### Logs
 
 settings-logs = Protokolle

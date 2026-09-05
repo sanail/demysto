@@ -164,6 +164,12 @@ settings-palette-hotkey-detail = Se guarda con el botón Guardar de abajo, y res
 settings-action-hotkey-detail = Por este camino no se piden los parámetros: cada uno toma lo que ofrece.
 settings-wayland-hotkeys = Wayland tampoco deja que ninguna aplicación se reserve un atajo para sí. Demysto pide las combinaciones de abajo al portal GlobalShortcuts del escritorio, y es el escritorio quien decide a qué responde cada una: cámbialas en los ajustes de atajos de teclado del propio escritorio, donde aparecen bajo Demysto.
 
+### Startup
+
+settings-autostart = Inicio
+settings-autostart-choice = Iniciarlo al iniciar sesión
+settings-autostart-detail = Demysto espera en la bandeja a que pulses el atajo, así que solo puede responder mientras se está ejecutando. Esta casilla surte efecto al marcarla y no al guardar: la lista de inicio es del propio sistema y no una línea de los ajustes de Demysto, y esa misma lista se edita también en los ajustes del sistema.
+
 ### Logs
 
 settings-logs = Registros
