@@ -178,7 +178,10 @@
   onMount(async () => {
     presets = await offeredPresets();
     paletteDefault = (await allowed()).palette_default;
-    autostartWanted = await autostart();
+    // A system that will not say is drawn as the offer to turn autostart on:
+    // this is the first thing the flow hears about the list and there is
+    // nothing better to go on (ticket 27).
+    autostartWanted = (await autostart()) ?? false;
     const reported = await status();
     languageFixed = reported.language_env;
     clipboardOnly = cannotRead(reported.capturing);
@@ -349,13 +352,20 @@
    * the user cannot see they have made (user story 52).
    */
   async function autostartIs(wanted: boolean) {
+    const was = autostartWanted;
     autostartWanted = wanted;
     autostartProblem = await sending(() => setAutostart(wanted));
 
     // What the system says it did, rather than what it was asked for: a
-    // refusal leaves the box where it was rather than lying about it.
-    if (autostartProblem !== null) autostartWanted = await autostart();
+    // refusal leaves the box where it was rather than lying about it. Where
+    // the system will not say either, where it was is the best answer there is
+    // — and it is the one the user had before they clicked (ticket 27).
+    if (autostartProblem !== null) autostartWanted = (await autostart()) ?? was;
   }
+
+  // The step is asked once and never re-read, so nothing here can answer out of
+  // turn: what Settings needs a count of clicks and a queue for is a window
+  // that asks the list again every time it is focused, and this one does not.
 
   async function showAccessibility() {
     accessibilityProblem = await sending(openAccessibility);

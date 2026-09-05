@@ -15,17 +15,23 @@ use demysto_core::{say, Words};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_autostart::ManagerExt;
 
-/// Whether Demysto is in the login items now.
+/// Whether Demysto is in the login items now, and `None` where the system would
+/// not say.
 ///
 /// Asked of the system rather than remembered in the settings: the login items
 /// are the operating system's list, and somebody who took Demysto out of it
 /// there has said so more plainly than a file of ours could record.
 ///
-/// A system that will not say answers no, which is what the window then offers
-/// to change — the alternative is a checkbox that refuses to be drawn because
-/// a registry key could not be read.
-pub fn enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
-    app.autolaunch().is_enabled().unwrap_or(false)
+/// "Would not say" is answered as itself rather than as no, because Settings
+/// asks this again every time it is focused (ticket 27). A list that cannot be
+/// read would otherwise untick a box the user has just ticked and Demysto has
+/// successfully acted on — saying the opposite of what the system holds, in the
+/// one window whose whole claim is to say what it holds. What the window does
+/// with the third answer is the window's: nothing, where it has something
+/// better to go on, and the offer to turn autostart on where this is the first
+/// thing it has heard.
+pub fn enabled<R: Runtime>(app: &AppHandle<R>) -> Option<bool> {
+    app.autolaunch().is_enabled().ok()
 }
 
 /// Puts Demysto into the login items, or takes it out.

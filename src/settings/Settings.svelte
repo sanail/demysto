@@ -156,6 +156,22 @@
    */
   let autostartWanted = $state(false);
   let autostartProblem = $state<string | null>(null);
+  /**
+   * How many times the box has been acted on, and what the login items were
+   * last asked — the two things that keep a reading and a change from
+   * answering out of turn (ticket 27).
+   *
+   * Both are needed and neither is enough. One click on a window that did not
+   * have focus sends both questions at once: `focus` on the way down asks what
+   * the list says, `change` on the way up changes it. That reading was taken
+   * before the change was made, so it must not be allowed to land after it —
+   * which is what counting the clicks is for. And two clicks in quick
+   * succession send two changes with no ordering between them, where the
+   * system has to be left holding the one made last — which is what asking one
+   * thing at a time is for.
+   */
+  let acted = 0;
+  let settling: Promise<unknown> = Promise.resolve();
   /** Where the logs are, and what went wrong opening the folder. */
   let logsProblem = $state<string | null>(null);
   /** The version this is, which is the half of an update question nobody else answers. */
@@ -234,7 +250,11 @@
     largeSelectionDefault = reported.large_selection_default;
     clipboardOnly = said(reported.capturing);
     languageFixed = reported.language_env;
-    autostartWanted = await autostart();
+    // The first thing this window hears about the login items, and the only
+    // one with nothing to fall back on: a system that will not say is drawn as
+    // the offer to turn autostart on, which is what it was drawn as when the
+    // backend answered no on its behalf (ticket 27).
+    autostartWanted = (await inTheList()) ?? false;
 
     // A refused key is reported in the Conversation and fixed here, so the
     // window is told which Provider it was opened for.
@@ -313,12 +333,25 @@
    * would be a choice with nowhere to land. The sentence below it says so.
    */
   async function autostartIs(wanted: boolean) {
+    const mine = ++acted;
+    const was = autostartWanted;
     autostartWanted = wanted;
-    autostartProblem = await sending(() => setAutostart(wanted));
+
+    const refused = await inTurn(() => sending(() => setAutostart(wanted)));
+
+    // A click that has been overtaken says nothing about the list any more:
+    // the click after it is the answer, and it is still on its way.
+    if (mine !== acted) return;
+
+    autostartProblem = refused;
+    if (refused === null) return;
 
     // What the system says it did, rather than what it was asked for: a
-    // refusal leaves the box where it was rather than lying about it.
-    if (autostartProblem !== null) autostartWanted = await autostart();
+    // refusal leaves the box where it was rather than lying about it. Where
+    // the system will not say either, where it was is the best answer there
+    // is — and it is the one the user had before they clicked.
+    const said = await inTheList();
+    if (mine === acted) autostartWanted = said ?? was;
   }
 
   /**
@@ -332,7 +365,40 @@
    * that never went away.
    */
   async function readAutostart() {
-    autostartWanted = await autostart();
+    const mine = acted;
+    const said = await inTheList();
+
+    // A reading the box has been clicked over says what the list held before
+    // the click, and a list that would not say says nothing at all. Neither is
+    // worth putting on screen over what is there.
+    if (mine !== acted || said === null) return;
+
+    autostartWanted = said;
+
+    // The sentence under the box was about the last change; this is a fresh
+    // reading of what came of everything, so there is nothing left for it to
+    // be about.
+    autostartProblem = null;
+  }
+
+  /** What the login items say, and `null` where nothing could be got out of them. */
+  function inTheList(): Promise<boolean | null> {
+    return inTurn(autostart).catch(() => null);
+  }
+
+  /**
+   * Asks the login items one thing at a time, in the order they were asked.
+   *
+   * The caller waits on the answer; what the queue is left holding is that
+   * answer with its failure taken off, so that one question the system refused
+   * does not stop every question after it from being asked.
+   */
+  function inTurn<T>(ask: () => Promise<T>): Promise<T> {
+    const answer = settling.then(ask);
+
+    settling = answer.catch(() => {});
+
+    return answer;
   }
 
   /** Opens the folder the logs are written in, so a bug report can carry them. */

@@ -179,9 +179,9 @@ pub fn accessibility_asked_for() -> bool {
 }
 
 /// Whether Demysto is in the login items now, which is what the flow's question
-/// about them starts at.
+/// about them starts at — `null` where the system would not say (ticket 27).
 #[tauri::command]
-pub fn autostart<R: Runtime>(app: AppHandle<R>) -> bool {
+pub fn autostart<R: Runtime>(app: AppHandle<R>) -> Option<bool> {
     crate::autostart::enabled(&app)
 }
 
