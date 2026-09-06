@@ -101,11 +101,24 @@ settings-keys = Esc zum Schließen
 settings-reading = Lese die Einstellungen…
 settings-unreadable-file = Die Einstellungen überschreiben keine Datei, die sie nicht lesen konnten; hier lässt sich also nichts bearbeiten, bis diese Datei in Ordnung ist. Öffnen Sie sie, berichtigen Sie, was darin steht, und öffnen Sie dieses Fenster erneut.
 
+settings-folder = Einstellungsordner
+
+### The tabs the window is divided into
+
+settings-tab-models = Modelle
+settings-tab-actions = Aktionen
+settings-tab-general = Allgemein
+settings-tab-about = Über
+settings-tab-unsaved = ungespeicherte Änderungen
+settings-tab-update = eine Aktualisierung steht bereit
+
 ### Providers
 
 settings-providers = Anbieter
 settings-add-provider = Einen Anbieter hinzufügen
 settings-remove-provider = Diesen Anbieter entfernen
+settings-provider-edit = Bearbeiten
+settings-provider-unnamed = (ohne Namen)
 settings-no-providers = Noch ist kein Anbieter eingerichtet. Fügen Sie einen hinzu, um Fragen stellen zu können.
 settings-provider-name = Name
 settings-provider-name-example = openai

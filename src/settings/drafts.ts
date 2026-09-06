@@ -57,7 +57,22 @@ export type Draft = {
  * One at a time, and not a draft each: an Action is a file of its own and is
  * saved on its own, so there is never more than one unsaved.
  */
-export type Editing = { draft: ActionEdit; standing: ActionStanding | null };
+export type Editing = {
+  draft: ActionEdit;
+  standing: ActionStanding | null;
+  /**
+   * The draft as it was opened, written out, so that what has been done to it
+   * since can be told from what has not. An Action opened and read is not an
+   * Action with something in it to save, and a mark saying otherwise would be
+   * one nobody could ever clear.
+   */
+  asOpened: string;
+};
+
+/** Whether an Action being edited has been changed since it was opened. */
+export function changed(editing: Editing | null): boolean {
+  return editing !== null && JSON.stringify(editing.draft) !== editing.asOpened;
+}
 
 export function drafted(provider: ConfiguredProvider): Draft {
   return {

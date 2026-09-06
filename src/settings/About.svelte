@@ -6,11 +6,14 @@
 
   let {
     version,
+    where,
     newer = $bindable(),
   }: {
     /** The version this is, which is the half of an update question nobody
         else answers. */
     version: string;
+    /** The directory the settings file is in. */
+    where: string;
     /** The newer version there is, `null` where there is none to be had. */
     newer: string | null;
   } = $props();
@@ -68,6 +71,22 @@
     }
   }
 </script>
+
+<!-- Written out rather than truncated with the full text in a title, which is
+     where this path used to live: somebody wants it in order to open the file
+     by hand or to put it in a bug report, and both want text that can be
+     selected and read aloud.
+
+     The folder and not the file, because the folder is what the backend
+     reports and what is actually wanted: the settings file is in it, and so
+     are the Actions. -->
+<section class="flex flex-col gap-1">
+  <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
+    {t("settings-folder")}
+  </h2>
+
+  <p class="text-xs break-all opacity-60">{where}</p>
+</section>
 
 <section class="flex flex-col gap-3">
   <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">

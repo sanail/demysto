@@ -2,6 +2,8 @@
   import {
     deleteAction,
     saveAction,
+    type ActionEdit,
+    type ActionStanding,
     type Catalogue,
     type DefinedAction,
   } from "../lib/ipc";
@@ -14,6 +16,7 @@
   let {
     actions,
     unreadableActions,
+    unclaimedHotkeys,
     bindableModels,
     editing = $bindable(),
     recording = $bindable(),
@@ -24,6 +27,9 @@
     actions: DefinedAction[];
     /** And what of it could not be read. */
     unreadableActions: string[];
+    /** The Hotkeys stated by an Action and not answered to, in the backend's
+        own sentences. */
+    unclaimedHotkeys: string[];
     /** Every Model configured, by the name an Action binds it with. */
     bindableModels: string[];
     editing: Editing | null;
@@ -43,18 +49,15 @@
   function write() {
     actionProblem = null;
     recording = null;
-    editing = {
-      standing: null,
-      draft: {
-        id: null,
-        name: "",
-        template: "",
-        parameters: [],
-        model: null,
-        hotkey: null,
-        accepts: ["text"],
-      },
-    };
+    editing = opening(null, {
+      id: null,
+      name: "",
+      template: "",
+      parameters: [],
+      model: null,
+      hotkey: null,
+      accepts: ["text"],
+    });
   }
 
   /**
@@ -68,18 +71,20 @@
   function change(action: DefinedAction) {
     actionProblem = null;
     recording = null;
-    editing = {
-      standing: action.standing,
-      draft: {
-        id: action.id,
-        name: action.name,
-        template: action.template,
-        parameters: action.parameters.map((parameter) => ({ ...parameter })),
-        model: action.model,
-        hotkey: action.hotkey,
-        accepts: action.accepts,
-      },
-    };
+    editing = opening(action.standing, {
+      id: action.id,
+      name: action.name,
+      template: action.template,
+      parameters: action.parameters.map((parameter) => ({ ...parameter })),
+      model: action.model,
+      hotkey: action.hotkey,
+      accepts: action.accepts,
+    });
+  }
+
+  /** One Action opened for editing, with what it said at that moment kept. */
+  function opening(standing: ActionStanding | null, draft: ActionEdit): Editing {
+    return { standing, draft, asOpened: JSON.stringify(draft) };
   }
 
   /** Takes the Hotkey off this Action, which is the only way to have none. */
@@ -177,6 +182,15 @@
   <p class="text-xs opacity-50">{@html t("settings-actions-detail")}</p>
 
   {#each unreadableActions as said (said)}
+    <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
+  {/each}
+
+  <!-- The same sentences the Hotkey field on the other panel shows. The
+       backend hands them over as one list without saying whose each is — a
+       combination another application holds is usually the Palette's business,
+       one two Actions both ask for is always theirs — and a list of one line
+       is cheaper to say twice than to look for on the wrong tab. -->
+  {#each unclaimedHotkeys as said (said)}
     <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
   {/each}
 

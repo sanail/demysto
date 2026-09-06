@@ -97,11 +97,24 @@ settings-keys = Esc para cerrar
 settings-reading = Leyendo los ajustes…
 settings-unreadable-file = Los ajustes no sobrescriben un archivo que no han podido leer, así que aquí no se puede editar nada hasta que ese archivo esté reparado. Ábrelo, corrige lo que dice y vuelve a abrir esta ventana.
 
+settings-folder = Carpeta de ajustes
+
+### The tabs the window is divided into
+
+settings-tab-models = Modelos
+settings-tab-actions = Acciones
+settings-tab-general = General
+settings-tab-about = Acerca de
+settings-tab-unsaved = cambios sin guardar
+settings-tab-update = hay una actualización lista
+
 ### Providers
 
 settings-providers = Proveedores
 settings-add-provider = Añadir un proveedor
 settings-remove-provider = Quitar este proveedor
+settings-provider-edit = Editar
+settings-provider-unnamed = (sin nombre)
 settings-no-providers = Todavía no hay ningún proveedor configurado. Añade uno para empezar a preguntar cosas.
 settings-provider-name = Nombre
 settings-provider-name-example = openai

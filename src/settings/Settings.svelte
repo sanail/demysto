@@ -5,6 +5,7 @@
     catalogue as catalogued,
     dismiss,
     hotkeys as allowed,
+    onClosing,
     onProviderWanted,
     onSettingsSaved,
     onUpdateOffered,
@@ -29,8 +30,27 @@
   import Actions from "./Actions.svelte";
   import General from "./General.svelte";
   import Models from "./Models.svelte";
-  import { drafted, edited, type Draft, type Editing } from "./drafts";
+  import { changed, drafted, edited, type Draft, type Editing } from "./drafts";
   import { BUTTON } from "./style";
+  import Unreadable from "./Unreadable.svelte";
+
+  /**
+   * The panels this window is divided into, in the order they are offered.
+   *
+   * Models first because a Demysto with no Provider has nothing to say, and
+   * About last because it is the one panel where nothing is configured.
+   */
+  const TABS = ["models", "actions", "general", "about"] as const;
+
+  type Tab = (typeof TABS)[number];
+
+  /**
+   * Which panel is on screen. Kept for as long as Demysto runs and written
+   * nowhere: this window's page is loaded once and hidden rather than closed,
+   * so where somebody was goes on being where they were, and a line in the
+   * settings file would be a preference nobody asked to state.
+   */
+  let showing = $state<Tab>("models");
 
   /** How long the window says a save landed. */
   const ACKNOWLEDGED = 1600;
@@ -133,6 +153,8 @@
   let watching: Promise<UnlistenFn> | null = null;
   /** The same, for the settings as each save leaves them. */
   let following: Promise<UnlistenFn> | null = null;
+  /** The same, for the ways of closing this window that Escape is not. */
+  let closing: Promise<UnlistenFn> | null = null;
   /** What opens the Palette when nothing states otherwise, as it is read. */
   let paletteDefault = $state("");
   /** The keys a Hotkey may be on its own — the backend decides which. */
@@ -145,6 +167,15 @@
    * that.
    */
   let savedSettings = $state<Settings | null>(null);
+
+  /**
+   * What the two file-backed panels held when the file was last read or
+   * written, as text. What is on screen now is written out the same way and
+   * compared with these, so that a change and its undoing leave no mark — a
+   * mark nobody can clear is a mark everybody learns to ignore.
+   */
+  let savedModels = $state("");
+  let savedGeneral = $state("");
 
   /** What went wrong with the last save, in the words the backend chose. */
   let problem = $state<string | null>(null);
@@ -211,6 +242,12 @@
     });
     await following;
 
+    // The title bar's close button, so that it leaves the window in the state
+    // Escape leaves it in. Both hide it, and one of them putting edits back
+    // while the other kept them would make which button was pressed a thing to
+    // remember.
+    closing = onClosing(discard);
+
     newer = await updateOffered();
 
     const may = await allowed();
@@ -235,15 +272,68 @@
     listening?.then((off) => off());
     watching?.then((off) => off());
     following?.then((off) => off());
+    closing?.then((off) => off());
   });
 
-  /** Brings the Provider this window was opened for into view. */
+  /**
+   * Brings the Provider this window was opened for into view, panel and all.
+   *
+   * The tab is this window's to choose; opening that Provider and putting the
+   * keyboard in it belongs to the panel that holds them, and is done there.
+   */
   async function settle(provider: string) {
+    showing = "models";
+
     await tick();
 
     document
       .querySelector(`[data-provider="${CSS.escape(provider)}"]`)
       ?.scrollIntoView({ block: "center" });
+  }
+
+  /**
+   * Puts the window back to the file, which is what closing it does.
+   *
+   * See ADR-0018: the page is hidden rather than unloaded, so keeping unsaved
+   * edits would cost nothing and would be worth less than nothing — a window
+   * showing one thing while the file says another is a window nobody can
+   * trust.
+   */
+  function discard() {
+    if (savedSettings) show(savedSettings);
+
+    stopEditing();
+  }
+
+  /**
+   * Moves along the tab strip, which is the whole of what a tab list owes a
+   * keyboard beyond Tab reaching it.
+   *
+   * Selecting as it moves rather than waiting to be asked: four tabs, none of
+   * them expensive to draw, and an arrow that moved a highlight without
+   * changing the panel would be a second thing to press for no gain.
+   */
+  function onTabKeydown(event: KeyboardEvent, at: number) {
+    // A Hotkey being recorded takes every keypress, arrows included.
+    if (recording !== null) return;
+
+    const along =
+      event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+
+    const next = along
+      ? (at + along + TABS.length) % TABS.length
+      : event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? TABS.length - 1
+          : null;
+
+    if (next === null) return;
+
+    event.preventDefault();
+
+    showing = TABS[next];
+    document.getElementById(`tab-${TABS[next]}`)?.focus();
   }
 
   /**
@@ -332,6 +422,70 @@
     paletteHotkey = settings.palette_hotkey ?? "";
     largeSelection = settings.large_selection;
     language = settings.language ?? "";
+
+    // Taken from the fields rather than from the settings, because it is the
+    // fields these will be compared against: whatever the file's own shape
+    // does to a value on its way in has already been done here.
+    savedModels = ofModels();
+    savedGeneral = ofGeneral();
+  }
+
+  /**
+   * What the Models panel holds, written out for comparing.
+   *
+   * A Provider's key is in it by way of what has been typed and whether the
+   * file's own is to be taken out: the key itself is never in this window
+   * (ADR-0002), so there is nothing to compare a typed one with, and typing
+   * one is a change by construction. What only ever shows on screen — the
+   * Models a Provider offered when asked, what it said, which one a
+   * verification would use — is left out.
+   */
+  function ofModels(): string {
+    return JSON.stringify({
+      providers: drafts.map((draft) => ({
+        was: draft.was,
+        name: draft.name,
+        base_url: draft.base_url,
+        preset: draft.preset,
+        api_key_env: draft.api_key_env,
+        models: draft.models,
+        typed: draft.typed,
+        forgetting: draft.forgetting,
+      })),
+      defaultModel,
+      defaultVisionModel,
+      largeSelection: stated(largeSelection),
+    });
+  }
+
+  /** And what the General panel holds of the file. */
+  function ofGeneral(): string {
+    return JSON.stringify({ paletteHotkey, language });
+  }
+
+  // Nothing is unsaved until there is something saved to compare with: a
+  // window still reading, or one whose file could not be read, has no state
+  // the file disagrees with.
+  const modelsUnsaved = $derived(savedSettings !== null && ofModels() !== savedModels);
+  const generalUnsaved = $derived(savedSettings !== null && ofGeneral() !== savedGeneral);
+  const actionUnsaved = $derived(changed(editing));
+
+  /** Whether the Save button below has anything to write. */
+  const unsaved = $derived(modelsUnsaved || generalUnsaved);
+
+  /**
+   * What a tab has to say for itself: that it holds something not written yet,
+   * or that the update panel has an update to offer.
+   *
+   * Two different marks and not one, because they ask for different things —
+   * one is work of the user's that Save would finish, the other is news.
+   */
+  function mark(tab: Tab): "unsaved" | "update" | null {
+    if (tab === "models") return modelsUnsaved ? "unsaved" : null;
+    if (tab === "general") return generalUnsaved ? "unsaved" : null;
+    if (tab === "actions") return actionUnsaved ? "unsaved" : null;
+
+    return newer ? "update" : null;
   }
 
   /** Takes the catalogue as the directory holds it as the state of this window. */
@@ -430,6 +584,7 @@
       return;
     }
 
+    discard();
     dismiss();
   }
 
@@ -469,58 +624,120 @@
   class="flex h-screen flex-col gap-4 bg-white p-6 font-sans text-neutral-900
          dark:bg-neutral-900 dark:text-neutral-100"
 >
-  <header class="flex items-baseline justify-between gap-3">
-    <h1 class="text-sm font-semibold tracking-tight">{t("settings-title")}</h1>
-    <span class="truncate text-xs opacity-40" title={where}>{where}</span>
-  </header>
+  <!-- The window's name is in its own frame, so nothing here draws it a second
+       time. It is still written, because a document with no heading is a
+       document a screen reader has no way into. -->
+  <h1 class="sr-only">{t("settings-title")}</h1>
 
-  <div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
-    {#if unreadable}
-      <!-- Demysto will not write over a file it could not parse: whatever is in
-           it, comments and keys alike, would go. So nothing is offered here but
-           what is wrong and where. -->
-      <section class="flex flex-col gap-2">
-        <p class="text-sm text-red-600 dark:text-red-400">{unreadable}</p>
-        <p class="text-sm opacity-60">{t("settings-unreadable-file")}</p>
-      </section>
-    {:else}
-      <Models
-        bind:drafts
-        bind:defaultModel
-        bind:defaultVisionModel
-        bind:largeSelection
-        {presets}
-        {wanted}
-        {read}
-        {largeSelectionDefault}
+  {#if clipboardOnly}
+    <!-- Above the tabs rather than on one of them. It is about what Demysto
+         can read at all, and it answers "why did pressing the Hotkey do
+         that?" wherever in this window somebody happens to be standing —
+         see ADR-0003. -->
+    <p class="text-xs opacity-50">{clipboardOnly}</p>
+  {/if}
+
+  <!-- Wrapping rather than scrolling sideways at 480 px: a strip that has to
+       be scrolled hides a tab from somebody who does not know it is there,
+       which is the thing this window was divided up to stop. -->
+  <div
+    role="tablist"
+    aria-label={t("settings-title")}
+    class="flex flex-wrap gap-1"
+  >
+    {#each TABS as tab, at (tab)}
+      {@const marked = mark(tab)}
+      <button
+        type="button"
+        role="tab"
+        id="tab-{tab}"
+        aria-controls="settings-panel"
+        aria-selected={showing === tab}
+        tabindex={showing === tab ? 0 : -1}
+        class="flex cursor-pointer items-center gap-1 rounded border px-3 py-1
+               text-xs {showing === tab
+          ? 'border-neutral-400 bg-neutral-100 dark:border-neutral-500 dark:bg-neutral-800'
+          : 'border-transparent hover:bg-neutral-100 dark:hover:bg-neutral-800'}"
+        onclick={() => (showing = tab)}
+        onkeydown={(event) => onTabKeydown(event, at)}
+      >
+        {t(`settings-tab-${tab}`)}
+
+        {#if marked}
+          <!-- The dot is what the eye reads and the sentence is what a screen
+               reader does, because a dot announced as a dot says nothing about
+               what it is there for. Ticket 26 in a third place. -->
+          <span
+            aria-hidden="true"
+            class={marked === "update" ? "text-blue-600 dark:text-blue-400" : ""}
+          >
+            •
+          </span>
+          <span class="sr-only">
+            , {marked === "update"
+              ? t("settings-tab-update")
+              : t("settings-tab-unsaved")}
+          </span>
+        {/if}
+      </button>
+    {/each}
+  </div>
+
+  <!-- Named from the same word its tab is named from, rather than pointed at
+       the tab itself. Pointing at it is what the pattern suggests, and it puts
+       the tab's whole name on the panel — the mark below included, so that the
+       panel would be announced as "Models, unsaved changes" and would go on
+       being announced that way after the mark had gone, on a name the platform
+       had already taken down. -->
+  <div
+    id="settings-panel"
+    role="tabpanel"
+    aria-label={t(`settings-tab-${showing}`)}
+    class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto"
+  >
+    {#if showing === "models"}
+      {#if unreadable}
+        <Unreadable said={unreadable} />
+      {:else}
+        <Models
+          bind:drafts
+          bind:defaultModel
+          bind:defaultVisionModel
+          bind:largeSelection
+          {presets}
+          {wanted}
+          {read}
+          {largeSelectionDefault}
+        />
+      {/if}
+    {:else if showing === "actions"}
+      <Actions
+        bind:editing
+        bind:recording
+        {actions}
+        {unreadableActions}
+        {unclaimedHotkeys}
+        {bindableModels}
+        {held}
+        {stopEditing}
       />
+    {:else if showing === "general"}
+      <General
+        bind:language
+        bind:paletteHotkey
+        bind:recording
+        {unreadable}
+        {languageFixed}
+        throughThePortal={clipboardOnly !== null}
+        {paletteDefault}
+        {unclaimedHotkeys}
+        {autostartWanted}
+        {autostartProblem}
+        onAutostart={autostartIs}
+      />
+    {:else}
+      <About {version} {where} bind:newer />
     {/if}
-
-    <General
-      bind:language
-      bind:paletteHotkey
-      bind:recording
-      {unreadable}
-      {languageFixed}
-      {clipboardOnly}
-      {paletteDefault}
-      {unclaimedHotkeys}
-      {autostartWanted}
-      {autostartProblem}
-      onAutostart={autostartIs}
-    />
-
-    <About {version} bind:newer />
-
-    <Actions
-      bind:editing
-      bind:recording
-      {actions}
-      {unreadableActions}
-      {bindableModels}
-      {held}
-      {stopEditing}
-    />
   </div>
 
   <footer class="flex items-center justify-between gap-3">
@@ -534,8 +751,16 @@
       {/if}
     </p>
 
+    <!-- Kept under every panel, and not only under the two it writes: what is
+         unsaved can be on a tab that is not on screen, and a button that went
+         away with it would have to be walked back to. -->
     {#if !unreadable}
-      <button type="button" class={BUTTON} disabled={saving} onclick={save}>
+      <button
+        type="button"
+        class={BUTTON}
+        disabled={saving || !unsaved}
+        onclick={save}
+      >
         {saving ? t("settings-saving") : t("settings-save")}
       </button>
     {/if}

@@ -1,5 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /**
  * Mirrors `demysto_core::Capturing`: what a Capture on this desktop can read.
@@ -111,6 +112,24 @@ export function actions(): Promise<Action[]> {
 /** Hides the window this is called from, which is what Escape asks for. */
 export function dismiss(): Promise<void> {
   return invoke<void>("dismiss");
+}
+
+/**
+ * Every request to close this window that did not come from Escape — the title
+ * bar's button, and whatever else the desktop offers.
+ *
+ * The shell answers this event as well, and answers it the same way every
+ * time: closing a window returns Demysto to the tray, so the window is hidden
+ * and not closed. This says the same thing from here, and has to. A listener
+ * that let the event run its course would have Tauri destroy the window
+ * afterwards — and every window in Demysto is loaded once at startup and shown
+ * and hidden from then on. Destroying one would take its page with it.
+ */
+export function onClosing(handle: () => void): Promise<UnlistenFn> {
+  return getCurrentWindow().onCloseRequested((event) => {
+    event.preventDefault();
+    handle();
+  });
 }
 
 /**

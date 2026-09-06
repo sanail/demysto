@@ -101,11 +101,24 @@ settings-keys = Échap pour fermer
 settings-reading = Lecture des réglages…
 settings-unreadable-file = Les réglages n'écrasent pas un fichier qu'ils n'ont pas pu lire : rien ne peut donc être modifié ici tant que ce fichier n'est pas réparé. Ouvrez-le, corrigez ce qu'il dit, puis rouvrez cette fenêtre.
 
+settings-folder = Dossier des réglages
+
+### The tabs the window is divided into
+
+settings-tab-models = Modèles
+settings-tab-actions = Actions
+settings-tab-general = Général
+settings-tab-about = À propos
+settings-tab-unsaved = modifications non enregistrées
+settings-tab-update = une mise à jour est prête
+
 ### Providers
 
 settings-providers = Fournisseurs
 settings-add-provider = Ajouter un fournisseur
 settings-remove-provider = Retirer ce fournisseur
+settings-provider-edit = Modifier
+settings-provider-unnamed = (sans nom)
 settings-no-providers = Aucun fournisseur n'est encore configuré. Ajoutez-en un pour commencer à poser des questions.
 settings-provider-name = Nom
 settings-provider-name-example = openai

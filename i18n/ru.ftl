@@ -97,11 +97,24 @@ settings-keys = Esc — закрыть
 settings-reading = Читаю настройки…
 settings-unreadable-file = Demysto не станет переписывать файл, который не смог прочитать, поэтому изменить здесь ничего нельзя, пока файл не исправлен. Откройте его, поправьте написанное и откройте это окно снова.
 
+settings-folder = Папка настроек
+
+### The tabs the window is divided into
+
+settings-tab-models = Модели
+settings-tab-actions = Действия
+settings-tab-general = Общие
+settings-tab-about = О программе
+settings-tab-unsaved = есть несохранённое
+settings-tab-update = обновление готово
+
 ### Providers
 
 settings-providers = Провайдеры
 settings-add-provider = Добавить провайдера
 settings-remove-provider = Удалить этого провайдера
+settings-provider-edit = Изменить
+settings-provider-unnamed = (без имени)
 settings-no-providers = Ни один провайдер не настроен. Добавьте одного, чтобы начать спрашивать.
 settings-provider-name = Имя
 settings-provider-name-example = openai

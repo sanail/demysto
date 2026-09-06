@@ -102,11 +102,24 @@ settings-keys = Esc to close
 settings-reading = Reading the settings…
 settings-unreadable-file = Settings will not write over a file it cannot read, so nothing here can be edited until that file is repaired. Open it, fix what it says, and reopen this window.
 
+settings-folder = Settings folder
+
+### The tabs the window is divided into
+
+settings-tab-models = Models
+settings-tab-actions = Actions
+settings-tab-general = General
+settings-tab-about = About
+settings-tab-unsaved = unsaved changes
+settings-tab-update = an update is ready
+
 ### Providers
 
 settings-providers = Providers
 settings-add-provider = Add a Provider
 settings-remove-provider = Remove this Provider
+settings-provider-edit = Edit
+settings-provider-unnamed = (unnamed)
 settings-no-providers = No Provider is configured yet. Add one to start asking things.
 settings-provider-name = Name
 settings-provider-name-example = openai

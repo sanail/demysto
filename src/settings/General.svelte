@@ -4,12 +4,13 @@
   import { LANGUAGES } from "../lib/languages";
   import { t } from "../lib/i18n.svelte";
   import { BUTTON, FIELD } from "./style";
+  import Unreadable from "./Unreadable.svelte";
 
   let {
     unreadable,
     language = $bindable(),
     languageFixed,
-    clipboardOnly,
+    throughThePortal,
     paletteHotkey = $bindable(),
     paletteDefault,
     recording = $bindable(),
@@ -23,8 +24,10 @@
     language: string;
     /** The language the environment fixes, `null` where nothing is exported. */
     languageFixed: Exported | null;
-    /** What a Capture on this desktop cannot do, where there is such a thing. */
-    clipboardOnly: string | null;
+    /** Whether this desktop hands out Hotkeys through a portal rather than
+        letting an application claim them, which is a thing to say where they
+        are set. */
+    throughThePortal: boolean;
     paletteHotkey: string;
     /** What opens the Palette when nothing states otherwise, as it is read. */
     paletteDefault: string;
@@ -47,7 +50,9 @@
   }
 </script>
 
-{#if !unreadable}
+{#if unreadable}
+  <Unreadable said={unreadable} />
+{:else}
   <section class="flex flex-col gap-3">
     <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
       {t("settings-language")}
@@ -84,12 +89,11 @@
     {t("settings-hotkeys")}
   </h2>
 
-  {#if clipboardOnly}
-    <!-- Both halves of what Wayland costs, together and where the Hotkey is
-         set, because both are answers to "why did pressing it do that?" —
-         see ADR-0003. -->
-    <p class="text-xs opacity-50">{clipboardOnly}</p>
-
+  {#if throughThePortal}
+    <!-- The half of what Wayland costs that is about this field. The other
+         half — that a Capture there reads only the clipboard — is said above
+         the tabs, because it is an answer to "why did pressing it do that?"
+         wherever in this window somebody is standing. See ADR-0003. -->
     <p class="text-xs opacity-50">{t("settings-wayland-hotkeys")}</p>
   {/if}
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick, untrack } from "svelte";
   import { providerModels, verifyProvider, type Preset } from "../lib/ipc";
   import { t } from "../lib/i18n.svelte";
   import { saidBy } from "../lib/sending";
@@ -28,6 +29,39 @@
     /** Demysto's own figure, so that the field can say what leaving it empty means. */
     largeSelectionDefault: number;
   } = $props();
+
+  /**
+   * Which Provider is open below the list, `null` for none.
+   *
+   * By position, like the list itself: a Provider has no name of its own that
+   * cannot be typed over, and the one thing the file knows it by is what it
+   * was called when it was read.
+   */
+  let editingAt = $state<number | null>(null);
+
+  /** The Provider this panel was last brought here for, so that being brought
+      here twice is told from a name that merely stayed the same. */
+  let brought = $state<string | null>(null);
+
+  // A Run refused for want of a key sends somebody here to fix one Provider.
+  // Opening it is the whole of what they came for; scrolling to a row and
+  // leaving it shut would be an instruction to go on clicking.
+  $effect(() => {
+    if (wanted === null || wanted === brought) return;
+
+    brought = wanted;
+
+    // Untracked because this is about the name that arrived, not about the
+    // drafts: read plainly, every keystroke in a name field would re-run this
+    // and shut whatever else had been opened since.
+    const at = untrack(() =>
+      drafts.findIndex((draft) => (draft.was ?? draft.name) === wanted),
+    );
+
+    if (at < 0) return;
+
+    open(at);
+  });
 
   /**
    * Every Model configured here, by the name it is nominated with.
@@ -70,12 +104,27 @@
     }
   }
 
+  /** Opens one Provider, and puts the keyboard where somebody would start. */
+  function open(at: number) {
+    editingAt = at;
+
+    tick().then(() =>
+      document.getElementById("provider-name")?.focus({ preventScroll: true }),
+    );
+  }
+
   function add() {
     drafts.push(fresh());
+    open(drafts.length - 1);
   }
 
   function remove(at: number) {
     drafts.splice(at, 1);
+
+    // The list is held by position, so taking one out moves everything after
+    // it. A selection left where it was would be pointing at its neighbour.
+    if (editingAt === at) editingAt = null;
+    else if (editingAt !== null && editingAt > at) editingAt -= 1;
   }
 
   /** Fills in what a preset knows, so that picking one is the whole of setup. */
@@ -153,7 +202,58 @@
     </button>
   </div>
 
+  <ul class="flex flex-col gap-1">
+    {#each drafts as draft, at (at)}
+      <!-- Named on the row, so that a window opened for one Provider — which
+           is what a refused key does — can bring it into view and say which
+           one it came here for. -->
+      <li
+        data-provider={draft.was ?? draft.name}
+        class="flex items-center gap-2 rounded border px-2 py-1.5
+               {(draft.was ?? draft.name) === wanted
+          ? 'border-red-400 dark:border-red-500'
+          : 'border-neutral-200 dark:border-neutral-700'}"
+      >
+        <span class="flex-1 truncate text-sm">
+          {draft.name || t("settings-provider-unnamed")}
+        </span>
+
+        {#if draft.preset}
+          <span class="truncate text-xs opacity-40">{draft.preset}</span>
+        {/if}
+
+        {#if draft.models.length > 0}
+          <span class="max-w-48 truncate text-xs opacity-40">
+            {draft.models.map((model) => model.id).join(", ")}
+          </span>
+        {/if}
+
+        <button
+          type="button"
+          class={BUTTON}
+          onclick={() => open(at)}
+          disabled={editingAt === at}
+        >
+          {t("settings-provider-edit")}
+        </button>
+
+        <button type="button" class={BUTTON} onclick={() => remove(at)}>
+          {t("settings-remove-provider")}
+        </button>
+      </li>
+    {:else}
+      <li class="text-sm opacity-50">
+        {read ? t("settings-no-providers") : t("settings-reading")}
+      </li>
+    {/each}
+  </ul>
+
   <!--
+    One Provider open at a time, below the list, the way an Action is opened
+    below its own. Every Provider expanded at once is what this window used
+    to be: two of them and the panel was longer than the window, with the
+    fields of the one being edited somewhere in the middle of it.
+
     Every field this window writes an identifier from says
     `autocorrect="off"`, for the reason the Palette's fields do (ticket 21)
     and with a consequence of its own: macOS corrects what is typed into a
@@ -167,21 +267,18 @@
     threshold takes a number; and an Action's prompt is the one thing here
     that IS prose, written in whole sentences for a Model to read.
   -->
-  {#each drafts as draft, at (at)}
-    <!-- Named on the element, so that a window opened for one Provider —
-         which is what a refused key does — can bring it into view and say
-         which one it came here for. -->
+  {#if editingAt !== null && drafts[editingAt]}
+    {@const at = editingAt}
+    {@const draft = drafts[at]}
     <article
-      data-provider={draft.was ?? draft.name}
-      class="flex flex-col gap-3 rounded-md border p-3
-             {(draft.was ?? draft.name) === wanted
-        ? 'border-red-400 dark:border-red-500'
-        : 'border-neutral-200 dark:border-neutral-700'}"
+      class="flex flex-col gap-3 rounded-md border border-neutral-300 p-3
+             dark:border-neutral-600"
     >
       <div class="grid grid-cols-2 gap-3">
         <label class="flex flex-col gap-1">
           <span class="text-xs opacity-60">{t("settings-provider-name")}</span>
           <input
+            id="provider-name"
             bind:value={draft.name}
             class={FIELD}
             autocorrect="off"
@@ -326,12 +423,13 @@
           {/each}
         </ul>
 
+        <!-- Removing a Provider is on its row and not here, where it used to
+             sit beside "Add a Model": the row is where a Provider is picked
+             out of the others, and it is the one place a Provider that is not
+             open can be got rid of. -->
         <div class="flex gap-2">
           <button type="button" class={BUTTON} onclick={() => offer(draft, "")}>
             {t("settings-add-model")}
-          </button>
-          <button type="button" class={BUTTON} onclick={() => remove(at)}>
-            {t("settings-remove-provider")}
           </button>
         </div>
 
@@ -366,11 +464,7 @@
         {/if}
       </div>
     </article>
-  {:else}
-    <p class="text-sm opacity-50">
-      {read ? t("settings-no-providers") : t("settings-reading")}
-    </p>
-  {/each}
+  {/if}
 </section>
 
 <section class="flex flex-col gap-3">
