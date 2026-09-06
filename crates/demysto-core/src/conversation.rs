@@ -7,13 +7,24 @@
 //! asking about something the user was never promised.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use crate::action::Action;
+use crate::picture::Png;
 use crate::run::RunOutcome;
 use crate::selection::{Kind, Selection};
 
 /// How many Conversations a session holds before the oldest falls off.
 pub(crate) const CAP: usize = 50;
+
+/// How much of this session's pictures are held at once before the oldest are
+/// let go of, in bytes.
+///
+/// A picture is heavy in a way text is not, and a resident tool left running
+/// all week must not grow without bound (user story 85). In any ordinary
+/// session this never fires: it is the ceiling under the rule that a picture
+/// lives as long as the window that shows it, not the rule itself.
+pub(crate) const HELD_PICTURES: u64 = 128 * 1024 * 1024;
 
 /// How much of the Selection the list of Conversations shows, in characters.
 /// Enough to tell two Runs of the same Action apart, and no more.
@@ -39,6 +50,31 @@ const ASSISTANT: &str = "assistant";
 /// service implementing this contract understands the same way.
 const CARRY_ON: &str = "That answer was cut off before it finished. Carry on from exactly where \
                         it stops, and do not repeat any of it.";
+
+/// What one message of a Conversation says, as the contract carries it.
+///
+/// Words alone for everything v1 sent, so that a text Run's request is byte for
+/// byte the one it always was. The other variant is the message a picture rides
+/// in — which is the first user message of an image Conversation, and no other:
+/// the whole list is resent on every Turn, so the picture is in front of the
+/// Model for every question asked about it.
+pub(crate) enum Said {
+    Words(String),
+    WordsAndPicture { text: String, picture: Arc<Png> },
+}
+
+/// Why the Turn now being asked has nothing to be asked with.
+pub(crate) enum Missing {
+    /// There is no Conversation to ask in: none on screen, or one evicted out
+    /// from under its own Run.
+    Conversation,
+    /// There is nothing in it to ask again: a Conversation whose last Turn is
+    /// still being answered, or one with no Turn to act on.
+    Turn,
+    /// Its picture has been let go of. The Conversation is Sealed: it reads
+    /// exactly as it did, and there is nothing left to resend.
+    Picture,
+}
 
 /// One Run of an Action plus the follow-up Turns taken on the same Selection.
 ///
@@ -75,12 +111,45 @@ pub struct Conversation {
     /// time, for the reason `warning` is: both are settled when the Conversation
     /// opens and neither changes after.
     pub preview: Option<String>,
+    /// How the picture this Conversation is about now stands, `None` for one
+    /// about words. Outlives the picture itself, which is what lets a Sealed
+    /// Conversation still say how large it was.
+    pub picture: Option<PictureStanding>,
     /// What every Turn in it is about. Held because the list shows it, because
     /// the window asks for the whole of it when the preview is expanded, and
     /// because a Run declared before it happens has already been told it; what
     /// the Model is sent is the Turns, not this.
+    ///
+    /// `None` for a Conversation whose picture has been let go of — see
+    /// [`Conversation::release`].
     #[serde(skip)]
     selection: Option<Selection>,
+}
+
+/// How the picture a Conversation is about now stands, which is what the window
+/// needs and the picture itself is not.
+///
+/// The picture crosses the bridge once, when the window asks for it; this
+/// crosses every time a Turn begins or ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct PictureStanding {
+    /// What asking again at the original resolution would send, so that the
+    /// price is written on the button rather than in a warning over it (user
+    /// story 78).
+    pub original_bytes: u64,
+    /// Whether fitting took anything off it. Where it did not, the original is
+    /// the picture already being sent, and there is nothing to offer.
+    pub fitted: bool,
+    /// Whether every Turn from here on sends the original rather than the
+    /// fitted picture, because somebody asked again at the original resolution.
+    ///
+    /// Held here and not on a Turn for the reason the switched Model is: a
+    /// person who asked for resolution asked because of a detail, and the
+    /// question after that one is about the same detail (user story 79).
+    pub original: bool,
+    /// Whether the picture has been let go of, which is what makes a
+    /// Conversation Sealed: readable, but not continuable (user story 84).
+    pub sealed: bool,
 }
 
 /// A single user message and the Model's reply.
@@ -144,6 +213,13 @@ pub(crate) struct Store {
     /// How many have been opened this session, which is where the next
     /// identifier comes from.
     opened: u64,
+    /// How much may be held in pictures before the oldest are let go of.
+    ///
+    /// A field rather than the constant itself, for the reason a Run's timeout
+    /// is one: a ceiling nobody can reach in a test is a ceiling nobody has
+    /// tested, and reaching this one honestly would mean a suite that encodes
+    /// 128 MB of noise.
+    ceiling: u64,
 }
 
 impl Store {
@@ -153,7 +229,14 @@ impl Store {
             held: VecDeque::new(),
             showing: None,
             opened: 0,
+            ceiling: HELD_PICTURES,
         }
+    }
+
+    /// The same store with a ceiling a test can reach.
+    #[cfg(test)]
+    pub(crate) fn holding_at_most(&mut self, bytes: u64) {
+        self.ceiling = bytes;
     }
 
     /// Opens the Conversation the Run about to begin will fill, puts it on
@@ -177,6 +260,7 @@ impl Store {
                 model: None,
                 warning: None,
                 preview: None,
+                picture: None,
                 selection: None,
             });
 
@@ -191,14 +275,67 @@ impl Store {
             .expect("a Conversation is open by this point");
 
         opening.action = action;
-        opening.preview = selection
+        // The dimensions where there is a picture and the opening words where
+        // there is text: what the window quotes above the first Turn, and what
+        // the list of Conversations shows, are the same fact said in the shape
+        // the Selection has.
+        opening.preview = selection.as_ref().map(|selection| {
+            selection
+                .dimensions()
+                .unwrap_or_else(|| opening_of(selection.as_text(), PREVIEW))
+        });
+        opening.picture = selection
             .as_ref()
-            .map(|selection| opening_of(selection.as_text(), PREVIEW));
+            .and_then(Selection::as_picture)
+            .map(|picture| PictureStanding {
+                original_bytes: picture.original_weight(),
+                fitted: picture.was_fitted(),
+                original: false,
+                sealed: false,
+            });
         opening.selection = selection;
         opening.warning = warning;
         self.showing = Some(opening.id);
 
-        opening.id
+        let id = opening.id;
+
+        self.within_the_ceiling();
+
+        id
+    }
+
+    /// Lets go of every picture this session is holding, which is what closing
+    /// the result window asks for.
+    ///
+    /// A picture lives as long as the window that shows it — ADR-0017. Nothing
+    /// is discarded by this: every Conversation stays in the list and reads
+    /// exactly as it did, and what is gone is the ability to add to one.
+    pub(crate) fn release_pictures(&mut self) {
+        for conversation in &mut self.held {
+            conversation.release();
+        }
+    }
+
+    /// Lets the oldest pictures go until what is held is under the ceiling.
+    ///
+    /// The Conversation just opened is never one of them: sealing a Conversation
+    /// before its first Turn would be answering a question by refusing it.
+    fn within_the_ceiling(&mut self) {
+        let mut held: u64 = self
+            .held
+            .iter()
+            .filter_map(Conversation::picture_weight)
+            .sum();
+
+        for at in (1..self.held.len()).rev() {
+            if held <= self.ceiling {
+                return;
+            }
+
+            if let Some(released) = self.held[at].release() {
+                held -= released;
+            }
+        }
     }
 
     /// Adds the Turn a follow-up asks to the Conversation on screen, so that
@@ -207,14 +344,22 @@ impl Store {
     ///
     /// `None` when there is no Conversation to add it to. Declared twice for
     /// the reason [`Self::open`] is, and added once for the same reason.
-    pub(crate) fn follow_up(&mut self, question: &str) -> Option<&Conversation> {
-        let showing = self.showing_mut()?;
+    pub(crate) fn follow_up(&mut self, question: &str) -> Result<&Conversation, Missing> {
+        let showing = self.showing_mut().ok_or(Missing::Conversation)?;
+
+        // A Sealed Conversation is not one to add to: there is nothing left to
+        // resend, and a Turn recorded here would be a question nobody could
+        // ask. The window says so where the input box was, and this is what
+        // keeps a window that did not from putting one on screen.
+        if showing.sealed() {
+            return Err(Missing::Picture);
+        }
 
         if !showing.turns.last().is_some_and(|last| last.asks(question)) {
             showing.turns.push(Turn::asking(question));
         }
 
-        Some(showing)
+        Ok(showing)
     }
 
     /// Records what the Turn now being asked sends, and answers with everything
@@ -226,11 +371,17 @@ impl Store {
         &mut self,
         id: u64,
         prompt: String,
-    ) -> Option<Vec<(&'static str, String)>> {
-        let conversation = self.held_mut(id)?;
-        conversation.turns.last_mut()?.prompt = prompt;
+    ) -> Result<Vec<(&'static str, Said)>, Missing> {
+        let conversation = self.held_mut(id).ok_or(Missing::Conversation)?;
 
-        Some(conversation.said())
+        if conversation.sealed() {
+            return Err(Missing::Picture);
+        }
+
+        let turn = conversation.turns.last_mut().ok_or(Missing::Conversation)?;
+        turn.prompt = prompt;
+
+        Ok(conversation.said())
     }
 
     /// Records what the Turn now being asked produced.
@@ -255,15 +406,22 @@ impl Store {
     ///
     /// `None` where there is nothing to try again: no Conversation on screen, or
     /// one whose last Turn is still being answered.
-    pub(crate) fn retrying(&mut self, model: Option<&str>) -> Option<Asked> {
-        let showing = self.showing_mut()?;
+    pub(crate) fn retrying(&mut self, model: Option<&str>) -> Result<Asked, Missing> {
+        let showing = self.showing_mut().ok_or(Missing::Conversation)?;
+
+        // Refused before anything is cleared, for the reason the Model is
+        // switched after rather than before: a Turn put back to being asked and
+        // then refused is a Turn whose answer was thrown away for nothing.
+        if showing.sealed() {
+            return Err(Missing::Picture);
+        }
 
         // Asked before the Model is switched, so that a retry with nothing to
         // retry changes nothing: switching the Conversation to a Model and then
         // not asking it anything would leave the window saying one thing and
         // the next Turn doing another.
-        let turn = showing.turns.last_mut()?;
-        turn.outcome.as_ref()?;
+        let turn = showing.turns.last_mut().ok_or(Missing::Turn)?;
+        turn.outcome.as_ref().ok_or(Missing::Turn)?;
 
         turn.outcome = None;
         turn.delivered = String::new();
@@ -272,7 +430,52 @@ impl Store {
             showing.model = Some(model.to_owned());
         }
 
-        Some(showing.asked())
+        Ok(showing.asked())
+    }
+
+    /// Puts the last Turn of the Conversation on screen back to being asked, at
+    /// the original resolution of the picture it is about — and leaves it there
+    /// for every Turn after this one (user stories 77 and 79).
+    ///
+    /// A retry with one thing changed, the way the Model switch is one: asking
+    /// for resolution without asking anything again would leave the user
+    /// looking at the same answer that missed the detail.
+    ///
+    /// The Turn asked again is the last one, where the spec says "re-runs the
+    /// Action". The two are the same thing in the case the button exists for —
+    /// a disappointing first answer — and differ only after a follow-up, where
+    /// re-running the Action would either discard the follow-ups or ask the
+    /// opening question a second time underneath them. What story 77 asks for
+    /// is the answer that missed a detail, asked again; that is the last Turn.
+    ///
+    /// `None` where there is nothing to ask again, and where the Conversation is
+    /// not about a picture at all.
+    pub(crate) fn at_original_resolution(&mut self) -> Result<Asked, Missing> {
+        let showing = self.showing_mut().ok_or(Missing::Conversation)?;
+
+        if showing.sealed() {
+            return Err(Missing::Picture);
+        }
+
+        showing
+            .selection
+            .as_ref()
+            .and_then(Selection::as_picture)
+            .ok_or(Missing::Turn)?;
+
+        let turn = showing.turns.last_mut().ok_or(Missing::Turn)?;
+        turn.outcome.as_ref().ok_or(Missing::Turn)?;
+
+        turn.outcome = None;
+        turn.delivered = String::new();
+
+        showing
+            .picture
+            .as_mut()
+            .expect("a Conversation with a picture stands for one")
+            .original = true;
+
+        Ok(showing.asked())
     }
 
     /// Puts the last Turn of the Conversation on screen back to being asked,
@@ -282,18 +485,27 @@ impl Store {
     /// `None` where the last Turn is not one that broke off part-way — there is
     /// nothing to continue from anything that finished, and nothing to continue
     /// at all where nothing arrived.
-    pub(crate) fn continuing(&mut self) -> Option<Asked> {
-        let showing = self.showing_mut()?;
-        let turn = showing.turns.last_mut()?;
+    pub(crate) fn continuing(&mut self) -> Result<Asked, Missing> {
+        let showing = self.showing_mut().ok_or(Missing::Conversation)?;
 
-        let RunOutcome::Interrupted { text, .. } = turn.outcome.as_ref()? else {
-            return None;
+        // Refused before anything is put back to being asked, for the reason a
+        // retry is: what already arrived is the user's, and losing it to a
+        // request that was never going to be made would be the worse failure.
+        if showing.sealed() {
+            return Err(Missing::Picture);
+        }
+
+        let turn = showing.turns.last_mut().ok_or(Missing::Turn)?;
+
+        let RunOutcome::Interrupted { text, .. } = turn.outcome.as_ref().ok_or(Missing::Turn)?
+        else {
+            return Err(Missing::Turn);
         };
 
         turn.delivered = text.clone();
         turn.outcome = None;
 
-        Some(showing.asked())
+        Ok(showing.asked())
     }
 
     /// The Conversation the result window is showing.
@@ -366,15 +578,83 @@ impl Conversation {
     /// Text where there is no Selection at all: a Run without one fails before
     /// it opens a Conversation, so the only way here is the empty Conversation
     /// a declared Run leaves behind, and asking about nothing is asking in
-    /// words.
+    /// words. A Sealed Conversation is still about the picture it was about,
+    /// whether or not Demysto still holds it.
     pub(crate) fn kind(&self) -> Kind {
-        self.selection.as_ref().map_or(Kind::Text, Selection::kind)
+        match (&self.selection, &self.picture) {
+            (Some(selection), _) => selection.kind(),
+            (None, Some(_)) => Kind::Image,
+            (None, None) => Kind::Text,
+        }
     }
 
     /// The whole of what every Turn in this Conversation is about, for the
     /// window that has quoted the opening of it and been asked for the rest.
+    ///
+    /// `None` for a picture: what that window is owed is the picture, which is
+    /// [`Self::picture_url`]'s.
     pub(crate) fn selection_text(&self) -> Option<&str> {
-        self.selection.as_ref().map(Selection::as_text)
+        self.selection
+            .as_ref()
+            .map(Selection::as_text)
+            .filter(|text| !text.is_empty())
+    }
+
+    /// The picture this Conversation is about, as the window shows one. `None`
+    /// where it is about words, and where the picture has been let go of.
+    pub(crate) fn picture_url(&self) -> Option<String> {
+        self.selection.as_ref().and_then(Selection::picture_url)
+    }
+
+    /// What holding this Conversation's picture costs, `None` where it holds
+    /// none.
+    fn picture_weight(&self) -> Option<u64> {
+        self.selection
+            .as_ref()
+            .and_then(Selection::as_picture)
+            .map(crate::Picture::weight_held)
+    }
+
+    /// Lets go of the picture, and answers with what that gave back.
+    ///
+    /// The Conversation itself stays: the exchange reads exactly as it did, and
+    /// what is gone is the ability to add to it. Only a picture is ever let go
+    /// of — a text Selection keeps until the session ends, as in v1.
+    fn release(&mut self) -> Option<u64> {
+        let weight = self.picture_weight()?;
+
+        self.selection = None;
+        if let Some(picture) = self.picture.as_mut() {
+            picture.sealed = true;
+        }
+
+        Some(weight)
+    }
+
+    /// Whether this is a Conversation that can be read but not added to.
+    fn sealed(&self) -> bool {
+        self.picture.is_some_and(|picture| picture.sealed)
+    }
+
+    /// Whether every Turn from here on sends the original picture.
+    fn at_original_resolution(&self) -> bool {
+        self.picture.is_some_and(|picture| picture.original)
+    }
+
+    /// What the list of Conversations calls this one: the dimensions where it
+    /// is about a picture, and the opening words where it is about text.
+    ///
+    /// Read from the Selection rather than from the preview, so that the words
+    /// are collapsed over the whole of it as they always were. A Sealed
+    /// Conversation no longer holds one, and its preview is the dimensions —
+    /// settled when it opened, and unchanged since.
+    fn about_line(&self) -> String {
+        match self.selection.as_ref() {
+            Some(selection) => selection
+                .dimensions()
+                .unwrap_or_else(|| about(selection.as_text())),
+            None => self.preview.clone().unwrap_or_default(),
+        }
     }
 
     /// Whether this is a Conversation whose one Turn is still waiting for its
@@ -395,13 +675,16 @@ impl Conversation {
     /// A question with nothing in it is not one: the opening Turn of a Run that
     /// failed before it assembled a prompt has none, and an empty message is
     /// not something to put to a Provider.
-    fn said(&self) -> Vec<(&'static str, String)> {
-        let mut said: Vec<(&'static str, String)> = self
+    fn said(&self) -> Vec<(&'static str, Said)> {
+        let mut said: Vec<(&'static str, Said)> = self
             .turns
             .iter()
             .flat_map(|turn| {
-                let asked = (!turn.prompt.is_empty()).then(|| (USER, turn.prompt.clone()));
-                let replied = turn.replied().map(|reply| (ASSISTANT, reply.to_owned()));
+                let asked =
+                    (!turn.prompt.is_empty()).then(|| (USER, Said::Words(turn.prompt.clone())));
+                let replied = turn
+                    .replied()
+                    .map(|reply| (ASSISTANT, Said::Words(reply.to_owned())));
 
                 asked.into_iter().chain(replied)
             })
@@ -415,10 +698,41 @@ impl Conversation {
             .last()
             .is_some_and(|turn| turn.outcome.is_none() && !turn.delivered.is_empty())
         {
-            said.push((USER, CARRY_ON.to_owned()));
+            said.push((USER, Said::Words(CARRY_ON.to_owned())));
         }
 
+        self.carrying_the_picture(&mut said);
+
         said
+    }
+
+    /// Puts the picture in the first user message, where there is one to put.
+    ///
+    /// The first and no other. Because the whole list is resent on every Turn
+    /// and the contract holds no state, one copy there is one copy in front of
+    /// the Model for every question in the Conversation — and the alternative
+    /// is a second question answered from the Model's memory of its own first
+    /// answer.
+    fn carrying_the_picture(&self, said: &mut [(&'static str, Said)]) {
+        let Some(picture) = self.selection.as_ref().and_then(Selection::as_picture) else {
+            return;
+        };
+
+        let Some((_, first)) = said.iter_mut().find(|(role, _)| *role == USER) else {
+            return;
+        };
+
+        let Said::Words(text) = first else {
+            return;
+        };
+
+        *first = Said::WordsAndPicture {
+            text: std::mem::take(text),
+            picture: match self.at_original_resolution() {
+                true => Arc::clone(picture.original()),
+                false => Arc::clone(picture.fitted()),
+            },
+        };
     }
 
     /// This Conversation as one line of the list of them.
@@ -426,11 +740,7 @@ impl Conversation {
         Summary {
             id: self.id,
             name: self.action.as_ref().map(|action| action.name.clone()),
-            about: self
-                .selection
-                .as_ref()
-                .map(|selection| about(selection.as_text()))
-                .unwrap_or_default(),
+            about: self.about_line(),
         }
     }
 }

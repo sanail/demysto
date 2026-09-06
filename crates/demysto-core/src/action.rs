@@ -117,6 +117,18 @@ pub(crate) fn built_in(words: &Words) -> Vec<Action> {
             accepts: vec![Kind::Text],
             template: SUMMARIZE.to_owned(),
         },
+        // One Action for pictures and not two. "Read the text in this picture"
+        // is a follow-up Turn in the Conversation that is already open, the
+        // Palette is worth less the longer it gets, and a built-in is ten lines
+        // here plus a message in five catalogues if it turns out to be wanted.
+        Action {
+            id: "describe-image".to_owned(),
+            name: say!(words, "action-describe-image-name"),
+            parameters: Vec::new(),
+            model: None,
+            accepts: vec![Kind::Image],
+            template: DESCRIBE_IMAGE.to_owned(),
+        },
     ]
 }
 
@@ -175,12 +187,20 @@ impl Action {
         interface: Interface,
     ) -> String {
         render(&self.template, |name| match name {
+            // Empty for a picture, which is `Selection::as_text` — and never
+            // the picture itself: that travels as a content part of its own,
+            // and nothing here may learn otherwise.
             SELECTION => Some(selection.as_text().to_owned()),
             UI_LANGUAGE => Some(interface.prompt_name().to_owned()),
             // Detected here rather than at Capture, and only when a template
             // asks: most Actions never mention it, and every Selection would
-            // otherwise be read twice for a variable nobody used.
-            SELECTION_LANGUAGE => Some(language::detect(selection.as_text()).name().to_owned()),
+            // otherwise be read twice for a variable nobody used. A picture is
+            // written in nothing, so an Action accepting both kinds renders
+            // this empty rather than guessing a language from no words.
+            SELECTION_LANGUAGE => Some(match selection.kind() {
+                Kind::Image => String::new(),
+                Kind::Text => language::detect(selection.as_text()).name().to_owned(),
+            }),
             _ => self
                 .parameters
                 .iter()
@@ -249,6 +269,19 @@ nothing else: no commentary, no notes, no transliteration, and no repetition of 
 the original. Keep whatever formatting the text already has.
 
 {{selection}}";
+
+/// English, like every other template and for ADR-0012's reason: this is
+/// addressed to a Model rather than to a person, and the answer is asked for in
+/// the language the interface speaks.
+///
+/// It names no `{{selection}}`, because there is nothing in a picture Selection
+/// to substitute: the picture is a content part of the same message, and the
+/// words below are what is said about it.
+const DESCRIBE_IMAGE: &str = "\
+Describe the image below to somebody who cannot see it. Say what it is and what \
+it shows, and read out any text in it exactly as it is written. Lead with what \
+the image is for; be brief and concrete, and do not speculate about what is not \
+there. Answer in {{ui_language}}.";
 
 const SUMMARIZE: &str = "\
 Summarize the text below for somebody deciding whether to read it. Lead with \

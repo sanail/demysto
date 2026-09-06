@@ -38,6 +38,7 @@ action-explain-name = Expliquer
 action-translate-name = Traduire
 action-translate-target-label = Vers quelle langue ?
 action-summarize-name = Résumer
+action-describe-image-name = Décrire l'image
 
 ## The Palette
 
@@ -45,6 +46,7 @@ palette-reading-selection = Lecture de ce que vous avez sélectionné…
 palette-reading-clipboard = Lecture du presse-papiers…
 palette-origin-selection = Sélection
 palette-origin-clipboard = Depuis le presse-papiers
+palette-picture = Une image, { $dimensions }
 palette-nothing-captured = Rien n'est sélectionné et le presse-papiers est vide. Sélectionnez du texte et appuyez de nouveau sur le raccourci.
 palette-filter = Filtrer les actions…
 palette-no-action-matches = Aucune action ne porte ce nom.
@@ -62,8 +64,12 @@ result-conversations = Conversations
 result-conversation-unnamed = Conversation
 result-nothing-asked-yet = Rien n'a encore été demandé.
 result-quotation-label = Le texte dont cette conversation parle
+result-picture-label = L'image dont cette conversation parle
 result-show-more = Afficher plus
 result-show-less = Afficher moins
+result-ask-at-original = Redemander en résolution d'origine — { $weight }
+result-picture-let-go = Demysto ne conserve plus cette image ({ $dimensions }).
+result-sealed = Cette conversation peut être lue, mais pas poursuivie : l'image dont elle parle a été relâchée. Copiez l'image et appuyez sur le raccourci pour poser une nouvelle question.
 result-asking = Interrogation du modèle…
 result-reasoning = Le modèle réfléchit…
 result-copy-answer = Copier la réponse
@@ -273,6 +279,7 @@ capture-clipboard-only = Ceci est une session Wayland, et Wayland ne laisse pas 
 capture-clipboard-unavailable = Le presse-papiers est indisponible : { $detail }
 capture-keystroke-refused = La frappe de copie n'a pas pu être envoyée : { $detail }
 capture-no-accessibility = macOS ne laisse pas Demysto lire ce que vous avez sélectionné : Demysto a besoin de l'autorisation d'Accessibilité. Ouvrez Confidentialité et sécurité → Accessibilité et activez Demysto.
+capture-picture-unreadable = Le presse-papiers contient une image que Demysto n'a pas pu lire. Copiez-la de nouveau, ou copiez-en une autre.
 accessibility-pane-unreachable = Demysto n'a pas pu ouvrir les Réglages Système : { $detail }. L'autorisation se trouve dans Confidentialité et sécurité → Accessibilité.
 accessibility-only-macos = Seul macOS demande une autorisation avant que Demysto puisse lire ce que vous avez sélectionné.
 
@@ -280,6 +287,7 @@ accessibility-only-macos = Seul macOS demande une autorisation avant que Demysto
 
 run-nothing-to-run = Il n'y a rien sur quoi exécuter une action : sélectionnez du texte, ou copiez-le, et appuyez de nouveau sur le raccourci.
 run-no-conversation = Il n'y a aucune conversation où poser cette question. Appuyez sur le raccourci pour en commencer une.
+run-conversation-sealed = L'image dont cette conversation parle a été relâchée, il ne reste donc plus rien sur quoi poser une question. Copiez-la et appuyez sur le raccourci pour commencer une nouvelle conversation.
 run-no-such-action = Il n'y a aucune action appelée « { $action } ». Elle a peut-être été retirée depuis que la palette s'est ouverte ; appuyez de nouveau sur le raccourci.
 run-nothing-to-retry = Il n'y a aucun tour à reprendre. Reposez la question pour en commencer un nouveau.
 
@@ -318,6 +326,7 @@ model-configured-are = Les modèles configurés là-bas sont : { $models }.
 model-action-binds-nothing = Cette action est liée au modèle « { $model } », et aucun fournisseur dans { $path } n'en offre un de ce nom. { $offered }
 model-setting-names-nothing = { $setting } dans { $path } nomme le modèle « { $model } », et aucun fournisseur là-bas n'en offre un de ce nom. { $offered }
 model-nothing-nominated = Aucun { $setting } n'est désigné dans { $path }. { $offered }
+model-no-vision-model = Aucun { $setting } n'est désigné dans { $path }, il n'y a donc aucun modèle à qui montrer une image. { $offered }
 model-nomination-none-configured = { $setting } nomme le modèle « { $model } », et aucun modèle n'est configuré du tout.
 model-nomination-unknown = { $setting } nomme le modèle « { $model } », et aucun fournisseur n'en offre un de ce nom. Les modèles configurés sont : { $models }.
 

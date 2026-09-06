@@ -33,8 +33,17 @@ export type Status = {
 /** Mirrors `demysto_core::Exported`. */
 export type Exported = { variable: string; value: string };
 
-/** Mirrors `demysto_core::Selection`. */
-export type Selection = { kind: "text"; text: string };
+/**
+ * Mirrors `demysto_core::Selection`.
+ *
+ * A picture carries how large it is and not the picture: that crosses the
+ * bridge when a window asks for it — [`capturedPicture`] for the Palette's
+ * thumbnail, [`picture`] for the Conversation — because this shape travels on
+ * every Capture and every Turn.
+ */
+export type Selection =
+  | { kind: "text"; text: string }
+  | { kind: "image"; picture: { dimensions: string } };
 
 /** Mirrors `demysto_core::Captured`. */
 export type Captured =
@@ -49,11 +58,13 @@ export type Captured =
  * `permission` is the one with somewhere to be sent — and so that each can be
  * said in a sentence of its own. `message` is whatever the platform said, which
  * the sentence quotes; the permission has none, macOS having said nothing but
- * no.
+ * no, and neither has `picture`, where the clipboard answered perfectly well
+ * and what it held was the problem.
  */
 export type CaptureError =
   | { kind: "clipboard"; message: string }
   | { kind: "keystroke"; message: string }
+  | { kind: "picture" }
   | { kind: "permission" };
 
 /** Mirrors `demysto_core::CaptureOutcome`. */
@@ -175,6 +186,30 @@ export type Turn = {
   outcome: RunOutcome | null;
 };
 
+/**
+ * Mirrors `demysto_core::PictureStanding`: how the picture a Conversation is
+ * about now stands.
+ */
+export type PictureStanding = {
+  /**
+   * What asking again at the original resolution would send, in bytes — which
+   * the button offering to says on itself.
+   */
+  original_bytes: number;
+  /**
+   * Whether fitting took anything off it. Where it did not, the original is
+   * the picture already being sent, and there is nothing to offer.
+   */
+  fitted: boolean;
+  /** Whether every Turn from here on sends the original rather than the fitted picture. */
+  original: boolean;
+  /**
+   * Whether the picture has been let go of, which makes the Conversation
+   * Sealed: it can be read, and it cannot be added to.
+   */
+  sealed: boolean;
+};
+
 /** Mirrors `demysto_core::Conversation`. */
 export type Conversation = {
   id: number;
@@ -189,11 +224,18 @@ export type Conversation = {
    */
   warning: string | null;
   /**
-   * The opening of the Selection, for the window to quote above the answer.
-   * `null` where there was no Selection. The rest of it comes from
-   * [`selection`], asked for only when the user expands the quotation.
+   * The opening of the Selection, for the window to quote above the answer —
+   * and, for a picture, how large it is. `null` where there was no Selection.
+   * The rest of it comes from [`selection`], asked for only when the user
+   * expands the quotation.
    */
   preview: string | null;
+  /**
+   * What this Conversation is owed where it is about a picture, `null` where it
+   * is about words. Outlives the picture itself, which is what lets a Sealed
+   * Conversation still say how large it was.
+   */
+  picture: PictureStanding | null;
 };
 
 /** Mirrors `demysto_core::Summary`: one line of the list of Conversations. */
@@ -249,6 +291,17 @@ export function retry(model?: string): Promise<void> {
 /** Asks the Model for the rest of an answer that broke off part-way. */
 export function continueAnswer(): Promise<void> {
   return invoke<void>("continue_answer");
+}
+
+/**
+ * Asks the Turn on screen again at the original resolution of the picture it is
+ * about, and leaves the Conversation there — every Turn after it sends the
+ * original too.
+ *
+ * Answers for the reason [`run`] does: the reply arrives through the events.
+ */
+export function askAtOriginalResolution(): Promise<void> {
+  return invoke<void>("ask_at_original_resolution");
 }
 
 /** Every Model configured, by the name a Conversation is switched to. */
@@ -397,6 +450,26 @@ export function conversation(): Promise<Conversation | null> {
  */
 export function selection(): Promise<string | null> {
   return invoke<string | null>("selection");
+}
+
+/**
+ * The picture the Conversation on screen is about, as a `data:` URL — `null`
+ * where it is about words, and where the picture has been let go of.
+ *
+ * Asked for rather than carried on the Conversation, for the reason the whole
+ * of a text Selection is: that shape crosses the bridge every time a Turn
+ * begins or ends, and this crosses once.
+ */
+export function picture(): Promise<string | null> {
+  return invoke<string | null>("picture");
+}
+
+/**
+ * The picture the last Capture produced, as a `data:` URL, for the thumbnail
+ * the Palette shows. `null` for a Capture that produced words, or nothing.
+ */
+export function capturedPicture(): Promise<string | null> {
+  return invoke<string | null>("captured_picture");
 }
 
 /** This session's Conversations, newest first. */

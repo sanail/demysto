@@ -150,6 +150,15 @@ pub fn continue_answer<R: Runtime>(app: AppHandle<R>) {
     crate::result::continue_answer(&app);
 }
 
+/// Asks the Turn on screen again at the original resolution of the picture it
+/// is about, and leaves the Conversation there.
+///
+/// Returns for the reason [`run`] does: the answer arrives through the events.
+#[tauri::command]
+pub fn ask_at_original_resolution<R: Runtime>(app: AppHandle<R>) {
+    crate::result::ask_at_original_resolution(&app);
+}
+
 /// Every Model configured, by the name one is switched to, so that the
 /// Conversation window can offer somewhere else to ask.
 #[tauri::command]
@@ -237,6 +246,24 @@ pub fn conversation(demysto: State<'_, Demysto>) -> Option<Conversation> {
 #[tauri::command]
 pub fn selection(demysto: State<'_, Demysto>) -> Option<String> {
     demysto.selection()
+}
+
+/// The picture the Conversation on screen is about, as a data URL — which is
+/// why `tauri.conf.json` lets these windows load `data:` images and nothing
+/// else.
+///
+/// Asked for rather than carried on the Conversation, for the reason the whole
+/// of a text Selection is: the Conversation crosses the bridge every time a Turn
+/// begins or ends, and this crosses once.
+#[tauri::command]
+pub fn picture(demysto: State<'_, Demysto>) -> Option<String> {
+    demysto.picture()
+}
+
+/// The picture the last Capture produced, for the thumbnail the Palette shows.
+#[tauri::command]
+pub fn captured_picture(demysto: State<'_, Demysto>) -> Option<String> {
+    demysto.captured_picture()
 }
 
 /// This session's Conversations, newest first, for the list the window offers.
@@ -383,6 +410,10 @@ async fn waiting<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -
 #[tauri::command]
 pub fn dismiss<R: Runtime>(window: WebviewWindow<R>) {
     let _ = window.hide();
+
+    // A Conversation window put away is a Conversation window closed, however
+    // it was put away: Escape is what most people close this one with.
+    crate::result::gone(window.app_handle(), window.label());
 
     crate::dock::follows_the_windows(
         window.app_handle(),

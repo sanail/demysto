@@ -131,6 +131,7 @@ pub fn run() {
                     dock::Change::Hiding(window.label()),
                 );
 
+                result::gone(window.app_handle(), window.label());
                 welcome::gone(window.app_handle(), window.label());
             }
             // The Palette is not a window anybody should have to manage: losing
@@ -152,6 +153,7 @@ pub fn run() {
             commands::stop,
             commands::retry,
             commands::continue_answer,
+            commands::ask_at_original_resolution,
             commands::models,
             commands::open_logs,
             commands::update_offered,
@@ -164,6 +166,8 @@ pub fn run() {
             commands::open_settings,
             commands::conversation,
             commands::selection,
+            commands::picture,
+            commands::captured_picture,
             commands::conversations,
             commands::show_conversation,
             commands::show_answers_on,

@@ -23,6 +23,7 @@ mod language;
 mod log;
 mod model;
 mod paths;
+mod picture;
 mod provider;
 mod run;
 mod selection;
@@ -34,10 +35,11 @@ pub use action::{Action, Parameter};
 pub use capture::{Capture, CaptureError, CaptureOutcome, Captured, Capturing};
 pub use catalogue::{ActionEdit, ActionError, ActionStanding, Catalogue, DefinedAction};
 pub use config::{ConfigError, DEFAULT_LARGE_SELECTION};
-pub use conversation::{Conversation, Summary, Turn};
+pub use conversation::{Conversation, PictureStanding, Summary, Turn};
 pub use fluent::FluentArgs as Args;
 pub use i18n::{Interface, Words, LANGUAGE_ENV};
 pub use paths::{config_dir, ConfigDirError, CONFIG_DIR_ENV};
+pub use picture::Picture;
 pub use run::{Arriving, RunError, RunOutcome};
 pub use selection::{Kind, Selection};
 pub use settings::{
@@ -314,6 +316,14 @@ impl Demysto {
         self
     }
 
+    /// The same facade holding almost nothing in pictures, so that the suite
+    /// can reach the ceiling without encoding 128 MB of noise to get there.
+    #[cfg(test)]
+    fn holding_at_most(self, bytes: u64) -> Self {
+        self.store.lock().unwrap().holding_at_most(bytes);
+        self
+    }
+
     /// Re-reads the settings the way saving them does, so that the suite can
     /// change them under a Conversation as the settings window does.
     #[cfg(test)]
@@ -384,7 +394,7 @@ impl Demysto {
     ///
     /// Answers with whether there was a Conversation to ask it in.
     pub fn about_to_follow_up(&self, question: &str) -> bool {
-        self.store.lock().unwrap().follow_up(question).is_some()
+        self.store.lock().unwrap().follow_up(question).is_ok()
     }
 
     /// The Conversation the result window is showing, `None` before there has
@@ -544,8 +554,14 @@ impl Demysto {
         // switched it, and that Model from then on.
         let (id, asking) = {
             let mut store = self.store.lock().unwrap();
-            let Some(conversation) = store.follow_up(question) else {
-                return RunOutcome::Failed(run::no_conversation(&self.words()));
+            let conversation = match store.follow_up(question) {
+                Ok(conversation) => conversation,
+                // Either there is no Conversation to ask in, or the one on
+                // screen has had its picture let go of and there is nothing
+                // left to ask about (user story 84).
+                Err(missing) => {
+                    return RunOutcome::Failed(run::nothing_left(missing, &self.words()))
+                }
             };
 
             (
@@ -597,6 +613,57 @@ impl Demysto {
         self.again(asked, showing)
     }
 
+    /// Asks the last Turn of the Conversation on screen again, at the original
+    /// resolution of the picture it is about — and leaves it there for every
+    /// Turn after this one (user stories 77 and 79).
+    ///
+    /// The recovery ADR-0017 puts after the answer rather than before it: the
+    /// decision is made by somebody looking at the evidence, and the price of it
+    /// is written on the button that makes it.
+    pub fn ask_at_original_resolution(&self, showing: impl FnMut(Arriving)) -> RunOutcome {
+        // Bound rather than passed straight in, for the reason a retry's is.
+        let asked = self.store.lock().unwrap().at_original_resolution();
+
+        self.again(asked, showing)
+    }
+
+    /// The picture the Conversation on screen is about, as a data URL, `None`
+    /// where it is about words — and where the picture has been let go of.
+    ///
+    /// Asked for rather than carried on the Conversation, for the reason the
+    /// whole of a text Selection is: the Conversation crosses to the window
+    /// every time a Turn begins or ends, and this crosses once, when the window
+    /// has one to show.
+    pub fn picture(&self) -> Option<String> {
+        self.store
+            .lock()
+            .unwrap()
+            .showing()
+            .and_then(Conversation::picture_url)
+    }
+
+    /// The picture the last Capture produced, as a data URL, so that the Palette
+    /// can show what it caught (user story 69). `None` for a Capture that
+    /// produced words, or nothing at all.
+    pub fn captured_picture(&self) -> Option<String> {
+        self.last_capture()
+            .as_ref()
+            .and_then(CaptureOutcome::selection)
+            .and_then(Selection::picture_url)
+    }
+
+    /// Lets go of every picture this session is holding, which is what the
+    /// result window closing asks for.
+    ///
+    /// A picture lives as long as the window that shows it — ADR-0017 — and
+    /// this is the signal the shell has to send, because nothing in the core
+    /// hears a window close. Nothing is discarded: the Conversations stay in the
+    /// list and read exactly as they did, and what is gone is the ability to add
+    /// to the ones that were about a picture.
+    pub fn windows_closed(&self) {
+        self.store.lock().unwrap().release_pictures();
+    }
+
     /// Whether the Conversation on screen has a Turn to try again or carry on,
     /// so that the window can show that it is under way before it is.
     ///
@@ -615,11 +682,12 @@ impl Demysto {
     /// one: a retry, or a continuation.
     fn again(
         &self,
-        asked: Option<conversation::Asked>,
+        asked: Result<conversation::Asked, conversation::Missing>,
         showing: impl FnMut(Arriving),
     ) -> RunOutcome {
-        let Some(asked) = asked else {
-            return RunOutcome::Failed(run::nothing_to_retry(&self.words()));
+        let asked = match asked {
+            Ok(asked) => asked,
+            Err(missing) => return RunOutcome::Failed(run::nothing_left(missing, &self.words())),
         };
 
         let id = asked.id;
@@ -762,8 +830,14 @@ impl Demysto {
             delivered,
         } = asking;
 
-        let Some(said) = self.store.lock().unwrap().asking(id, prompt) else {
-            return RunOutcome::stopped_short(delivered, run::no_conversation(&self.words()));
+        let said = match self.store.lock().unwrap().asking(id, prompt) {
+            Ok(said) => said,
+            Err(missing) => {
+                return RunOutcome::stopped_short(
+                    delivered,
+                    run::nothing_left(missing, &self.words()),
+                )
+            }
         };
 
         // Everything the request needs comes out of the settings here, and the
@@ -1080,6 +1154,13 @@ mod tests {
         /// tests that are about what happens when one never answers.
         fn impatient(mut self) -> Self {
             self.demysto = self.demysto.impatient();
+            self
+        }
+
+        /// The same Demysto holding no pictures at all, for the one test that
+        /// is about the ceiling rather than about what fits under it.
+        fn holding_nothing(mut self) -> Self {
+            self.demysto = self.demysto.holding_at_most(0);
             self
         }
     }
@@ -1442,6 +1523,159 @@ mod tests {
             captured(&demysto(fake::over(&desktop))),
             Captured::Clipboard(Selection::text("the same words"))
         );
+    }
+
+    #[test]
+    fn captures_a_picture_the_clipboard_is_holding() {
+        // The unambiguous case: a screen capture, or "copy image", puts no text
+        // on the clipboard at all.
+        let desktop = Arc::new(FakeDesktop::new(None, None).holding_picture(fake::pixels(8, 6, 1)));
+
+        assert_eq!(
+            captured(&demysto(fake::over(&desktop)))
+                .selection()
+                .map(Selection::kind),
+            Some(Kind::Image)
+        );
+    }
+
+    #[test]
+    fn a_clipboard_holding_both_text_and_a_picture_is_read_as_the_text() {
+        // A spreadsheet cell, a fragment of a page, a Word selection: they mean
+        // the text and carry the picture as a secondary flavour (user story 71).
+        let desktop = Arc::new(
+            FakeDesktop::new(Some("copied a moment ago"), None)
+                .holding_picture(fake::pixels(8, 6, 1)),
+        );
+
+        assert_eq!(
+            captured(&demysto(fake::over(&desktop))),
+            Captured::Clipboard(Selection::text("copied a moment ago"))
+        );
+    }
+
+    #[test]
+    fn a_clipboard_holding_text_is_never_asked_for_a_picture() {
+        // Text wins, and finding that out must not cost a walk through
+        // megabytes on every Hotkey press.
+        let desktop = Arc::new(FakeDesktop::new(Some("a receipt"), Some("a paragraph")));
+
+        demysto(fake::over(&desktop)).capture();
+
+        assert_eq!(desktop.picture_reads(), 0);
+    }
+
+    #[test]
+    fn a_picture_is_read_twice_at_most_rather_than_polled_for() {
+        // Once before the copy and once after it, against a settle window of
+        // five reads: the polling is text's, and a picture is megabytes.
+        let desktop = Arc::new(FakeDesktop::new(None, None).holding_picture(fake::pixels(8, 6, 1)));
+
+        demysto(fake::over(&desktop)).capture();
+
+        assert_eq!(desktop.picture_reads(), 2);
+    }
+
+    #[test]
+    fn a_picture_the_copy_lands_is_a_selection_rather_than_the_clipboard() {
+        // Nothing was on the clipboard to be told apart from it, and the copy
+        // brought it: that is what the user was looking at.
+        let desktop =
+            Arc::new(FakeDesktop::new(None, None).selecting_picture(fake::pixels(8, 6, 1)));
+
+        assert!(matches!(
+            captured(&demysto(fake::over(&desktop))),
+            Captured::Selection(Selection::Image { .. })
+        ));
+    }
+
+    #[test]
+    fn a_picture_the_copy_did_not_change_is_the_clipboards_own() {
+        let desktop = Arc::new(FakeDesktop::new(None, None).holding_picture(fake::pixels(8, 6, 1)));
+
+        assert!(matches!(
+            captured(&demysto(fake::over(&desktop))),
+            Captured::Clipboard(Selection::Image { .. })
+        ));
+    }
+
+    #[test]
+    fn a_picture_of_the_same_size_in_a_different_shade_is_a_new_one() {
+        // The signature is the size and a hash of the pixels, so two pictures
+        // that differ in neither dimension are still told apart.
+        let desktop = Arc::new(
+            FakeDesktop::new(None, None)
+                .holding_picture(fake::pixels(8, 6, 1))
+                .selecting_picture(fake::pixels(8, 6, 2)),
+        );
+
+        assert!(matches!(
+            captured(&demysto(fake::over(&desktop))),
+            Captured::Selection(Selection::Image { .. })
+        ));
+    }
+
+    #[test]
+    fn a_capture_that_displaced_a_picture_puts_it_back() {
+        // The guarantee v1 gave for text, now covering pictures (user story 70).
+        let held = fake::pixels(8, 6, 1);
+        let desktop =
+            Arc::new(FakeDesktop::new(None, Some("a paragraph")).holding_picture(held.clone()));
+
+        demysto(fake::over(&desktop)).capture();
+
+        assert_eq!(desktop.picture_now(), Some(held));
+    }
+
+    #[test]
+    fn a_clipboard_that_will_not_answer_about_words_is_still_asked_about_pictures() {
+        // What X11 does with a clipboard holding a picture and nothing else:
+        // the owner cannot convert what it has into what was asked for, and
+        // says so. Reporting that as a clipboard nobody can read made every
+        // picture on that platform a Capture that failed.
+        let desktop = Arc::new(
+            FakeDesktop::new(None, None)
+                .refusing_text()
+                .holding_picture(fake::pixels(8, 6, 1)),
+        );
+
+        assert!(matches!(
+            captured(&demysto(fake::over(&desktop))),
+            Captured::Clipboard(Selection::Image { .. })
+        ));
+    }
+
+    #[test]
+    fn a_clipboard_that_will_answer_about_nothing_at_all_is_reported() {
+        // And the sentence is the one about words: it is the answer to what
+        // the user was almost certainly asking for.
+        let desktop = Arc::new(FakeDesktop::new(None, None).refusing_text());
+
+        assert_eq!(
+            demysto(fake::over(&desktop)).capture(),
+            CaptureOutcome::Failed(CaptureError::Clipboard(
+                "incorrect type received from clipboard".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_clipboard_holding_neither_text_nor_a_picture_is_still_nothing() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+
+        assert_eq!(captured(&demysto(fake::over(&desktop))), Captured::Nothing);
+    }
+
+    #[test]
+    fn a_wayland_session_reads_a_picture_off_the_clipboard_too() {
+        // The half that works there, and the one platform without a synthetic
+        // copy is not also the one without pictures (user story 72).
+        let desktop = Arc::new(FakeDesktop::new(None, None).holding_picture(fake::pixels(8, 6, 1)));
+
+        assert!(matches!(
+            captured(&demysto(fake::clipboard_only_over(&desktop))),
+            Captured::Clipboard(Selection::Image { .. })
+        ));
     }
 
     #[test]
@@ -4146,7 +4380,10 @@ mod tests {
     fn a_fresh_installation_has_the_built_in_actions_and_nothing_written_anywhere() {
         let demysto = unconfigured("a paragraph");
 
-        assert_eq!(catalogued(&demysto), ["explain", "translate", "summarize"]);
+        assert_eq!(
+            catalogued(&demysto),
+            ["explain", "translate", "summarize", "describe-image"]
+        );
         assert!(demysto.catalogue().unreadable.is_empty());
 
         // ADR-0005: the configuration directory belongs to the user, and a
@@ -4289,7 +4526,10 @@ mod tests {
             .delete_action("rewrite-plainly")
             .expect("the Action should have been deleted");
 
-        assert_eq!(catalogued(&demysto), ["explain", "translate", "summarize"]);
+        assert_eq!(
+            catalogued(&demysto),
+            ["explain", "translate", "summarize", "describe-image"]
+        );
         assert!(!path.exists(), "the file should have gone with it");
     }
 
@@ -4326,7 +4566,10 @@ mod tests {
 
         // Still the first Action in the Palette, and still called what it was:
         // an Override changes an Action, it does not add one.
-        assert_eq!(catalogued(&demysto), ["explain", "translate", "summarize"]);
+        assert_eq!(
+            catalogued(&demysto),
+            ["explain", "translate", "summarize", "describe-image"]
+        );
         assert_eq!(
             defined(&demysto, "explain").standing,
             ActionStanding::Overridden
@@ -4462,7 +4705,13 @@ mod tests {
         );
         assert_eq!(
             catalogued(&demysto),
-            ["explain", "translate", "summarize", "explain-2"]
+            [
+                "explain",
+                "translate",
+                "summarize",
+                "describe-image",
+                "explain-2"
+            ]
         );
         assert_eq!(
             defined(&demysto, "explain").standing,
@@ -4519,7 +4768,13 @@ mod tests {
         assert_eq!(defined(&demysto, "rewrite-plainly").name, "Put it plainly");
         assert_eq!(
             catalogued(&demysto),
-            ["explain", "translate", "summarize", "rewrite-plainly"]
+            [
+                "explain",
+                "translate",
+                "summarize",
+                "describe-image",
+                "rewrite-plainly"
+            ]
         );
     }
 
@@ -4594,7 +4849,13 @@ mod tests {
                 .into_iter()
                 .map(|action| action.id)
                 .collect::<Vec<_>>(),
-            ["explain", "translate", "summarize", "rewrite-plainly"]
+            [
+                "explain",
+                "translate",
+                "summarize",
+                "describe-image",
+                "rewrite-plainly"
+            ]
         );
         assert_eq!(catalogue.unreadable.len(), 2);
         assert!(
@@ -4726,7 +4987,13 @@ mod tests {
 
         assert_eq!(
             catalogued(&demysto),
-            ["explain", "translate", "summarize", "объяснить-проще"]
+            [
+                "explain",
+                "translate",
+                "summarize",
+                "describe-image",
+                "объяснить-проще"
+            ]
         );
     }
 
@@ -5587,5 +5854,510 @@ mod tests {
         assert!(!written.contains("nobody else should read"), "{written}");
         assert!(!written.contains("Higgs"), "{written}");
         assert!(!written.contains("a-key"), "{written}");
+    }
+
+    /// A settings file naming one Provider at `base_url`, and nominating its
+    /// one Model for both defaults — which is what asking about a picture
+    /// needs, and what a user with one Provider writes.
+    fn one_seeing_provider(base_url: &str) -> String {
+        format!(
+            "default_model = \"a provider/a-model\"\n\
+             default_vision_model = \"a provider/a-model\"\n\n{}",
+            provider("a provider", base_url, "a-key", "a-model")
+        )
+    }
+
+    /// A Demysto that has captured a picture of that size and is pointed at
+    /// `server`, with a Model nominated to show it to.
+    fn ready_to_look(server: &ServerGuard, width: u32, height: u32) -> Rooted {
+        looking_at(
+            &one_seeing_provider(&format!("{}/v1", server.url())),
+            width,
+            height,
+        )
+    }
+
+    /// The same, with the settings written out in full.
+    fn looking_at(settings: &str, width: u32, height: u32) -> Rooted {
+        let desktop =
+            Arc::new(FakeDesktop::new(None, None).holding_picture(fake::pixels(width, height, 1)));
+        let demysto = rooted(
+            fake::over(&desktop),
+            Some(&format!("version = 1\n\n{settings}")),
+        );
+        demysto.capture();
+
+        demysto
+    }
+
+    /// The two data URLs a picture of that size travels as: what a Run sends,
+    /// and what asking again at the original resolution sends.
+    ///
+    /// Built here the way the Capture builds them, so that an assertion about
+    /// which of the two went out is an assertion about the picture rather than
+    /// about a length.
+    fn fitted_and_original(width: u32, height: u32) -> (String, String) {
+        let pixels = fake::pixels(width, height, 1);
+        let picture = picture::Picture::taken(pixels.width, pixels.height, &pixels.bytes)
+            .expect("that is a picture");
+
+        (picture.fitted().url(), picture.original().url())
+    }
+
+    /// A request carrying that picture in the first user message.
+    fn carrying(url: &str) -> Matcher {
+        Matcher::PartialJson(json!({
+            "messages": [{
+                "role": "user",
+                "content": [{ "type": "text" }, { "image_url": { "url": url } }],
+            }],
+        }))
+    }
+
+    #[test]
+    fn a_picture_travels_as_a_part_of_the_first_user_message() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![
+                Matcher::PartialJson(json!({
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            { "type": "text" },
+                            { "type": "image_url" },
+                        ],
+                    }],
+                })),
+                // A data URL and not a link to somewhere: the picture is held in
+                // memory, and there is nowhere else it could be fetched from.
+                Matcher::Regex(r#""url":"data:image/png;base64,"#.to_owned()),
+            ],
+        );
+
+        running(&ready_to_look(&server, 8, 6), "describe-image", &[]);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn a_text_run_still_sends_its_message_as_a_bare_string() {
+        // Nothing about a request v1 recorded changes: the parts array is what
+        // a picture needs, and it is used where there is one and nowhere else.
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![Matcher::Regex(
+                r#""role":"user","content":"Explain the text below"#.to_owned(),
+            )],
+        );
+
+        run(&ready_to_run(&server, "Ceci n'est pas une pipe"));
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn the_picture_is_in_the_request_of_every_turn() {
+        // The whole list is resent on every Turn and the contract holds no
+        // state, so this is what keeps a third question from being answered
+        // from the Model's memory of its own first answer.
+        let mut server = Server::new();
+        let (fitted, _) = fitted_and_original(8, 6);
+        let endpoint = asked_for(&mut server, vec![carrying(&fitted)]).expect(2);
+
+        let demysto = ready_to_look(&server, 8, 6);
+        running(&demysto, "describe-image", &[]);
+        following_up(&demysto, "and what is the arrow on the left?");
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn a_run_sends_the_fitted_picture_and_not_the_original() {
+        let mut server = Server::new();
+        let (fitted, original) = fitted_and_original(2000, 100);
+
+        assert_ne!(fitted, original, "a picture over the ceiling is fitted");
+
+        let endpoint = asked_for(&mut server, vec![carrying(&fitted)]);
+
+        running(&ready_to_look(&server, 2000, 100), "describe-image", &[]);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn asking_again_at_the_original_resolution_sends_the_original() {
+        let mut server = Server::new();
+        let (_, original) = fitted_and_original(2000, 100);
+        let endpoint = asked_for(&mut server, vec![carrying(&original)]);
+
+        let demysto = ready_to_look(&server, 2000, 100);
+        running(&demysto, "describe-image", &[]);
+        demysto.ask_at_original_resolution(|_| {});
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn the_original_stays_for_the_turn_after_the_one_that_asked_for_it() {
+        // Somebody who asked for resolution asked because of a detail, and the
+        // question after that one is about the same detail (user story 79).
+        let mut server = Server::new();
+        let (_, original) = fitted_and_original(2000, 100);
+        let endpoint = asked_for(&mut server, vec![carrying(&original)]).expect(2);
+
+        let demysto = ready_to_look(&server, 2000, 100);
+        running(&demysto, "describe-image", &[]);
+        demysto.ask_at_original_resolution(|_| {});
+        following_up(&demysto, "and the small print under it?");
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn asking_again_at_the_original_resolution_does_not_add_a_turn() {
+        // The same question asked a second time, as a retry is: a Conversation
+        // that accumulated one copy of it per attempt would send every attempt
+        // as context for the next.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .expect(2)
+            .create();
+
+        let demysto = ready_to_look(&server, 8, 6);
+        running(&demysto, "describe-image", &[]);
+        demysto.ask_at_original_resolution(|_| {});
+
+        assert_eq!(turns(&demysto), [(None, answered("an answer"))]);
+    }
+
+    #[test]
+    fn the_window_is_told_what_asking_at_the_original_resolution_would_weigh() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_look(&server, 2000, 100);
+        running(&demysto, "describe-image", &[]);
+
+        let depicted = showing(&demysto)
+            .picture
+            .expect("an image Conversation says what it is about");
+
+        assert!(depicted.fitted, "a picture over the ceiling was fitted");
+        assert!(!depicted.original, "a Run sends the fitted picture");
+        assert!(!depicted.sealed);
+        assert!(depicted.original_bytes > 0, "the price goes on the button");
+    }
+
+    #[test]
+    fn a_picture_within_the_ceiling_has_nothing_to_offer_at_the_original() {
+        // Fitting took nothing off it, so the original is the picture already
+        // being sent: a button offering to send it again would charge for a
+        // byte-identical request.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_look(&server, 8, 6);
+        running(&demysto, "describe-image", &[]);
+
+        assert!(!showing(&demysto).picture.expect("a picture").fitted);
+    }
+
+    #[test]
+    fn a_retry_in_a_sealed_conversation_keeps_the_answer_it_had() {
+        // The refusal comes before the Turn is put back to being asked. It did
+        // not once, and a Try again on a Sealed Conversation threw away the
+        // answer that was on screen to make room for a request that was never
+        // going to be made.
+        let mut server = Server::new();
+        let endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("a chart with two axes"))
+            .expect(1)
+            .create();
+
+        let demysto = ready_to_look(&server, 8, 6);
+        running(&demysto, "describe-image", &[]);
+        demysto.windows_closed();
+
+        let outcome = demysto.retry(None, |_| {});
+
+        assert!(
+            outcome
+                .error()
+                .is_some_and(|error| error.message().contains("let go of")),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            turns(&demysto),
+            [(None, answered("a chart with two axes"))],
+            "the answer should still be there"
+        );
+        endpoint.assert();
+    }
+
+    #[test]
+    fn a_conversation_asking_at_the_original_resolution_says_so() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .expect(2)
+            .create();
+
+        let demysto = ready_to_look(&server, 2000, 100);
+        running(&demysto, "describe-image", &[]);
+        demysto.ask_at_original_resolution(|_| {});
+
+        // So that the offer is not made twice: from here on every Turn sends
+        // the original, and there is nothing left to offer.
+        assert!(showing(&demysto).picture.expect("a picture").original);
+    }
+
+    #[test]
+    fn a_picture_with_no_vision_model_nominated_names_the_setting_rather_than_asking() {
+        // The Provider is an address that refuses connections, so anything but
+        // this outcome would mean a request went out to a Model that cannot see.
+        let demysto = looking_at(&one_provider("http://127.0.0.1:1"), 8, 6);
+
+        let RunOutcome::Failed(error) = running(&demysto, "describe-image", &[]) else {
+            panic!("a picture with nowhere to go should fail");
+        };
+
+        assert!(error.message().contains("default_vision_model"), "{error}");
+    }
+
+    #[test]
+    fn the_action_that_could_not_resolve_a_model_is_still_offered() {
+        // An Action that vanishes reads as "this tool cannot do pictures",
+        // where the true answer is "nominate a Model, here".
+        let demysto = looking_at(&one_provider("http://127.0.0.1:1"), 8, 6);
+
+        assert_eq!(offered(&demysto), ["Describe image"]);
+    }
+
+    #[test]
+    fn text_is_not_offered_the_action_that_accepts_a_picture() {
+        let demysto = ready_with(&one_provider("http://127.0.0.1:1"), "a paragraph");
+
+        assert_eq!(offered(&demysto), ["Explain", "Translate", "Summarize"]);
+    }
+
+    #[test]
+    fn a_picture_renders_the_selection_and_its_language_as_nothing() {
+        // An Action declaring both kinds is legitimate, and its template has to
+        // name `{{selection}}` for the text half. What it must never do is
+        // carry the picture into the words: that travels as a part of its own.
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![Matcher::PartialJson(json!({
+                "messages": [{
+                    "content": [{ "text": "Look at [] written in []." }],
+                }],
+            }))],
+        );
+
+        let demysto = ready_to_look(&server, 8, 6);
+        both_kinds(&demysto);
+
+        running(&demysto, "both-kinds", &[]);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn the_same_action_renders_text_and_its_language_as_it_always_did() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![Matcher::Regex(
+                "Look at \\[Der Mensch ist frei geschaffen\\] written in \\[German\\].".to_owned(),
+            )],
+        );
+
+        let demysto = ready_to_run(&server, "Der Mensch ist frei geschaffen");
+        both_kinds(&demysto);
+
+        running(&demysto, "both-kinds", &[]);
+
+        endpoint.assert();
+    }
+
+    /// An Action of the user's own that takes either kind, saved the way the
+    /// window that writes Actions saves one.
+    fn both_kinds(demysto: &Demysto) {
+        demysto
+            .save_action(&ActionEdit {
+                id: None,
+                name: "Both kinds".to_owned(),
+                template: "Look at [{{selection}}] written in [{{selection_language}}].".to_owned(),
+                parameters: Vec::new(),
+                model: None,
+                hotkey: None,
+                accepts: vec![Kind::Text, Kind::Image],
+            })
+            .expect("an Action taking both kinds is one to save");
+    }
+
+    #[test]
+    fn an_action_declaring_it_takes_pictures_survives_a_save() {
+        let demysto = demysto(fake::over(&Arc::new(FakeDesktop::default())));
+
+        demysto
+            .save_action(&ActionEdit {
+                id: None,
+                name: "Read the sign".to_owned(),
+                template: "What does this sign say?".to_owned(),
+                parameters: Vec::new(),
+                model: None,
+                hotkey: None,
+                accepts: vec![Kind::Image],
+            })
+            .expect("an Action taking a picture is one to save");
+
+        let saved = demysto
+            .catalogue()
+            .actions
+            .into_iter()
+            .find(|action| action.id == "read-the-sign")
+            .expect("the Action that was just saved");
+
+        assert_eq!(saved.accepts, [Kind::Image]);
+    }
+
+    #[test]
+    fn closing_the_window_leaves_the_conversation_readable() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("a chart with two axes"))
+            .create();
+
+        let demysto = ready_to_look(&server, 8, 6);
+        running(&demysto, "describe-image", &[]);
+
+        demysto.windows_closed();
+
+        // Nothing is discarded: what is gone is the ability to add to it.
+        assert_eq!(turns(&demysto), [(None, answered("a chart with two axes"))]);
+        assert!(showing(&demysto).picture.expect("a picture").sealed);
+        assert_eq!(demysto.picture(), None);
+    }
+
+    #[test]
+    fn a_sealed_conversation_still_reads_as_what_it_was_about() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("a chart"))
+            .create();
+
+        let demysto = ready_to_look(&server, 320, 240);
+        running(&demysto, "describe-image", &[]);
+        demysto.windows_closed();
+
+        assert_eq!(showing(&demysto).preview.as_deref(), Some("320 × 240"));
+        assert_eq!(
+            demysto
+                .conversations()
+                .into_iter()
+                .map(|held| held.about)
+                .collect::<Vec<_>>(),
+            ["320 × 240"]
+        );
+    }
+
+    #[test]
+    fn a_follow_up_in_a_sealed_conversation_is_refused_and_sends_nothing() {
+        // The Provider answers once and would answer again; the mock expects
+        // one request, so a second would fail this.
+        let mut server = Server::new();
+        let endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("a chart"))
+            .expect(1)
+            .create();
+
+        let demysto = ready_to_look(&server, 8, 6);
+        running(&demysto, "describe-image", &[]);
+        demysto.windows_closed();
+
+        let RunOutcome::Failed(error) = following_up(&demysto, "and the axis labels?") else {
+            panic!("a Sealed Conversation has nothing left to ask about");
+        };
+
+        assert!(!demysto.about_to_follow_up("and the axis labels?"));
+        assert!(error.message().contains("let go of"), "{error}");
+        endpoint.assert();
+    }
+
+    #[test]
+    fn a_text_conversation_is_never_sealed() {
+        // A picture is what weighs enough to be worth letting go of; the words
+        // somebody asked about keep until the session ends, as in v1.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .expect(2)
+            .create();
+
+        let demysto = ready_to_run(&server, "Ceci n'est pas une pipe");
+        run(&demysto);
+
+        demysto.windows_closed();
+
+        assert_eq!(showing(&demysto).picture, None);
+        assert!(matches!(
+            following_up(&demysto, "and in English?"),
+            RunOutcome::Answered(_)
+        ));
+    }
+
+    #[test]
+    fn the_ceiling_over_held_pictures_lets_the_oldest_go_first() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .expect(2)
+            .create();
+
+        // A ceiling of nothing at all, so that opening the second Conversation
+        // is already over it: what a session left running all week reaches
+        // honestly, a suite reaches by lowering the bar.
+        let demysto = ready_to_look(&server, 8, 6).holding_nothing();
+        running(&demysto, "describe-image", &[]);
+
+        let first = showing(&demysto).id;
+
+        // A second picture, captured and asked about after the first.
+        demysto.capture();
+        running(&demysto, "describe-image", &[]);
+
+        assert!(
+            !showing(&demysto).picture.expect("a picture").sealed,
+            "the Conversation just opened is never the one let go of"
+        );
+        assert!(
+            demysto
+                .show_conversation(first)
+                .expect("the first Conversation is still held")
+                .picture
+                .expect("a picture")
+                .sealed,
+            "the oldest picture is the one that goes"
+        );
     }
 }

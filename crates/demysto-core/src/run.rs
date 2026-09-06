@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::capture::{CaptureError, CaptureOutcome};
+use crate::conversation::Missing;
 use crate::i18n::{say, Words};
 
 /// What a Run hands over while it is still going.
@@ -241,6 +242,29 @@ pub(crate) fn nothing_to_run(words: &Words) -> RunError {
 pub(crate) fn no_conversation(words: &Words) -> RunError {
     RunError::NothingToRun {
         message: say!(words, "run-no-conversation"),
+    }
+}
+
+/// What the user is told when the Turn now being asked has nothing left to be
+/// asked with: no Conversation to ask it in, or one whose picture has been let
+/// go of.
+pub(crate) fn nothing_left(missing: Missing, words: &Words) -> RunError {
+    match missing {
+        Missing::Conversation => no_conversation(words),
+        Missing::Turn => nothing_to_retry(words),
+        Missing::Picture => conversation_sealed(words),
+    }
+}
+
+/// What the user is told when the Conversation they asked in is Sealed: it can
+/// be read, and there is nothing left to send a Model.
+///
+/// Not reachable from a window that knows it — the window says so where the
+/// input box was — and reachable the moment one that has not heard yet asks
+/// anything in it.
+pub(crate) fn conversation_sealed(words: &Words) -> RunError {
+    RunError::NothingToRun {
+        message: say!(words, "run-conversation-sealed"),
     }
 }
 

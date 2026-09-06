@@ -34,6 +34,7 @@ action-explain-name = Объяснить
 action-translate-name = Перевести
 action-translate-target-label = На какой язык?
 action-summarize-name = Пересказать
+action-describe-image-name = Описать изображение
 
 ## The Palette
 
@@ -41,6 +42,7 @@ palette-reading-selection = Читаю выделенное…
 palette-reading-clipboard = Читаю буфер обмена…
 palette-origin-selection = Выделение
 palette-origin-clipboard = Из буфера обмена
+palette-picture = Изображение, { $dimensions }
 palette-nothing-captured = Ничего не выделено, и буфер обмена пуст. Выделите текст и нажмите горячую клавишу ещё раз.
 palette-filter = Фильтр действий…
 palette-no-action-matches = Ни одно действие так не называется.
@@ -58,8 +60,12 @@ result-conversations = Беседы
 result-conversation-unnamed = Беседа
 result-nothing-asked-yet = Пока ничего не спрошено.
 result-quotation-label = Текст, о котором эта беседа
+result-picture-label = Изображение, о котором эта беседа
 result-show-more = Показать целиком
 result-show-less = Свернуть
+result-ask-at-original = Спросить снова в исходном разрешении — { $weight }
+result-picture-let-go = Demysto больше не хранит это изображение ({ $dimensions }).
+result-sealed = Эту беседу можно прочитать, но нельзя продолжить: изображение, о котором она, отпущено. Скопируйте изображение и нажмите горячую клавишу, чтобы спросить что-то новое.
 result-asking = Спрашиваю модель…
 result-reasoning = Модель размышляет…
 result-copy-answer = Скопировать ответ
@@ -269,6 +275,7 @@ capture-clipboard-only = Это сеанс Wayland, а Wayland не позвол
 capture-clipboard-unavailable = Буфер обмена недоступен: { $detail }
 capture-keystroke-refused = Не удалось отправить сочетание копирования: { $detail }
 capture-no-accessibility = macOS не даёт Demysto прочитать выделенное: Demysto нужно разрешение «Универсальный доступ». Откройте «Конфиденциальность и безопасность» → «Универсальный доступ» и включите Demysto.
+capture-picture-unreadable = В буфере обмена изображение, которое Demysto не смог прочитать. Скопируйте его ещё раз или скопируйте другое.
 accessibility-pane-unreachable = Demysto не смог открыть Системные настройки: { $detail }. Разрешение находится в «Конфиденциальность и безопасность» → «Универсальный доступ».
 accessibility-only-macos = Только macOS спрашивает разрешение, прежде чем Demysto сможет прочитать выделенное.
 
@@ -276,6 +283,7 @@ accessibility-only-macos = Только macOS спрашивает разреш�
 
 run-nothing-to-run = Не на чем запускать действие: выделите текст или скопируйте его и нажмите горячую клавишу ещё раз.
 run-no-conversation = Нет беседы, в которой можно это спросить. Нажмите горячую клавишу, чтобы начать новую.
+run-conversation-sealed = Изображение, о котором эта беседа, отпущено, и спрашивать больше не о чем. Скопируйте его и нажмите горячую клавишу, чтобы начать новую беседу.
 run-no-such-action = Нет действия с именем «{ $action }». Возможно, его удалили после того, как открылась палитра; нажмите горячую клавишу ещё раз.
 run-nothing-to-retry = Нет реплики, которую можно повторить. Задайте вопрос заново, чтобы начать новую.
 
@@ -315,6 +323,7 @@ model-configured-are = Там настроены такие модели: { $mod
 model-action-binds-nothing = Это действие привязано к модели «{ $model }», и ни один провайдер в { $path } не предлагает модель с таким именем. { $offered }
 model-setting-names-nothing = { $setting } в { $path } называет модель «{ $model }», и ни один провайдер там не предлагает модель с таким именем. { $offered }
 model-nothing-nominated = В { $path } не назначено { $setting }. { $offered }
+model-no-vision-model = В { $path } не назначено { $setting }, и показать изображение некому. { $offered }
 model-nomination-none-configured = { $setting } называет модель «{ $model }», а не настроено ни одной модели.
 model-nomination-unknown = { $setting } называет модель «{ $model }», и ни один провайдер не предлагает модель с таким именем. Настроены такие модели: { $models }.
 

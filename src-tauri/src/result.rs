@@ -89,6 +89,27 @@ pub fn continue_answer<R: Runtime>(app: &AppHandle<R>) {
     again(app, |demysto| demysto.continue_answer(streaming));
 }
 
+/// Asks the Turn on screen again at the original resolution of the picture it
+/// is about (user story 77).
+pub fn ask_at_original_resolution<R: Runtime>(app: &AppHandle<R>) {
+    again(app, |demysto| demysto.ask_at_original_resolution(streaming));
+}
+
+/// Tells the core that this window has gone, so that it can let go of the
+/// pictures it was showing.
+///
+/// The signal ADR-0017 says the shell has to send: a picture lives as long as
+/// the window that shows it, and nothing in the core hears a window close.
+/// Answers to this window alone — Settings going away is nobody's business
+/// here.
+pub fn gone<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    if label != LABEL {
+        return;
+    }
+
+    app.state::<Demysto>().windows_closed();
+}
+
 /// Asks a Turn the Conversation already holds, however it came to be asked
 /// again. The window is up and holding the focus, so nothing is revealed and
 /// nothing is hidden — only the Turn is new.

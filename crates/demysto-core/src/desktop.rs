@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
-use crate::capture::{Capture, CaptureError, Capturing, ClipboardCapture, Desktop, DesktopCapture};
+use crate::capture::{
+    Capture, CaptureError, Capturing, ClipboardCapture, Desktop, DesktopCapture, Pixels,
+};
 
 /// The environment variable Linux session managers use to say which display
 /// server is running.
@@ -142,8 +144,9 @@ impl Desktop for SystemDesktop {
     fn clipboard_text(&self) -> Result<Option<String>, CaptureError> {
         match self.on_clipboard(arboard::Clipboard::get_text) {
             Ok(text) => Ok(Some(text)),
-            // An empty clipboard and one holding an image both come back this
-            // way; for a text-only v1 they are the same thing.
+            // An empty clipboard and one holding only a picture both come back
+            // this way. They are told apart by asking for the picture, which a
+            // Capture does where this answers nothing.
             Err(arboard::Error::ContentNotAvailable) => Ok(None),
             Err(error) => Err(CaptureError::Clipboard(error.to_string())),
         }
@@ -153,6 +156,35 @@ impl Desktop for SystemDesktop {
         self.on_clipboard(|clipboard| match text {
             Some(text) => clipboard.set_text(text),
             None => clipboard.clear(),
+        })
+        .map_err(|error| CaptureError::Clipboard(error.to_string()))
+    }
+
+    fn clipboard_picture(&self) -> Result<Option<Pixels>, CaptureError> {
+        match self.on_clipboard(arboard::Clipboard::get_image) {
+            // Raw RGBA8 with a width and a height, which is what every platform
+            // hands over and why encoding is Demysto's — see `picture`. The
+            // sizes arrive as `usize` and are pixels: a picture wider than a
+            // `u32` is not one any of these platforms can hold.
+            Ok(image) => Ok(Some(Pixels {
+                width: image.width as u32,
+                height: image.height as u32,
+                bytes: image.bytes.into_owned(),
+            })),
+            // A clipboard holding no picture — which is most of them, and the
+            // same answer text gives for a clipboard holding no text.
+            Err(arboard::Error::ContentNotAvailable) => Ok(None),
+            Err(error) => Err(CaptureError::Clipboard(error.to_string())),
+        }
+    }
+
+    fn set_clipboard_picture(&self, picture: &Pixels) -> Result<(), CaptureError> {
+        self.on_clipboard(|clipboard| {
+            clipboard.set_image(arboard::ImageData {
+                width: picture.width as usize,
+                height: picture.height as usize,
+                bytes: std::borrow::Cow::Borrowed(&picture.bytes),
+            })
         })
         .map_err(|error| CaptureError::Clipboard(error.to_string()))
     }

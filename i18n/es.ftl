@@ -34,6 +34,7 @@ action-explain-name = Explicar
 action-translate-name = Traducir
 action-translate-target-label = ¿A qué idioma?
 action-summarize-name = Resumir
+action-describe-image-name = Describir imagen
 
 ## The Palette
 
@@ -41,6 +42,7 @@ palette-reading-selection = Leyendo lo que has seleccionado…
 palette-reading-clipboard = Leyendo el portapapeles…
 palette-origin-selection = Selección
 palette-origin-clipboard = Del portapapeles
+palette-picture = Una imagen, { $dimensions }
 palette-nothing-captured = No hay nada seleccionado y el portapapeles está vacío. Selecciona un texto y pulsa el atajo otra vez.
 palette-filter = Filtrar acciones…
 palette-no-action-matches = Ninguna acción se llama así.
@@ -58,8 +60,12 @@ result-conversations = Conversaciones
 result-conversation-unnamed = Conversación
 result-nothing-asked-yet = Todavía no se ha preguntado nada.
 result-quotation-label = El texto del que trata esta conversación
+result-picture-label = La imagen de la que trata esta conversación
 result-show-more = Mostrar más
 result-show-less = Mostrar menos
+result-ask-at-original = Preguntar otra vez en resolución original — { $weight }
+result-picture-let-go = Demysto ya no guarda esta imagen ({ $dimensions }).
+result-sealed = Esta conversación se puede leer, pero no continuar: la imagen de la que trata ya se ha soltado. Copia la imagen y pulsa el atajo para preguntar algo nuevo.
 result-asking = Preguntando al modelo…
 result-reasoning = El modelo está razonando…
 result-copy-answer = Copiar la respuesta
@@ -269,6 +275,7 @@ capture-clipboard-only = Esta es una sesión de Wayland, y Wayland no deja que u
 capture-clipboard-unavailable = El portapapeles no está disponible: { $detail }
 capture-keystroke-refused = No se ha podido enviar la pulsación de copiar: { $detail }
 capture-no-accessibility = macOS no deja que Demysto lea lo que has seleccionado: Demysto necesita el permiso de Accesibilidad. Abre Privacidad y seguridad → Accesibilidad y activa Demysto.
+capture-picture-unreadable = El portapapeles tiene una imagen que Demysto no ha podido leer. Cópiala otra vez, o copia otra distinta.
 accessibility-pane-unreachable = Demysto no ha podido abrir Ajustes del Sistema: { $detail }. El permiso está en Privacidad y seguridad → Accesibilidad.
 accessibility-only-macos = Solo macOS pide un permiso antes de que Demysto pueda leer lo que has seleccionado.
 
@@ -276,6 +283,7 @@ accessibility-only-macos = Solo macOS pide un permiso antes de que Demysto pueda
 
 run-nothing-to-run = No hay nada sobre lo que ejecutar una acción: selecciona un texto, o cópialo, y pulsa el atajo otra vez.
 run-no-conversation = No hay ninguna conversación en la que preguntar esto. Pulsa el atajo para empezar una.
+run-conversation-sealed = La imagen de la que trata esta conversación ya se ha soltado, así que no queda nada sobre lo que preguntar. Cópiala y pulsa el atajo para empezar una conversación nueva.
 run-no-such-action = No hay ninguna acción llamada «{ $action }». Puede que la hayan quitado desde que se abrió la paleta; pulsa el atajo otra vez.
 run-nothing-to-retry = No hay ningún turno que repetir. Vuelve a hacer la pregunta para empezar uno nuevo.
 
@@ -314,6 +322,7 @@ model-configured-are = Los modelos configurados ahí son: { $models }.
 model-action-binds-nothing = Esta acción está atada al modelo «{ $model }», y ningún proveedor de { $path } ofrece uno con ese nombre. { $offered }
 model-setting-names-nothing = { $setting } en { $path } nombra el modelo «{ $model }», y ningún proveedor de ahí ofrece uno con ese nombre. { $offered }
 model-nothing-nominated = En { $path } no se designa ningún { $setting }. { $offered }
+model-no-vision-model = En { $path } no se designa ningún { $setting }, así que no hay ningún modelo al que mostrarle una imagen. { $offered }
 model-nomination-none-configured = { $setting } nombra el modelo «{ $model }», y no hay ningún modelo configurado.
 model-nomination-unknown = { $setting } nombra el modelo «{ $model }», y ningún proveedor ofrece uno con ese nombre. Los modelos configurados son: { $models }.
 

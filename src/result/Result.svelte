@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import { copy } from "../lib/clipboard";
   import {
+    askAtOriginalResolution,
     continueAnswer,
     conversation,
     conversations,
@@ -13,6 +14,7 @@
     onStreaming,
     openAccessibility,
     openSettings,
+    picture,
     retry,
     selection,
     showConversation,
@@ -23,7 +25,7 @@
     type Summary,
     type Turn,
   } from "../lib/ipc";
-  import { t } from "../lib/i18n.svelte";
+  import { spokenTag, t } from "../lib/i18n.svelte";
   import { copyable, render } from "../lib/markdown";
   import { sending } from "../lib/sending";
 
@@ -215,6 +217,20 @@
   let whole = $state<string | null>(null);
 
   /**
+   * The picture this Conversation is about, as a `data:` URL, once it has been
+   * asked for; `null` until then and for a Conversation about words.
+   */
+  let shown = $state<string | null>(null);
+
+  /**
+   * Whether this Conversation can still be added to. A Sealed one cannot: the
+   * picture it is about has been let go of, and there is nothing left to
+   * resend — so the window says so where the input box was, rather than
+   * offering a box that would fail (user story 84).
+   */
+  const sealed = $derived(showing?.picture?.sealed === true);
+
+  /**
    * Whether the quotation has more in it than the lines it is showing, which is
    * what puts Show more under it.
    *
@@ -236,7 +252,51 @@
     quoting = id;
     expanded = false;
     whole = null;
+    shown = null;
+
+    // A picture is asked for as the Conversation arrives rather than when
+    // somebody expands it, unlike the rest of a text Selection: it is what this
+    // window shows above the first Turn, not something behind a Show more.
+    if (showing?.picture && !showing.picture.sealed) {
+      let stale = false;
+
+      picture().then((held) => {
+        if (!stale) shown = held;
+      });
+
+      return () => {
+        stale = true;
+      };
+    }
   });
+
+  /**
+   * What asking again at the original resolution would send, as somebody reads
+   * a size — in the language the rest of the window is being said in, because
+   * the mark between a number and its fraction is a comma in most of them.
+   */
+  function weighs(bytes: number): string {
+    // Kilobytes below a megabyte, and megabytes above it. One unit for both
+    // would put "0.1 MB" on a screenshot of a dialog and "0 MB" on a small
+    // one, which is a price that says nothing — and the price is the whole of
+    // what the button has to say (user story 78).
+    const megabytes = bytes >= 1_000_000;
+
+    return new Intl.NumberFormat(spokenTag(), {
+      style: "unit",
+      unit: megabytes ? "megabyte" : "kilobyte",
+      unitDisplay: "short",
+      maximumFractionDigits: megabytes ? 1 : 0,
+    }).format(bytes / (megabytes ? 1_000_000 : 1_000));
+  }
+
+  /** Asks the Turn on screen again at the original resolution (user story 77). */
+  async function askAtOriginal() {
+    pinned = true;
+    progress = null;
+
+    await askAtOriginalResolution();
+  }
 
   /** Says whether the quotation is showing less than it holds. */
   function measure() {
@@ -395,10 +455,24 @@
     void turns;
     void progress;
 
+    keepUp();
+  });
+
+  /**
+   * Puts the view back at the bottom, wherever the answer now ends.
+   *
+   * A function as well as an effect because one thing in this window changes
+   * its height without changing anything the effect reads: the picture, whose
+   * bytes are asked for separately and which is laid out when they arrive. The
+   * effect had already scrolled by then, and the answer ended up below the
+   * fold — on screen, the window opened on the picture and the answer to the
+   * question was somewhere under it.
+   */
+  function keepUp() {
     if (pinned && reading) {
       reading.scrollTop = reading.scrollHeight;
     }
-  });
+  }
 
   function onScroll() {
     if (!reading) return;
@@ -586,7 +660,59 @@
     onclick={onAnswerClick}
     class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto"
   >
-    {#if showing?.preview}
+    {#if showing?.picture}
+      <!-- The picture above the first Turn, for the reason the text is quoted
+           there: the window opens over whatever the user was looking at, and a
+           third question should not have to be asked blind (user story 75).
+
+           A named region rather than a heading, as the quotation is: on screen
+           the picture says what it is, and a screen reader is given the label
+           and the picture's own dimensions. -->
+      <section
+        aria-label={t("result-picture-label")}
+        class="flex flex-col items-start gap-1.5"
+      >
+        {#if sealed}
+          <!-- Nothing left to show: the exchange below reads exactly as it did,
+               and this is where the picture was. -->
+          <p class="text-sm opacity-50">
+            {t("result-picture-let-go", { dimensions: showing.preview ?? "" })}
+          </p>
+        {:else}
+          {#if shown}
+            <img
+              src={shown}
+              onload={keepUp}
+              alt={showing.preview ?? ""}
+              class="max-h-64 max-w-full rounded border border-neutral-200
+                     object-contain dark:border-neutral-700"
+            />
+          {/if}
+
+          <!-- The recovery ADR-0017 puts after the answer, where the evidence
+               is — with the weight it will send written on it, so that the
+               price is on the action rather than in a warning over it.
+
+               Offered only where fitting actually took something off: a
+               picture already within the ceiling is sent whole already, and a
+               button that would re-ask with byte-identical bytes charges for
+               nothing. Gone once it has been taken, too — from then on every
+               Turn sends the original. -->
+          {#if showing.picture.fitted && !showing.picture.original}
+            <button
+              type="button"
+              class="{FOOTER} opacity-40"
+              disabled={answering}
+              onclick={askAtOriginal}
+            >
+              {t("result-ask-at-original", {
+                weight: weighs(showing.picture.original_bytes),
+              })}
+            </button>
+          {/if}
+        {/if}
+      </section>
+    {:else if showing?.preview}
       <!-- What the Model is being asked about, quoted above what it said: the
            window opens over whatever the user was reading, and the Action's
            name alone does not say which paragraph it was handed — nor whether
@@ -777,42 +903,49 @@
   </div>
 
   <footer class="flex flex-col gap-1.5">
-    <div class="flex items-end gap-2">
-      <textarea
-        bind:this={composer}
-        bind:value={question}
-        onkeydown={onComposerKeydown}
-        rows="1"
-        placeholder={t("result-follow-up")}
-        class="max-h-32 min-h-8 w-full flex-1 resize-none rounded border border-neutral-300
-               bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-500
-               dark:border-neutral-700 dark:focus:border-neutral-500"
-      ></textarea>
+    {#if sealed}
+      <!-- Where the input box was, and not beside it: a box that cannot be
+           used is worse than none, because it reads as a window that has
+           stopped working. -->
+      <p class="text-sm opacity-50">{t("result-sealed")}</p>
+    {:else}
+      <div class="flex items-end gap-2">
+        <textarea
+          bind:this={composer}
+          bind:value={question}
+          onkeydown={onComposerKeydown}
+          rows="1"
+          placeholder={t("result-follow-up")}
+          class="max-h-32 min-h-8 w-full flex-1 resize-none rounded border border-neutral-300
+                 bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-500
+                 dark:border-neutral-700 dark:focus:border-neutral-500"
+        ></textarea>
 
-      {#if answering}
-        <button
-          type="button"
-          class="rounded border border-neutral-300 px-2 py-1 text-xs
-                 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          onclick={stop}
-        >
-          {t("result-stop")}
-        </button>
-      {:else}
-        <button
-          type="button"
-          class="rounded border border-neutral-300 px-2 py-1 text-xs
-                 hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent
-                 dark:border-neutral-700 dark:hover:bg-neutral-800
-                 dark:disabled:hover:bg-transparent"
-          disabled={question.trim() === ""}
-          onclick={ask}
-        >
-          {t("result-ask")}
-        </button>
-      {/if}
-    </div>
+        {#if answering}
+          <button
+            type="button"
+            class="rounded border border-neutral-300 px-2 py-1 text-xs
+                   hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            onclick={stop}
+          >
+            {t("result-stop")}
+          </button>
+        {:else}
+          <button
+            type="button"
+            class="rounded border border-neutral-300 px-2 py-1 text-xs
+                   hover:bg-neutral-100 disabled:opacity-40 disabled:hover:bg-transparent
+                   dark:border-neutral-700 dark:hover:bg-neutral-800
+                   dark:disabled:hover:bg-transparent"
+            disabled={question.trim() === ""}
+            onclick={ask}
+          >
+            {t("result-ask")}
+          </button>
+        {/if}
+      </div>
 
-    <p class="text-xs opacity-40">{t("result-keys")}</p>
+      <p class="text-xs opacity-40">{t("result-keys")}</p>
+    {/if}
   </footer>
 </main>

@@ -38,6 +38,7 @@ action-explain-name = Erklären
 action-translate-name = Übersetzen
 action-translate-target-label = In welche Sprache?
 action-summarize-name = Zusammenfassen
+action-describe-image-name = Bild beschreiben
 
 ## The Palette
 
@@ -45,6 +46,7 @@ palette-reading-selection = Lese, was Sie ausgewählt haben…
 palette-reading-clipboard = Lese die Zwischenablage…
 palette-origin-selection = Auswahl
 palette-origin-clipboard = Aus der Zwischenablage
+palette-picture = Ein Bild, { $dimensions }
 palette-nothing-captured = Es ist nichts ausgewählt, und die Zwischenablage ist leer. Wählen Sie Text aus und drücken Sie das Tastenkürzel noch einmal.
 palette-filter = Aktionen filtern…
 palette-no-action-matches = Keine Aktion heißt so.
@@ -62,8 +64,12 @@ result-conversations = Unterhaltungen
 result-conversation-unnamed = Unterhaltung
 result-nothing-asked-yet = Noch nichts gefragt.
 result-quotation-label = Der Text, um den es in dieser Unterhaltung geht
+result-picture-label = Das Bild, um das es in dieser Unterhaltung geht
 result-show-more = Mehr anzeigen
 result-show-less = Weniger anzeigen
+result-ask-at-original = Erneut in Originalauflösung fragen — { $weight }
+result-picture-let-go = Demysto hält dieses Bild ({ $dimensions }) nicht mehr.
+result-sealed = Diese Unterhaltung lässt sich lesen, aber nicht fortsetzen: das Bild, um das es geht, wurde freigegeben. Kopieren Sie das Bild und drücken Sie das Tastenkürzel, um etwas Neues zu fragen.
 result-asking = Frage das Modell…
 result-reasoning = Das Modell denkt nach…
 result-copy-answer = Antwort kopieren
@@ -273,6 +279,7 @@ capture-clipboard-only = Dies ist eine Wayland-Sitzung, und Wayland lässt eine 
 capture-clipboard-unavailable = Die Zwischenablage ist nicht verfügbar: { $detail }
 capture-keystroke-refused = Der Tastendruck zum Kopieren konnte nicht gesendet werden: { $detail }
 capture-no-accessibility = macOS lässt Demysto nicht lesen, was Sie ausgewählt haben: Demysto braucht die Berechtigung für Bedienungshilfen. Öffnen Sie „Datenschutz & Sicherheit“ → „Bedienungshilfen“ und schalten Sie Demysto ein.
+capture-picture-unreadable = In der Zwischenablage liegt ein Bild, das Demysto nicht lesen konnte. Kopieren Sie es noch einmal, oder kopieren Sie ein anderes.
 accessibility-pane-unreachable = Demysto konnte die Systemeinstellungen nicht öffnen: { $detail }. Die Berechtigung liegt unter „Datenschutz & Sicherheit“ → „Bedienungshilfen“.
 accessibility-only-macos = Nur macOS fragt nach einer Berechtigung, bevor Demysto lesen darf, was Sie ausgewählt haben.
 
@@ -280,6 +287,7 @@ accessibility-only-macos = Nur macOS fragt nach einer Berechtigung, bevor Demyst
 
 run-nothing-to-run = Es gibt nichts, worauf sich eine Aktion ausführen ließe: wählen Sie Text aus oder kopieren Sie ihn, und drücken Sie das Tastenkürzel noch einmal.
 run-no-conversation = Es gibt keine Unterhaltung, in der sich das fragen ließe. Drücken Sie das Tastenkürzel, um eine zu beginnen.
+run-conversation-sealed = Das Bild, um das es in dieser Unterhaltung geht, wurde freigegeben, also ist nichts mehr da, wonach sich fragen ließe. Kopieren Sie es und drücken Sie das Tastenkürzel, um eine neue Unterhaltung zu beginnen.
 run-no-such-action = Es gibt keine Aktion namens „{ $action }“. Sie wurde vielleicht entfernt, seit die Palette sich geöffnet hat; drücken Sie das Tastenkürzel noch einmal.
 run-nothing-to-retry = Es gibt keine Runde, die sich wiederholen ließe. Stellen Sie die Frage erneut, um eine neue zu beginnen.
 
@@ -318,6 +326,7 @@ model-configured-are = Die dort eingerichteten Modelle sind: { $models }.
 model-action-binds-nothing = Diese Aktion ist an das Modell „{ $model }“ gebunden, und kein Anbieter in { $path } bietet eines dieses Namens an. { $offered }
 model-setting-names-nothing = { $setting } in { $path } nennt das Modell „{ $model }“, und kein Anbieter dort bietet eines dieses Namens an. { $offered }
 model-nothing-nominated = In { $path } ist kein { $setting } benannt. { $offered }
+model-no-vision-model = In { $path } ist kein { $setting } benannt, also gibt es kein Modell, dem sich ein Bild zeigen ließe. { $offered }
 model-nomination-none-configured = { $setting } nennt das Modell „{ $model }“, und es ist überhaupt kein Modell eingerichtet.
 model-nomination-unknown = { $setting } nennt das Modell „{ $model }“, und kein Anbieter bietet eines dieses Namens an. Eingerichtet sind die Modelle: { $models }.
 

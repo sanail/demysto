@@ -9,11 +9,15 @@ description = "Demysto's product logic, independent of any user interface toolki
 serde.workspace = true
 serde_json = "1"
 dirs = "6"
-arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
 enigo = "0.6"
 toml = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls", "system-proxy"] }
 whatlang = "0.18.0"
+# Fitting and encoding a picture, and nothing else: the clipboard hands over
+# pixels rather than a file, so nothing here has to decode one.
+image = { version = "0.25", default-features = false, features = ["png"] }
+base64 = "0.22"
 toml_edit = "0.25"
 fluent = "0.17.0"
 unic-langid = "0.9.6"

@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import {
     actions as offeredActions,
+    capturedPicture,
     dismiss,
     lastCapture,
     onCapture,
@@ -71,6 +72,16 @@
         : null,
   );
 
+  /**
+   * The picture this Capture caught, as a `data:` URL — `null` for one that
+   * caught words, and until the backend has answered.
+   *
+   * Asked for rather than carried on the Capture: what arrives with the Capture
+   * is how large the picture is, and the picture itself crosses the bridge once
+   * per Capture, here.
+   */
+  let thumbnail = $state<string | null>(null);
+
   /** The Actions that accept this Capture, as the backend filtered them. */
   let offered = $state<Action[]>([]);
   /** What the user has typed to narrow that list. */
@@ -102,6 +113,8 @@
         return t("capture-clipboard-unavailable", { detail: failure.message });
       case "keystroke":
         return t("capture-keystroke-refused", { detail: failure.message });
+      case "picture":
+        return t("capture-picture-unreadable");
       case "permission":
         return t("capture-no-accessibility");
     }
@@ -154,6 +167,8 @@
     asking = 0;
     answers = {};
 
+    thumbnail = null;
+
     if (current?.status !== "captured" || current.detail.origin === "nothing") {
       offered = [];
       return;
@@ -164,6 +179,14 @@
     offeredActions().then((list) => {
       if (!stale) offered = list;
     });
+
+    // Only where there is one to ask for: a Capture of words has no picture,
+    // and asking anyway would put a round trip on the common path.
+    if (current.detail.selection.kind === "image") {
+      capturedPicture().then((caught) => {
+        if (!stale) thumbnail = caught;
+      });
+    }
 
     return () => {
       stale = true;
@@ -342,6 +365,27 @@
           <p class="text-sm opacity-60">{clipboardOnly}</p>
         {:else}
           <p class="text-sm opacity-60">{t("palette-nothing-captured")}</p>
+        {/if}
+      {:else if selection.kind === "image"}
+        <!-- A thumbnail where the text is quoted, in the same box and at the
+             same height: the Palette must not change size according to what was
+             caught. Cropped across rather than resized down, because its one
+             job is confirming this is the right picture, and a strip of the
+             picture does that where a line reading "Image 1280×720" does not.
+
+             The box is drawn before the picture arrives rather than after, so
+             that the list of Actions below does not jump down the moment it
+             does. -->
+        {#if thumbnail}
+          <img
+            src={thumbnail}
+            alt={t("palette-picture", {
+              dimensions: selection.picture.dimensions,
+            })}
+            class="h-10 w-full rounded object-cover object-left-top"
+          />
+        {:else}
+          <div class="h-10 w-full rounded bg-neutral-100 dark:bg-neutral-800"></div>
         {/if}
       {:else}
         <p class="line-clamp-2 text-sm whitespace-pre-wrap opacity-60">

@@ -7,7 +7,7 @@ Demysto is a resident desktop utility that turns whatever the user is looking at
 ### What the user acts on
 
 **Selection**:
-The input a Run operates on, captured at invocation time. Its kind is one of text, image, or file.
+The input a Run operates on, captured at invocation time. Its kind is one of text, image, or file, and names what a Model is handed rather than where Demysto found it: a picture read from the clipboard and a picture opened from a path reach a Model the same way, so both are image Selections. Where it came from is the Capture's business, not the kind's.
 _Avoid_: input, content, context, payload
 
 **Capture**:
@@ -71,6 +71,10 @@ _Avoid_: chat, thread, session, dialogue
 **Turn**:
 A single user message and the Model's reply within a Conversation.
 _Avoid_: message, exchange, round
+
+**Sealed**:
+A Conversation that can be read but not added to, because the Selection it was about has been let go. Only a picture is ever let go — one weighs enough that holding every Conversation's would cost a resident tool more memory than it may take — so a text Conversation is never Sealed.
+_Avoid_: closed, archived, expired, stale
 
 **Reasoning**:
 The chain of thought a Model may produce before its answer. Demysto asks a Provider that takes the instruction not to reason at all, because none of the Actions gains anything from it and the wait is what the user pays. Where reasoning arrives anyway it is never part of the answer and is not kept: the window says only that the Model is working.

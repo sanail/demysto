@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::conversation::Said;
 use crate::i18n::{say, Words};
 use crate::model::{Endpoint, Resolved};
 use crate::run::{Arriving, RunError, Stopping};
@@ -60,7 +61,7 @@ const BODY_KEPT: usize = 4 * 300;
 /// leaves the caller holding what had arrived by then.
 pub(crate) fn answer(
     resolved: &Resolved,
-    said: &[(&str, String)],
+    said: &[(&str, Said)],
     timeout: Duration,
     stopping: &Stopping,
     words: &Words,
@@ -242,7 +243,7 @@ pub(crate) fn verify(
     timeout: Duration,
     words: &Words,
 ) -> Result<(), RunError> {
-    let said = [("user", "Hi".to_owned())];
+    let said = [("user", Said::Words("Hi".to_owned()))];
 
     let response = asking(provider, model, &said, timeout, words)?
         .send()
@@ -265,7 +266,7 @@ pub(crate) fn verify(
 fn asking(
     provider: &Endpoint,
     model: &str,
-    said: &[(&str, String)],
+    said: &[(&str, Said)],
     timeout: Duration,
     words: &Words,
 ) -> Result<reqwest::blocking::RequestBuilder, RunError> {
@@ -280,7 +281,10 @@ fn asking(
         model,
         messages: said
             .iter()
-            .map(|(role, content)| Message { role, content })
+            .map(|(role, said)| Message {
+                role,
+                content: content(said),
+            })
             .collect(),
         stream: true,
         thinking: provider
@@ -597,7 +601,51 @@ struct SkipReasoning {
 #[derive(Serialize)]
 struct Message<'a> {
     role: &'a str,
-    content: &'a str,
+    content: Content<'a>,
+}
+
+/// What a message carries.
+///
+/// A bare string for everything v1 sent, because that is what the contract has
+/// always taken and a text Run's request is not the place to change: the parts
+/// array is the shape every supported service implements for a picture, and it
+/// is used where there is a picture and nowhere else.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum Content<'a> {
+    Words(&'a str),
+    Parts(Vec<Part<'a>>),
+}
+
+/// One part of a message: the words, or the picture they are about.
+///
+/// The picture travels as a `data:` URL rather than as a link to somewhere,
+/// which is the one form of `image_url` that needs nothing outside the request
+/// — and the only one Demysto could offer, holding the picture in memory.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum Part<'a> {
+    Text { text: &'a str },
+    ImageUrl { image_url: Url },
+}
+
+#[derive(Serialize)]
+struct Url {
+    url: String,
+}
+
+/// A message as the contract carries it: words alone, or the words followed by
+/// the picture they are about.
+fn content(said: &Said) -> Content<'_> {
+    match said {
+        Said::Words(text) => Content::Words(text),
+        Said::WordsAndPicture { text, picture } => Content::Parts(vec![
+            Part::Text { text },
+            Part::ImageUrl {
+                image_url: Url { url: picture.url() },
+            },
+        ]),
+    }
 }
 
 /// One event of a stream.

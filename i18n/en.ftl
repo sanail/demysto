@@ -39,6 +39,7 @@ action-explain-name = Explain
 action-translate-name = Translate
 action-translate-target-label = Into which language?
 action-summarize-name = Summarize
+action-describe-image-name = Describe image
 
 ## The Palette
 
@@ -46,6 +47,7 @@ palette-reading-selection = Reading what you selected…
 palette-reading-clipboard = Reading the clipboard…
 palette-origin-selection = Selection
 palette-origin-clipboard = From the clipboard
+palette-picture = A picture, { $dimensions }
 palette-nothing-captured = Nothing is selected and the clipboard is empty. Select some text and press the Hotkey again.
 palette-filter = Filter Actions…
 palette-no-action-matches = No Action is called that.
@@ -63,8 +65,12 @@ result-conversations = Conversations
 result-conversation-unnamed = Conversation
 result-nothing-asked-yet = Nothing asked yet.
 result-quotation-label = The text this Conversation is about
+result-picture-label = The picture this Conversation is about
 result-show-more = Show more
 result-show-less = Show less
+result-ask-at-original = Ask again at original resolution — { $weight }
+result-picture-let-go = Demysto is no longer holding this picture ({ $dimensions }).
+result-sealed = This Conversation can be read but not added to: the picture it is about has been let go of. Copy the picture and press the Hotkey to ask something new.
 result-asking = Asking the Model…
 result-reasoning = The Model is reasoning…
 result-copy-answer = Copy answer
@@ -274,6 +280,7 @@ capture-clipboard-only = This is a Wayland session, and Wayland does not let one
 capture-clipboard-unavailable = The clipboard is unavailable: { $detail }
 capture-keystroke-refused = The copy keystroke could not be sent: { $detail }
 capture-no-accessibility = macOS is not letting Demysto read what you selected: Demysto needs the Accessibility permission. Open Privacy & Security → Accessibility and turn Demysto on.
+capture-picture-unreadable = The clipboard is holding a picture Demysto could not read. Copy it again, or copy a different one.
 accessibility-pane-unreachable = Demysto could not open System Settings: { $detail }. The permission is in Privacy & Security → Accessibility.
 accessibility-only-macos = Only macOS asks for a permission before Demysto can read what you selected.
 
@@ -281,6 +288,7 @@ accessibility-only-macos = Only macOS asks for a permission before Demysto can r
 
 run-nothing-to-run = There is nothing to run an Action on: select some text, or copy it, and press the Hotkey again.
 run-no-conversation = There is no Conversation to ask this in. Press the Hotkey to start one.
+run-conversation-sealed = The picture this Conversation is about has been let go of, so there is nothing left to ask about. Copy it and press the Hotkey to start a new Conversation.
 run-no-such-action = There is no Action called "{ $action }". It may have been removed since the Palette opened; press the Hotkey again.
 run-nothing-to-retry = There is no Turn to try again. Ask the question again to start a new one.
 
@@ -319,6 +327,7 @@ model-configured-are = The Models configured there are: { $models }.
 model-action-binds-nothing = This Action is bound to the Model "{ $model }", and no Provider in { $path } offers one by that name. { $offered }
 model-setting-names-nothing = { $setting } in { $path } names the Model "{ $model }", and no Provider there offers one by that name. { $offered }
 model-nothing-nominated = No { $setting } is nominated in { $path }. { $offered }
+model-no-vision-model = No { $setting } is nominated in { $path }, so there is no Model to show a picture to. { $offered }
 model-nomination-none-configured = { $setting } names the Model "{ $model }", and no Model is configured at all.
 model-nomination-unknown = { $setting } names the Model "{ $model }", and no Provider offers one by that name. The Models configured are: { $models }.
 

@@ -2,11 +2,12 @@
 //! an error saying which setting is missing.
 //!
 //! The chain the spec's *Model resolution* fixes is the Action's own binding,
-//! then the Default Vision Model when the Selection is an image, then the
-//! Default Model. Nothing here reaches the disk or the network: it works on the
-//! settings as `config` read them, which is what lets the whole chain — the
-//! branches a Run reaches today and the one v1 has no Selection kind for yet —
-//! be tested without either.
+//! then the Default Vision Model where the Selection is an image, then the
+//! Default Model. An image whose Default Vision Model is not nominated is where
+//! the chain ends rather than falling through — see [`no_vision_model`].
+//! Nothing here reaches the disk or the network: it works on the settings as
+//! `config` read them, which is what lets the whole chain be tested without
+//! either.
 //!
 //! Every failure here is a [`RunError::Configuration`], because every one of
 //! them is fixed in the settings file rather than by trying again.
@@ -150,18 +151,18 @@ fn chosen<'a>(
     }
 
     if kind == Kind::Image {
-        if let Some(name) = config.default_vision_model.as_deref() {
-            return config
-                .model(name)
-                .ok_or_else(|| nominates_nothing(config, VISION_SETTING, name, words));
-        }
+        // Whether the Model is ticked vision-capable is not asked. The tick is
+        // stated by a person rather than discovered, and a field somebody fills
+        // in by hand is not grounds for refusing them (user story 82).
+        let Some(name) = config.default_vision_model.as_deref() else {
+            return Err(no_vision_model(config, words));
+        };
+
+        return config
+            .model(name)
+            .ok_or_else(|| nominates_nothing(config, VISION_SETTING, name, words));
     }
 
-    // An image with no Default Vision Model nominated goes to the Default Model
-    // like anything else. Whether Demysto should refuse to send it to a Model
-    // that cannot see is a real question, and one for v1.1: it has no Selection
-    // to ask it of yet, and the answer is worth deciding against a picture
-    // rather than against a guess.
     default(config, words)
 }
 
@@ -215,6 +216,24 @@ fn nominates_nothing(config: &Config, setting: &str, name: &str, words: &Words) 
     }
 }
 
+/// What the user is told when there is a picture to ask about and no Model
+/// nominated to ask about it.
+///
+/// A failure of its own rather than the fall-through v1 had: a Model that
+/// cannot see, handed a picture, answers confidently about nothing, and an
+/// answer like that is indistinguishable from a right one (user story 80).
+fn no_vision_model(config: &Config, words: &Words) -> RunError {
+    RunError::Configuration {
+        message: say!(
+            words,
+            "model-no-vision-model",
+            "setting" = VISION_SETTING,
+            "path" = config.path.display().to_string(),
+            "offered" = offered(config, words)
+        ),
+    }
+}
+
 fn nothing_nominated(config: &Config, words: &Words) -> RunError {
     RunError::Configuration {
         message: say!(
@@ -231,12 +250,12 @@ fn nothing_nominated(config: &Config, words: &Words) -> RunError {
 mod tests {
     //! The chain the spec's *Testing Decisions* asks to see tested "down the
     //! full chain, including the unresolvable case", tested here rather than at
-    //! the facade — because two of its three legs cannot be reached from there
-    //! in v1. No built-in Action binds a Model, and no Capture produces an
-    //! image, so a seam-level test could exercise only the Default Model. What
-    //! a Run does reach is asserted at the facade alongside everything else;
-    //! this is the rest of the chain, and it follows `config`'s own precedent
-    //! of testing key resolution beside the code that resolves.
+    //! the facade — because one of its three legs cannot be reached from there:
+    //! no built-in Action binds a Model, so a seam-level test could not
+    //! exercise a binding. What a Run does reach is asserted at the facade
+    //! alongside everything else; this is the rest of the chain, and it follows
+    //! `config`'s own precedent of testing key resolution beside the code that
+    //! resolves.
     //!
     //! Settings are built here rather than parsed, so that these are about
     //! which Model the chain arrives at and not about what TOML says.
@@ -393,11 +412,28 @@ mod tests {
     }
 
     #[test]
-    fn an_image_with_no_vision_model_nominated_falls_back_to_the_default_model() {
-        // The end of the chain is the Default Model, whatever the Selection is.
-        // Whether an image should be kept from a Model that cannot see is
-        // v1.1's to decide, against a picture rather than against a guess.
-        assert_eq!(resolved(&one_model(), None, Kind::Image), "cheap/everyday");
+    fn an_image_with_no_vision_model_nominated_names_the_setting_that_fixes_it() {
+        // Not the Default Model, which was v1's placeholder and is gone: a
+        // Model that cannot see would answer about nothing at all, and say so
+        // as confidently as it says everything else.
+        let message = failure(&one_model(), None, Kind::Image);
+
+        assert!(message.contains("default_vision_model"), "{message}");
+        assert!(message.contains(FILE), "{message}");
+        assert!(message.contains("cheap/everyday"), "{message}");
+    }
+
+    #[test]
+    fn a_vision_model_nobody_ticked_as_one_is_used_anyway() {
+        // The tick is stated by a person rather than discovered, and a field
+        // somebody fills in by hand is not grounds for refusing them.
+        let config = settings(
+            vec![provider("cheap", &[("everyday", false)])],
+            Some("cheap/everyday"),
+            Some("cheap/everyday"),
+        );
+
+        assert_eq!(resolved(&config, None, Kind::Image), "cheap/everyday");
     }
 
     #[test]
