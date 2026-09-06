@@ -3,43 +3,34 @@
   import {
     autostart,
     catalogue as catalogued,
-    deleteAction,
     dismiss,
     hotkeys as allowed,
-    installUpdate,
-    lookForUpdate,
     onProviderWanted,
     onSettingsSaved,
     onUpdateOffered,
-    openLogs,
     presets as offeredPresets,
-    providerModels,
-    saveAction,
     saveSettings,
     setAutostart,
     settings as configured,
     status,
     updateOffered,
-    verifyProvider,
-    type ActionEdit,
-    type ActionStanding,
     type Capturing,
     type Catalogue,
-    type ConfiguredModel,
-    type ConfiguredProvider,
     type DefinedAction,
-    type KeyEdit,
-    type KeyStanding,
     type Exported,
     type Preset,
-    type ProviderEdit,
     type Settings,
   } from "../lib/ipc";
-  import { combination, reading } from "../lib/hotkey";
-  import { LANGUAGES } from "../lib/languages";
-  import { spokenTag, t } from "../lib/i18n.svelte";
+  import { combination } from "../lib/hotkey";
+  import { t } from "../lib/i18n.svelte";
   import { saidBy, sending } from "../lib/sending";
   import type { UnlistenFn } from "@tauri-apps/api/event";
+  import About from "./About.svelte";
+  import Actions from "./Actions.svelte";
+  import General from "./General.svelte";
+  import Models from "./Models.svelte";
+  import { drafted, edited, type Draft, type Editing } from "./drafts";
+  import { BUTTON } from "./style";
 
   /** How long the window says a save landed. */
   const ACKNOWLEDGED = 1600;
@@ -50,48 +41,6 @@
       ? t("capture-clipboard-only")
       : null;
   }
-
-  /**
-   * One Provider as this window has it: what will be written, plus what is only
-   * ever on screen — where its key already is, what it answered when it was
-   * last asked something, and whether it is being asked something now.
-   */
-  type Draft = {
-    was: string | null;
-    name: string;
-    base_url: string;
-    preset: string;
-    api_key_env: string;
-    models: ConfiguredModel[];
-    /**
-     * Where the key the file holds is. Never the key: this window is the one
-     * ADR-0002 promises the key does not enter, and a field showing it would
-     * be that promise broken for the sake of showing somebody their own
-     * secret back.
-     */
-    standing: KeyStanding;
-    /** What has been typed into the key field, which is the only way one gets in. */
-    typed: string;
-    /** Whether the file's own key is to be taken out on the next save. */
-    forgetting: boolean;
-    /** What this Provider said it offers, once somebody asked it. */
-    offered: string[] | null;
-    /** Which of its Models a verification puts its request to. */
-    trying: string;
-    /** Whether it is being asked something now. */
-    asking: boolean;
-    /** What it last said, and whether that was good news. */
-    said: { well: boolean; message: string } | null;
-  };
-
-  /**
-   * One Action being edited, and where its definition stood before the editing
-   * began — `null` for one being written, which stands nowhere yet.
-   *
-   * One at a time, and not a draft each: an Action is a file of its own and is
-   * saved on its own, so there is never more than one unsaved.
-   */
-  type Editing = { draft: ActionEdit; standing: ActionStanding | null };
 
   let drafts = $state<Draft[]>([]);
   let defaultModel = $state("");
@@ -172,23 +121,10 @@
    */
   let acted = 0;
   let settling: Promise<unknown> = Promise.resolve();
-  /** Where the logs are, and what went wrong opening the folder. */
-  let logsProblem = $state<string | null>(null);
   /** The version this is, which is the half of an update question nobody else answers. */
   let version = $state("");
   /** The newer version there is, `null` where there is none to be had. */
   let newer = $state<string | null>(null);
-  /**
-   * Whether a check has been made while this window has been open.
-   *
-   * What separates "up to date" from "not asked yet": the window opens knowing
-   * only what the check on the way up left behind, and that answer is silence
-   * when the machine was offline for it.
-   */
-  let asked = $state(false);
-  let checking = $state(false);
-  let installing = $state(false);
-  let updateProblem = $state<string | null>(null);
   /** The Provider the window was opened at, so that it can be shown as such. */
   let wanted = $state<string | null>(null);
   /** The listener that carries that name, for as long as this window lives. */
@@ -201,9 +137,6 @@
   let paletteDefault = $state("");
   /** The keys a Hotkey may be on its own — the backend decides which. */
   let bareKeys = $state<ReadonlySet<string>>(new Set());
-  /** What went wrong with the last Action saved, in the backend's own words. */
-  let actionProblem = $state<string | null>(null);
-  let actionSaving = $state(false);
   /**
    * The settings as the file holds them, which is where the Models an Action
    * can bind come from. Taken from what was saved rather than from the
@@ -229,17 +162,6 @@
    * not offered, and the only honest instruction is to repair the file itself.
    */
   let unreadable = $state<string | null>(null);
-
-  const FIELD =
-    "w-full rounded border border-neutral-300 bg-transparent px-2 py-1 text-sm " +
-    "outline-none focus:border-neutral-500 dark:border-neutral-700 " +
-    "dark:focus:border-neutral-500";
-
-  const BUTTON =
-    "cursor-pointer rounded border border-neutral-300 px-2 py-1 text-xs " +
-    "hover:bg-neutral-100 disabled:cursor-default disabled:opacity-40 " +
-    "disabled:hover:bg-transparent dark:border-neutral-700 " +
-    "dark:hover:bg-neutral-800 dark:disabled:hover:bg-transparent";
 
   onMount(async () => {
     presets = await offeredPresets();
@@ -401,45 +323,6 @@
     return answer;
   }
 
-  /** Opens the folder the logs are written in, so a bug report can carry them. */
-  async function showLogs() {
-    logsProblem = await sending(openLogs);
-  }
-
-  /** Asks the manifest whether there is a newer Demysto than this one. */
-  async function checkForUpdate() {
-    checking = true;
-    updateProblem = null;
-
-    try {
-      newer = await lookForUpdate();
-      asked = true;
-    } catch (error) {
-      updateProblem = saidBy(error);
-    } finally {
-      checking = false;
-    }
-  }
-
-  /**
-   * Takes the update on offer.
-   *
-   * Nothing follows a success, and nothing can: the process is replaced by the
-   * version it installed. The state is left saying "installing" for exactly
-   * that reason — the only way back from here is a failure.
-   */
-  async function install() {
-    installing = true;
-    updateProblem = null;
-
-    try {
-      await installUpdate();
-    } catch (error) {
-      updateProblem = saidBy(error);
-      installing = false;
-    }
-  }
-
   /** Takes the settings as the file holds them as the state of this window. */
   function show(settings: Settings) {
     savedSettings = settings;
@@ -456,175 +339,6 @@
     actions = catalogue.actions;
     unreadableActions = catalogue.unreadable;
     unclaimedHotkeys = catalogue.unclaimed;
-  }
-
-  function drafted(provider: ConfiguredProvider): Draft {
-    return {
-      was: provider.name,
-      name: provider.name,
-      base_url: provider.base_url ?? "",
-      preset: provider.preset ?? "",
-      api_key_env: provider.api_key_env ?? "",
-      models: provider.models.map((model) => ({ ...model })),
-      standing: provider.key,
-      typed: "",
-      forgetting: false,
-      offered: null,
-      trying: provider.models[0]?.id ?? "",
-      asking: false,
-      said: null,
-    };
-  }
-
-  /** What of a draft gets written. */
-  function edited(draft: Draft): ProviderEdit {
-    return {
-      was: draft.was,
-      name: draft.name,
-      base_url: draft.base_url,
-      preset: draft.preset,
-      api_key_env: draft.api_key_env,
-      api_key: key(draft),
-      models: draft.models,
-    };
-  }
-
-  /**
-   * What a save does to this Provider's key. Typing one replaces whatever the
-   * file holds; typing nothing leaves it alone, which is the ordinary case and
-   * the reason the field can start empty at all.
-   */
-  function key(draft: Draft): KeyEdit {
-    if (draft.typed.trim() !== "") return { action: "set", key: draft.typed };
-
-    return draft.forgetting ? { action: "forget" } : { action: "keep" };
-  }
-
-  /**
-   * Every Model configured here, by the name it is nominated with.
-   *
-   * The `<provider>/<model>` shape is composed here rather than asked for,
-   * because the list has to include Models added since the last save and a
-   * question per keystroke would be a poor trade for one separator. What it
-   * composes is checked where it matters: a nomination naming no Model is
-   * refused by the save, in `settings::nominating`.
-   */
-  const nominable = $derived(
-    drafts.flatMap((draft) =>
-      draft.models
-        // A row added and not yet typed into is not a Model to nominate: the
-        // save refuses one with no name, and offering "a provider/" here would
-        // be inviting exactly that.
-        .filter((model) => model.id.trim() !== "")
-        .map((model) => ({
-          name: `${draft.name}/${model.id}`,
-          vision: model.vision,
-        })),
-    ),
-  );
-
-  /** What the key field says instead of the key. */
-  function about(draft: Draft): string {
-    if (draft.forgetting) return t("settings-key-going");
-
-    switch (draft.standing.state) {
-      case "in_file":
-        return t("settings-key-in-file");
-      case "in_environment":
-        return t("settings-key-in-environment", {
-          variable: draft.standing.variable,
-        });
-      case "not_needed":
-        return t("settings-key-not-needed");
-      case "missing":
-        return t("settings-key-missing");
-    }
-  }
-
-  function add() {
-    drafts.push({
-      was: null,
-      name: "",
-      base_url: "",
-      preset: "",
-      api_key_env: "",
-      models: [],
-      standing: { state: "missing" },
-      typed: "",
-      forgetting: false,
-      offered: null,
-      trying: "",
-      asking: false,
-      said: null,
-    });
-  }
-
-  function remove(at: number) {
-    drafts.splice(at, 1);
-  }
-
-  /** Fills in what a preset knows, so that picking one is the whole of setup. */
-  function picked(draft: Draft) {
-    draft.offered = null;
-    draft.said = null;
-
-    // Only into a name nobody has typed over: a Provider called something of
-    // the user's own is not renamed by their changing its service.
-    const preset = presets.find((preset) => preset.name === draft.preset);
-    if (preset && draft.name.trim() === "") draft.name = preset.name;
-  }
-
-  /** Adds a Model to a Provider, unless it already offers one by that name. */
-  function offer(draft: Draft, id: string) {
-    if (draft.models.some((model) => model.id === id)) return;
-
-    draft.models.push({ id, vision: false });
-    if (draft.trying === "") draft.trying = id;
-  }
-
-  /** Takes a Model off a Provider. Named for the Model, because `forgetting`
-      next door is about the key. */
-  function stopOffering(draft: Draft, at: number) {
-    const [gone] = draft.models.splice(at, 1);
-    if (draft.trying === gone.id) draft.trying = draft.models[0]?.id ?? "";
-  }
-
-  /** Asks a Provider what it offers, as this window has it rather than as the
-      file holds it: the commonest moment to want the list is before saving. */
-  async function askForModels(draft: Draft) {
-    draft.asking = true;
-    draft.said = null;
-
-    try {
-      draft.offered = await providerModels(edited(draft));
-
-      if (draft.offered.length === 0) {
-        draft.said = { well: false, message: t("settings-provider-offers-nothing") };
-      }
-    } catch (error) {
-      draft.said = { well: false, message: saidBy(error) };
-    } finally {
-      draft.asking = false;
-    }
-  }
-
-  /** Puts the smallest real request to a Provider, to learn now rather than at
-      the first Run whether the key works (user story 42). */
-  async function verify(draft: Draft) {
-    draft.asking = true;
-    draft.said = null;
-
-    try {
-      await verifyProvider(edited(draft), draft.trying);
-      draft.said = {
-        well: true,
-        message: t("settings-provider-answered", { model: draft.trying }),
-      };
-    } catch (error) {
-      draft.said = { well: false, message: saidBy(error) };
-    } finally {
-      draft.asking = false;
-    }
   }
 
   async function save() {
@@ -683,141 +397,16 @@
    * rather than from the Providers on screen, for the reason `savedSettings`
    * exists.
    */
-  const bindable = $derived(
+  const bindableModels = $derived(
     (savedSettings?.providers ?? []).flatMap((provider) =>
       provider.models.map((model) => `${provider.name}/${model.id}`),
     ),
   );
 
-  /** What an Action being written starts as. */
-  function write() {
-    actionProblem = null;
-    recording = null;
-    editing = {
-      standing: null,
-      draft: {
-        id: null,
-        name: "",
-        template: "",
-        parameters: [],
-        model: null,
-        hotkey: null,
-        accepts: ["text"],
-      },
-    };
-  }
-
-  /**
-   * Opens an Action for editing.
-   *
-   * Everything it states is carried into the draft, the Hotkey and the
-   * Selection kinds included — neither has a field here yet, and a save that
-   * dropped what the file already said would be this window destroying what it
-   * does not show.
-   */
-  function change(action: DefinedAction) {
-    actionProblem = null;
-    recording = null;
-    editing = {
-      standing: action.standing,
-      draft: {
-        id: action.id,
-        name: action.name,
-        template: action.template,
-        parameters: action.parameters.map((parameter) => ({ ...parameter })),
-        model: action.model,
-        hotkey: action.hotkey,
-        accepts: action.accepts,
-      },
-    };
-  }
-
-  /** Takes the Hotkey off this Action, which is the only way to have none. */
-  function unbind() {
-    if (editing) editing.draft.hotkey = null;
-    recording = null;
-  }
-
-  /** Takes the Palette back to the Hotkey Demysto comes with. */
-  function unbindPalette() {
-    paletteHotkey = "";
-    recording = null;
-  }
-
   /** Leaves the Action being edited, whatever was being done to it. */
   function stopEditing() {
     editing = null;
     recording = null;
-  }
-
-  /** The language this window was drawn in, so that a change can be noticed. */
-  let drawnIn = spokenTag();
-
-  // A draft of a built-in holds what the built-in says, in the words it said
-  // them in: its name, its Parameters' labels, and what they offer. Changing
-  // the language leaves those the words of a language nobody chose — and saving
-  // the draft afterwards would write them into an Override, leaving one Action
-  // in the Palette speaking it for good. So the panel closes with the language
-  // it was written in, and reopens in the new one.
-  $effect(() => {
-    if (spokenTag() === drawnIn) return;
-
-    drawnIn = spokenTag();
-    stopEditing();
-  });
-
-  function declare() {
-    editing?.draft.parameters.push({ id: "", label: "", default: "" });
-  }
-
-  function stopDeclaring(at: number) {
-    editing?.draft.parameters.splice(at, 1);
-  }
-
-  async function keep() {
-    if (!editing) return;
-
-    actionSaving = true;
-    actionProblem = null;
-
-    try {
-      // Shown from what came back rather than from what went out, for the
-      // reason a saved settings file is read back: a save is finished when the
-      // directory reads back, and an Override that changed nothing leaves no
-      // file at all.
-      held(await saveAction(editing.draft));
-      stopEditing();
-    } catch (error) {
-      actionProblem = saidBy(error);
-    } finally {
-      actionSaving = false;
-    }
-  }
-
-  /** Deletes an Action of the user's own, or resets a built-in to how it was
-      written by removing the Override over it. */
-  async function forget(action: DefinedAction) {
-    actionProblem = null;
-
-    try {
-      held(await deleteAction(action.id));
-      if (editing?.draft.id === action.id) stopEditing();
-    } catch (error) {
-      actionProblem = saidBy(error);
-    }
-  }
-
-  /** What the list calls an Action's standing, where it is worth calling
-      anything: an Action nobody has touched needs no label. */
-  function standing(action: DefinedAction): string | null {
-    switch (action.standing) {
-      case "built_in":
-        return null;
-      case "overridden":
-        return t("settings-action-changed");
-      case "authored":
-        return t("settings-action-yours");
-    }
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -895,735 +484,43 @@
         <p class="text-sm opacity-60">{t("settings-unreadable-file")}</p>
       </section>
     {:else}
-    <section class="flex flex-col gap-3">
-      <div class="flex items-baseline justify-between gap-3">
-        <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-          {t("settings-providers")}
-        </h2>
-        <button type="button" class={BUTTON} onclick={add}>
-          {t("settings-add-provider")}
-        </button>
-      </div>
-
-      <!--
-        Every field this window writes an identifier from says
-        `autocorrect="off"`, for the reason the Palette's fields do (ticket 21)
-        and with a consequence of its own: macOS corrects what is typed into a
-        WebKit field, and what it corrects is what gets written. Watched on a
-        live desktop through the first-run flow, whose fields are these ones:
-        "mock" was written down as "Mock" and "mock-small" as "Mock-small" —
-        a Provider refusing a Model the user typed correctly.
-
-        Three fields are left out, and each for a reason of its own: the key is
-        a password field, which macOS corrects nothing in; the warning
-        threshold takes a number; and an Action's prompt is the one thing here
-        that IS prose, written in whole sentences for a Model to read.
-      -->
-      {#each drafts as draft, at (at)}
-        <!-- Named on the element, so that a window opened for one Provider —
-             which is what a refused key does — can bring it into view and say
-             which one it came here for. -->
-        <article
-          data-provider={draft.was ?? draft.name}
-          class="flex flex-col gap-3 rounded-md border p-3
-                 {(draft.was ?? draft.name) === wanted
-            ? 'border-red-400 dark:border-red-500'
-            : 'border-neutral-200 dark:border-neutral-700'}"
-        >
-          <div class="grid grid-cols-2 gap-3">
-            <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">{t("settings-provider-name")}</span>
-              <input
-                bind:value={draft.name}
-                class={FIELD}
-                autocorrect="off"
-                placeholder={t("settings-provider-name-example")}
-              />
-            </label>
-
-            <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">{t("settings-provider-service")}</span>
-              <select
-                bind:value={draft.preset}
-                onchange={() => picked(draft)}
-                class={FIELD}
-              >
-                <option value="">{t("settings-provider-no-preset")}</option>
-                {#each presets as preset (preset.name)}
-                  <option value={preset.name}>
-                    {preset.needs_key
-                      ? preset.name
-                      : t("settings-provider-preset-keyless", {
-                          preset: preset.name,
-                        })}
-                  </option>
-                {/each}
-              </select>
-            </label>
-
-            <label class="col-span-2 flex flex-col gap-1">
-              <span class="text-xs opacity-60">
-                {draft.preset === ""
-                  ? t("settings-provider-base-url")
-                  : t("settings-provider-base-url-from-preset")}
-              </span>
-              <input
-                bind:value={draft.base_url}
-                class={FIELD}
-                autocorrect="off"
-                placeholder={presets.find((it) => it.name === draft.preset)
-                  ?.base_url ?? t("settings-provider-base-url-example")}
-              />
-            </label>
-
-            <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">{t("settings-provider-key")}</span>
-              <input
-                type="password"
-                bind:value={draft.typed}
-                oninput={() => (draft.forgetting = false)}
-                class={FIELD}
-                placeholder={about(draft)}
-              />
-            </label>
-
-            <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">
-                {t("settings-provider-key-variable")}
-              </span>
-              <input
-                bind:value={draft.api_key_env}
-                class={FIELD}
-                autocorrect="off"
-                placeholder={presets.find((it) => it.name === draft.preset)
-                  ?.variable ?? t("settings-provider-key-variable-example")}
-              />
-            </label>
-          </div>
-
-          {#if draft.standing.state === "in_file"}
-            <p class="text-xs opacity-50">
-              <button
-                type="button"
-                class="cursor-pointer underline underline-offset-2"
-                onclick={() => {
-                  draft.forgetting = !draft.forgetting;
-                  draft.typed = "";
-                }}
-              >
-                {draft.forgetting
-                  ? t("settings-keep-key")
-                  : t("settings-remove-key")}
-              </button>
-            </p>
-          {/if}
-
-          <div class="flex flex-col gap-2">
-            <div class="flex items-baseline justify-between gap-3">
-              <span class="text-xs opacity-60">{t("settings-models")}</span>
-              <div class="flex gap-2">
-                <button
-                  type="button"
-                  class={BUTTON}
-                  disabled={draft.asking}
-                  onclick={() => askForModels(draft)}
-                >
-                  {t("settings-fetch-models")}
-                </button>
-                <button
-                  type="button"
-                  class={BUTTON}
-                  disabled={draft.asking || draft.trying === ""}
-                  onclick={() => verify(draft)}
-                >
-                  {t("settings-verify-key")}
-                </button>
-              </div>
-            </div>
-
-            <ul class="flex flex-col gap-1">
-              {#each draft.models as model, index (index)}
-                <li class="flex items-center gap-2">
-                  <input
-                    bind:value={model.id}
-                    class="{FIELD} flex-1"
-                    autocorrect="off"
-                  />
-
-                  <label class="flex items-center gap-1 text-xs opacity-70">
-                    <input type="checkbox" bind:checked={model.vision} />
-                    {t("settings-model-sees-images")}
-                  </label>
-
-                  <label class="flex items-center gap-1 text-xs opacity-70">
-                    <input
-                      type="radio"
-                      name="verifying-{at}"
-                      value={model.id}
-                      bind:group={draft.trying}
-                    />
-                    {t("settings-model-verify-with")}
-                  </label>
-
-                  <button
-                    type="button"
-                    class={BUTTON}
-                    onclick={() => stopOffering(draft, index)}
-                  >
-                    {t("settings-remove-model")}
-                  </button>
-                </li>
-              {:else}
-                <li class="text-xs opacity-50">{t("settings-no-models")}</li>
-              {/each}
-            </ul>
-
-            <div class="flex gap-2">
-              <button type="button" class={BUTTON} onclick={() => offer(draft, "")}>
-                {t("settings-add-model")}
-              </button>
-              <button type="button" class={BUTTON} onclick={() => remove(at)}>
-                {t("settings-remove-provider")}
-              </button>
-            </div>
-
-            {#if draft.asking}
-              <p class="text-xs opacity-50">{t("settings-asking-provider")}</p>
-            {:else if draft.said}
-              <p
-                class="text-xs {draft.said.well
-                  ? 'text-green-700 dark:text-green-400'
-                  : 'text-red-600 dark:text-red-400'}"
-              >
-                {draft.said.message}
-              </p>
-            {/if}
-
-            {#if draft.offered && draft.offered.length > 0}
-              <ul class="flex max-h-32 flex-wrap gap-1 overflow-y-auto">
-                {#each draft.offered as id (id)}
-                  <li>
-                    <button
-                      type="button"
-                      class="cursor-pointer rounded bg-neutral-100 px-2 py-0.5 text-xs
-                             hover:bg-neutral-200 dark:bg-neutral-800
-                             dark:hover:bg-neutral-700"
-                      onclick={() => offer(draft, id)}
-                    >
-                      {id}
-                    </button>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          </div>
-        </article>
-      {:else}
-        <p class="text-sm opacity-50">
-          {read ? t("settings-no-providers") : t("settings-reading")}
-        </p>
-      {/each}
-    </section>
-
-    <section class="flex flex-col gap-3">
-      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-        {t("settings-defaults")}
-      </h2>
-
-      <div class="grid grid-cols-2 gap-3">
-        <label class="flex flex-col gap-1">
-          <span class="text-xs opacity-60">{t("settings-default-model")}</span>
-          <select bind:value={defaultModel} class={FIELD}>
-            <option value="">{t("settings-model-none")}</option>
-            {#each nominable as model (model.name)}
-              <option value={model.name}>{model.name}</option>
-            {/each}
-          </select>
-        </label>
-
-        <label class="flex flex-col gap-1">
-          <span class="text-xs opacity-60">
-            {t("settings-default-vision-model")}
-          </span>
-          <select bind:value={defaultVisionModel} class={FIELD}>
-            <option value="">{t("settings-model-none")}</option>
-            {#each nominable as model (model.name)}
-              <option value={model.name}>
-                {model.vision
-                  ? model.name
-                  : t("settings-model-does-not-see", { model: model.name })}
-              </option>
-            {/each}
-          </select>
-        </label>
-      </div>
-
-      <label class="flex flex-col gap-1">
-        <span class="text-xs opacity-60">{t("settings-large-selection")}</span>
-        <input
-          type="number"
-          min="0"
-          bind:value={largeSelection}
-          placeholder={t("settings-large-selection-default", {
-            characters: largeSelectionDefault,
-          })}
-          class="{FIELD} max-w-64"
-        />
-        <span class="text-xs opacity-50">
-          {t("settings-large-selection-detail")}
-        </span>
-      </label>
-    </section>
-
-    <section class="flex flex-col gap-3">
-      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-        {t("settings-language")}
-      </h2>
-
-      <label class="flex flex-col gap-1">
-        <span class="text-xs opacity-60">{t("settings-language-field")}</span>
-        <select bind:value={language} class="{FIELD} max-w-64">
-          <option value="">{t("settings-language-follows-system")}</option>
-          {#each LANGUAGES as offered (offered.tag)}
-            <option value={offered.tag}>{offered.name}</option>
-          {/each}
-        </select>
-      </label>
-
-      <span class="text-xs opacity-50">{t("settings-language-detail")}</span>
-
-      {#if languageFixed}
-        <!-- Said where the field is, for the reason a key found in a variable
-             is: without it, somebody choosing a language here and watching
-             nothing change has no way to learn why. -->
-        <p class="text-xs opacity-50">
-          {t("settings-language-from-environment", {
-            variable: languageFixed.variable,
-            value: languageFixed.value,
-          })}
-        </p>
-      {/if}
-    </section>
+      <Models
+        bind:drafts
+        bind:defaultModel
+        bind:defaultVisionModel
+        bind:largeSelection
+        {presets}
+        {wanted}
+        {read}
+        {largeSelectionDefault}
+      />
     {/if}
 
-    <section class="flex flex-col gap-3">
-      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-        {t("settings-hotkeys")}
-      </h2>
+    <General
+      bind:language
+      bind:paletteHotkey
+      bind:recording
+      {unreadable}
+      {languageFixed}
+      {clipboardOnly}
+      {paletteDefault}
+      {unclaimedHotkeys}
+      {autostartWanted}
+      {autostartProblem}
+      onAutostart={autostartIs}
+    />
 
-      {#if clipboardOnly}
-        <!-- Both halves of what Wayland costs, together and where the Hotkey is
-             set, because both are answers to "why did pressing it do that?" —
-             see ADR-0003. -->
-        <p class="text-xs opacity-50">{clipboardOnly}</p>
+    <About {version} bind:newer />
 
-        <p class="text-xs opacity-50">{t("settings-wayland-hotkeys")}</p>
-      {/if}
-
-      {#if !unreadable}
-        <!-- A row of four sentences, and until ticket 26 a screen reader was
-             given two buttons and none of them: what the row is for, what is
-             bound now, that a recording is under way and what may be pressed
-             were bare runs of text, which WebKitGTK keeps in no tree — the
-             same gap ticket 18 found in the Palette's header, in a second
-             place.
-
-             So the combination is the *value* of this row rather than a
-             sentence beside it: the caption names it, and reaching it reads
-             both, in the order somebody would ask. `status` is what keeps it
-             in the tree at all, and here it speaks as well — unlike the
-             Palette's caption, what changes these words is the user pressing
-             Record, so there is somebody listening when they change. The one
-             change nobody asks for — the settings arriving and putting the
-             user's own combination where the built-in one was — happens at
-             startup, while this window is loaded and hidden, which is where
-             18's caption changes too and where an announcement reaches
-             nobody.
-
-             The rule is what may be pressed, so it is on the button that asks
-             for a combination, and the caption is on both buttons: the value
-             is not focusable, and a Tab that arrives at "Record" would
-             otherwise arrive at a word with nothing saying which of the two
-             rows it belongs to. The rule needed no role of its own — it is a
-             paragraph now rather than a run of text inside a row, and a
-             paragraph is kept.
-
-             Nothing here draws anything: the same words stay in the same
-             places at the same size. -->
-        <div class="flex flex-col gap-1">
-          <span id="palette-hotkey" class="text-xs opacity-60">
-            {t("settings-palette-hotkey")}
-          </span>
-          <div class="flex items-center gap-2">
-            <span
-              role="status"
-              aria-labelledby="palette-hotkey"
-              class="{FIELD} flex-1 truncate {paletteHotkey ||
-              recording === 'palette'
-                ? ''
-                : 'opacity-40'}"
-            >
-              {#if recording === "palette"}
-                {t("settings-hotkey-recording")}
-              {:else if paletteHotkey}
-                {reading(paletteHotkey)}
-              {:else}
-                {t("settings-hotkey-default", {
-                  hotkey: reading(paletteDefault),
-                })}
-              {/if}
-            </span>
-
-            <button
-              type="button"
-              class={BUTTON}
-              aria-describedby="palette-hotkey palette-hotkey-rule"
-              disabled={recording !== null && recording !== "palette"}
-              onclick={() =>
-                (recording = recording === "palette" ? null : "palette")}
-            >
-              {recording === "palette"
-                ? t("settings-hotkey-cancel")
-                : t("settings-hotkey-record")}
-            </button>
-
-            <button
-              type="button"
-              class={BUTTON}
-              aria-describedby="palette-hotkey"
-              disabled={!paletteHotkey}
-              onclick={unbindPalette}
-            >
-              {t("settings-hotkey-clear")}
-            </button>
-          </div>
-          <p id="palette-hotkey-rule" class="text-xs opacity-50">
-            {t("settings-hotkey-rule")}
-            {t("settings-palette-hotkey-detail")}
-          </p>
-        </div>
-      {/if}
-
-      {#each unclaimedHotkeys as said (said)}
-        <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
-      {/each}
-    </section>
-
-    <section class="flex flex-col gap-3">
-      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-        {t("settings-autostart")}
-      </h2>
-
-      <p class="text-xs opacity-50">{t("settings-autostart-detail")}</p>
-
-      <label class="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={autostartWanted}
-          onchange={(event) => autostartIs(event.currentTarget.checked)}
-        />
-        {t("settings-autostart-choice")}
-      </label>
-
-      {#if autostartProblem}
-        <p class="text-xs text-red-600 dark:text-red-400">{autostartProblem}</p>
-      {/if}
-    </section>
-
-    <section class="flex flex-col gap-3">
-      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-        {t("settings-logs")}
-      </h2>
-
-      <p class="text-xs opacity-50">{t("settings-logs-detail")}</p>
-
-      <div>
-        <button type="button" class={BUTTON} onclick={showLogs}>
-          {t("settings-open-logs")}
-        </button>
-      </div>
-
-      {#if logsProblem}
-        <p class="text-xs text-red-600 dark:text-red-400">{logsProblem}</p>
-      {/if}
-    </section>
-
-    <section class="flex flex-col gap-3">
-      <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-        {t("settings-updates")}
-      </h2>
-
-      <p class="text-xs opacity-50">{t("settings-updates-detail")}</p>
-
-      <p class="text-xs opacity-60">{t("settings-version", { version })}</p>
-
-      <div class="flex items-center gap-2">
-        <button
-          type="button"
-          class={BUTTON}
-          disabled={checking || installing}
-          onclick={checkForUpdate}
-        >
-          {checking ? t("settings-checking") : t("settings-check-for-update")}
-        </button>
-
-        {#if newer}
-          <button
-            type="button"
-            class={BUTTON}
-            disabled={installing}
-            onclick={install}
-          >
-            {installing
-              ? t("settings-installing")
-              : t("settings-install-update")}
-          </button>
-        {/if}
-      </div>
-
-      {#if newer}
-        <p class="text-xs">{t("settings-update-found", { version: newer })}</p>
-      {:else if asked}
-        <p class="text-xs opacity-50">{t("settings-up-to-date")}</p>
-      {/if}
-
-      {#if updateProblem}
-        <p class="text-xs text-red-600 dark:text-red-400">{updateProblem}</p>
-      {/if}
-    </section>
-
-    <section class="flex flex-col gap-3">
-      <div class="flex items-baseline justify-between gap-3">
-        <h2 class="text-xs font-semibold tracking-wide uppercase opacity-50">
-          {t("settings-actions")}
-        </h2>
-        <button type="button" class={BUTTON} onclick={write}>
-          {t("settings-write-action")}
-        </button>
-      </div>
-
-      <!-- Through `@html` for the `<code>` in it, which is markup a
-           translation has to be able to put where its own sentence wants it.
-           The catalogues are this repository's own files, not anything a user
-           or a Model wrote: the two places untrusted text is rendered are the
-           answer and the Selection, and neither comes through here. -->
-      <p class="text-xs opacity-50">{@html t("settings-actions-detail")}</p>
-
-      {#each unreadableActions as said (said)}
-        <p class="text-xs text-red-600 dark:text-red-400">{said}</p>
-      {/each}
-
-      <ul class="flex flex-col gap-1">
-        {#each actions as action (action.id)}
-          <li
-            class="flex items-center gap-2 rounded border border-neutral-200 px-2
-                   py-1.5 dark:border-neutral-700"
-          >
-            <span class="flex-1 truncate text-sm" title={action.path ?? ""}>
-              {action.name}
-            </span>
-
-            {#if standing(action)}
-              <span class="text-xs opacity-40">{standing(action)}</span>
-            {/if}
-
-            {#if action.hotkey}
-              <span class="truncate text-xs opacity-40">
-                {reading(action.hotkey)}
-              </span>
-            {/if}
-
-            {#if action.model}
-              <span class="truncate text-xs opacity-40">{action.model}</span>
-            {/if}
-
-            <button
-              type="button"
-              class={BUTTON}
-              onclick={() => change(action)}
-              disabled={editing?.draft.id === action.id}
-            >
-              {t("settings-action-edit")}
-            </button>
-
-            {#if action.standing === "overridden"}
-              <button type="button" class={BUTTON} onclick={() => forget(action)}>
-                {t("settings-action-reset")}
-              </button>
-            {:else if action.standing === "authored"}
-              <button type="button" class={BUTTON} onclick={() => forget(action)}>
-                {t("settings-action-delete")}
-              </button>
-            {/if}
-          </li>
-        {/each}
-      </ul>
-
-      {#if editing}
-        <article
-          class="flex flex-col gap-3 rounded-md border border-neutral-300 p-3
-                 dark:border-neutral-600"
-        >
-          <div class="grid grid-cols-2 gap-3">
-            <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">{t("settings-action-name")}</span>
-              <input
-                bind:value={editing.draft.name}
-                class={FIELD}
-                autocorrect="off"
-                placeholder={t("settings-action-name-example")}
-              />
-            </label>
-
-            <label class="flex flex-col gap-1">
-              <span class="text-xs opacity-60">{t("settings-action-model")}</span>
-              <select bind:value={editing.draft.model} class={FIELD}>
-                <option value={null}>{t("settings-action-model-default")}</option>
-                {#each bindable as model (model)}
-                  <option value={model}>{model}</option>
-                {/each}
-              </select>
-            </label>
-          </div>
-
-          <!-- The Palette's Hotkey row, again and identically: the caption
-               names the value, the rule is on the button that asks for a
-               combination, and both buttons say which row they are in — which
-               matters most here, where a second Record and a second Clear are
-               on screen at the same time as the Palette's. See the comment
-               there for why any of it is needed. -->
-          <div class="flex flex-col gap-1">
-            <span id="action-hotkey" class="text-xs opacity-60">
-              {t("settings-action-hotkey")}
-            </span>
-            <div class="flex items-center gap-2">
-              <span
-                role="status"
-                aria-labelledby="action-hotkey"
-                class="{FIELD} flex-1 truncate {editing.draft.hotkey ||
-                recording === 'action'
-                  ? ''
-                  : 'opacity-40'}"
-              >
-                {#if recording === "action"}
-                  {t("settings-hotkey-recording")}
-                {:else if editing.draft.hotkey}
-                  {reading(editing.draft.hotkey)}
-                {:else}
-                  {t("settings-hotkey-none")}
-                {/if}
-              </span>
-
-              <button
-                type="button"
-                class={BUTTON}
-                aria-describedby="action-hotkey action-hotkey-rule"
-                disabled={recording !== null && recording !== "action"}
-                onclick={() =>
-                  (recording = recording === "action" ? null : "action")}
-              >
-                {recording === "action"
-                  ? t("settings-hotkey-cancel")
-                  : t("settings-hotkey-record")}
-              </button>
-
-              <button
-                type="button"
-                class={BUTTON}
-                aria-describedby="action-hotkey"
-                disabled={!editing.draft.hotkey}
-                onclick={unbind}
-              >
-                {t("settings-hotkey-clear")}
-              </button>
-            </div>
-            <p id="action-hotkey-rule" class="text-xs opacity-50">
-              {t("settings-hotkey-rule")}
-              {t("settings-action-hotkey-detail")}
-            </p>
-          </div>
-
-          <label class="flex flex-col gap-1">
-            <span class="text-xs opacity-60">{t("settings-action-prompt")}</span>
-            <textarea
-              bind:value={editing.draft.template}
-              rows="8"
-              class="{FIELD} resize-y font-mono text-xs"
-              placeholder={t("settings-action-prompt-example")}
-            ></textarea>
-          </label>
-
-          <!-- Through `@html` for the reason the Actions note above is. -->
-          <p class="text-xs opacity-50">
-            {@html t("settings-action-prompt-detail")}
-          </p>
-
-          <div class="flex flex-col gap-2">
-            <div class="flex items-baseline justify-between gap-3">
-              <span class="text-xs opacity-60">{t("settings-parameters")}</span>
-              <button type="button" class={BUTTON} onclick={declare}>
-                {t("settings-declare-parameter")}
-              </button>
-            </div>
-
-            <ul class="flex flex-col gap-1">
-              {#each editing.draft.parameters as parameter, at (at)}
-                <li class="flex items-center gap-2">
-                  <input
-                    bind:value={parameter.id}
-                    class="{FIELD} flex-1 font-mono text-xs"
-                    autocorrect="off"
-                    placeholder={t("settings-parameter-id-example")}
-                  />
-                  <input
-                    bind:value={parameter.label}
-                    class="{FIELD} flex-1"
-                    autocorrect="off"
-                    placeholder={t("settings-parameter-label-example")}
-                  />
-                  <input
-                    bind:value={parameter.default}
-                    class="{FIELD} flex-1"
-                    autocorrect="off"
-                    placeholder={t("settings-parameter-default-example")}
-                  />
-                  <button
-                    type="button"
-                    class={BUTTON}
-                    onclick={() => stopDeclaring(at)}
-                  >
-                    {t("settings-remove-parameter")}
-                  </button>
-                </li>
-              {:else}
-                <li class="text-xs opacity-50">{t("settings-no-parameters")}</li>
-              {/each}
-            </ul>
-          </div>
-
-          {#if actionProblem}
-            <p class="text-xs text-red-600 dark:text-red-400">{actionProblem}</p>
-          {/if}
-
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              class={BUTTON}
-              disabled={actionSaving}
-              onclick={keep}
-            >
-              {actionSaving ? t("settings-saving") : t("settings-save-action")}
-            </button>
-            <button type="button" class={BUTTON} onclick={stopEditing}>
-              {t("settings-cancel")}
-            </button>
-            {#if editing.standing === "overridden"}
-              <span class="text-xs opacity-50">{t("settings-reset-by-saving")}</span>
-            {/if}
-          </div>
-        </article>
-      {/if}
-    </section>
+    <Actions
+      bind:editing
+      bind:recording
+      {actions}
+      {unreadableActions}
+      {bindableModels}
+      {held}
+      {stopEditing}
+    />
   </div>
 
   <footer class="flex items-center justify-between gap-3">

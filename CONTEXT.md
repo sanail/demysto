@@ -42,6 +42,14 @@ _Avoid_: shortcut, keybinding, accelerator
 Whether Demysto is in the operating system's login items, so that a resident tool is already running by the time it is wanted. The answer belongs to the system rather than to Demysto: it is asked for rather than remembered, and it changes whenever somebody edits that list in the system's own settings. Demysto offers the choice once in the first-run flow, and holds it in Settings for anybody who changes their mind.
 _Avoid_: login item, startup entry, auto-launch, launch at login
 
+**Settings**:
+The window in which a user tells Demysto what it needs to know: the Providers and their Models, which Model an Action falls back to, the Palette's Hotkey, the interface language, whether Demysto starts at login. Not the same thing as the Settings File, and holding more than it: the window edits Actions, which are files of their own, and it asks the system questions — Autostart is one — whose answers nothing of Demysto's holds.
+_Avoid_: preferences, options, configuration, config window
+
+**Settings File**:
+The one file Demysto writes down what it was told in: the Providers, the Default Model, the Default Vision Model, the Palette's Hotkey, the size at which a Selection is called large, the interface language, and whether the first run has happened. Written as text a person may read and edit, which is why Demysto refuses to write over one it could not parse. Actions are not in it.
+_Avoid_: config file, config, preferences file, settings
+
 ### What answers
 
 **Provider**:
