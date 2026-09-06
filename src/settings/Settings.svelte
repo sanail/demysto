@@ -488,6 +488,22 @@
     return newer ? "update" : null;
   }
 
+  /**
+   * What a tab is called.
+   *
+   * Every identifier written out rather than built from the tab's own name.
+   * The catalogues are held to what the sources ask for by name, and a message
+   * asked for as `settings-tab-${tab}` is one that check reads as a message
+   * nobody wants and tells us to drop.
+   */
+  function named(tab: Tab): string {
+    if (tab === "models") return t("settings-tab-models");
+    if (tab === "actions") return t("settings-tab-actions");
+    if (tab === "general") return t("settings-tab-general");
+
+    return t("settings-tab-about");
+  }
+
   /** Takes the catalogue as the directory holds it as the state of this window. */
   function held(catalogue: Catalogue) {
     actions = catalogue.actions;
@@ -661,7 +677,7 @@
         onclick={() => (showing = tab)}
         onkeydown={(event) => onTabKeydown(event, at)}
       >
-        {t(`settings-tab-${tab}`)}
+        {named(tab)}
 
         {#if marked}
           <!-- The dot is what the eye reads and the sentence is what a screen
@@ -692,7 +708,7 @@
   <div
     id="settings-panel"
     role="tabpanel"
-    aria-label={t(`settings-tab-${showing}`)}
+    aria-label={named(showing)}
     class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto"
   >
     {#if showing === "models"}
