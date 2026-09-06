@@ -2,6 +2,47 @@
 
 What each release brought, newest first.
 
+## 0.2.0 — 2026-09-06
+
+A release about pictures. What you are looking at is no longer only text: copy a
+diagram, a screenshot or an error dialog and the Hotkey you already press works
+over it. And Settings, which had grown into one long page, is divided into four.
+
+### Pictures
+
+- A copied picture is a Selection like any other. The Palette shows a thumbnail
+  of what it caught and lists the Actions that accept an image. Where the
+  clipboard holds text and a picture both — a spreadsheet cell, a fragment of a
+  page — the text wins, and what the Capture displaced is put back either way.
+- A **describe image** Action out of the box, the fourth built-in, answering in
+  the interface's language whatever language the picture is written in.
+- The picture is shown above the first Turn and stays in front of the Model for
+  every question after it, so a follow-up is one line of typing.
+- What is sent is fitted to 1568 px on its longest side. Where that lost
+  something the answer needed, the Conversation offers to ask again at the
+  original resolution with the weight of doing so written on the button, and
+  every Turn after that one is asked at the original too.
+- A picture with no Default Vision Model nominated is reported inside the
+  Conversation, with a way to the setting, rather than answered by a Model that
+  cannot see. A Model that was nominated is used whether or not it is ticked
+  vision-capable.
+- A picture lives as long as the window that shows it: closing the result window
+  lets go of every picture in it, and a ceiling of 128 MB releases the oldest
+  first. The Conversation stays there to be read and says plainly that it can no
+  longer be added to.
+
+### Settings
+
+- Four tabs — Models, Actions, General, About — instead of one page to scroll.
+  A tab holding edits that are not written yet carries a dot, as does About when
+  an update is ready, and a screen reader is told which of the two it is.
+- Closing the window puts back everything that was not saved. A half-typed key
+  no longer waits a week to be shown back as though it were the setting in
+  force; the window and the settings file now agree whenever it opens.
+- Providers are a list, opened one at a time. A Run refused for want of a key
+  opens the Provider it named rather than pointing at a row.
+- About says which folder the settings file and the Actions are in.
+
 ## 0.1.3 — 2026-09-06
 
 A release about Settings: what it can say about the rest of the system, and what
