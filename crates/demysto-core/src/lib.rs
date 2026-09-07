@@ -4628,6 +4628,96 @@ mod tests {
     }
 
     #[test]
+    fn an_override_can_change_the_kinds_the_built_in_accepts() {
+        // User story 87 through the window: the built-in that describes a
+        // picture becomes one that takes text as well, and the file it leaves
+        // behind says that and nothing else.
+        let demysto = unconfigured("a paragraph");
+        let built_in = defined(&demysto, "describe-image");
+
+        authored(
+            &demysto,
+            &ActionEdit {
+                accepts: vec![Kind::Text, Kind::Image],
+                ..changing("describe-image", &built_in.name, &built_in.template)
+            },
+        );
+
+        assert_eq!(
+            defined(&demysto, "describe-image").accepts,
+            [Kind::Text, Kind::Image]
+        );
+
+        let written =
+            std::fs::read_to_string(defined(&demysto, "describe-image").path.unwrap()).unwrap();
+
+        assert!(
+            written.contains("accepts = [\"text\", \"image\"]"),
+            "{written}"
+        );
+        assert!(!written.contains("template ="), "{written}");
+    }
+
+    #[test]
+    fn an_override_stating_the_kinds_the_built_in_already_accepts_is_no_override_at_all() {
+        // The window sends the kinds in the order a file states them, and this
+        // is what that buys: a list holding the same two the other way round
+        // would differ from the built-in's, and Demysto would keep the file.
+        let demysto = unconfigured("a paragraph");
+        let built_in = defined(&demysto, "describe-image");
+
+        authored(
+            &demysto,
+            &ActionEdit {
+                accepts: built_in.accepts.clone(),
+                ..changing("describe-image", &built_in.name, &built_in.template)
+            },
+        );
+
+        assert_eq!(defined(&demysto, "describe-image"), built_in);
+        assert!(
+            !actions_dir(&demysto).join("describe-image.toml").exists(),
+            "an Override of nothing should leave no file"
+        );
+    }
+
+    #[test]
+    fn removing_an_override_puts_back_the_kinds_the_built_in_accepts() {
+        let demysto = unconfigured("a paragraph");
+        let built_in = defined(&demysto, "describe-image");
+
+        authored(
+            &demysto,
+            &ActionEdit {
+                accepts: vec![Kind::Text],
+                ..changing("describe-image", &built_in.name, &built_in.template)
+            },
+        );
+        demysto
+            .delete_action("describe-image")
+            .expect("the Override should have been removed");
+
+        assert_eq!(defined(&demysto, "describe-image"), built_in);
+    }
+
+    #[test]
+    fn an_action_that_accepts_no_kind_at_all_is_refused() {
+        // Which the window can now ask for, the kinds being two ticks: what
+        // both unticked would write is an Action nothing could ever offer.
+        let demysto = unconfigured("a paragraph");
+
+        let why = refused(
+            &demysto,
+            &ActionEdit {
+                accepts: Vec::new(),
+                ..writing("Rewrite plainly", "Rewrite: {{selection}}")
+            },
+        );
+
+        assert!(why.contains("Palette"), "{why}");
+    }
+
+    #[test]
     fn an_override_can_bind_a_model_the_built_in_did_not() {
         let mut server = Server::new();
         let asked = server
@@ -6234,6 +6324,49 @@ mod tests {
             .expect("the Action that was just saved");
 
         assert_eq!(saved.accepts, [Kind::Image]);
+    }
+
+    #[test]
+    fn an_action_the_user_writes_for_pictures_is_offered_to_a_picture_and_not_to_text() {
+        // User story 86 at the Palette: "describe image" is a starting point
+        // rather than the whole of what a picture may be asked.
+        let sign = ActionEdit {
+            id: None,
+            name: "Read the sign".to_owned(),
+            template: "What does this sign say?".to_owned(),
+            parameters: Vec::new(),
+            model: None,
+            hotkey: None,
+            accepts: vec![Kind::Image],
+        };
+
+        let looking = looking_at(&one_seeing_provider("http://127.0.0.1:1"), 8, 6);
+        looking.save_action(&sign).expect("an Action to save");
+
+        assert_eq!(offered(&looking), ["Describe image", "Read the sign"]);
+
+        let reading = ready_with(&one_provider("http://127.0.0.1:1"), "a paragraph");
+        reading.save_action(&sign).expect("an Action to save");
+
+        assert_eq!(offered(&reading), ["Explain", "Translate", "Summarize"]);
+    }
+
+    #[test]
+    fn an_action_that_accepts_both_kinds_is_offered_to_either() {
+        // User story 87 at the Palette: one prompt covering both, and listed
+        // whichever of the two the user happened to capture.
+        let looking = looking_at(&one_seeing_provider("http://127.0.0.1:1"), 8, 6);
+        both_kinds(&looking);
+
+        assert_eq!(offered(&looking), ["Describe image", "Both kinds"]);
+
+        let reading = ready_with(&one_provider("http://127.0.0.1:1"), "a paragraph");
+        both_kinds(&reading);
+
+        assert_eq!(
+            offered(&reading),
+            ["Explain", "Translate", "Summarize", "Both kinds"]
+        );
     }
 
     #[test]

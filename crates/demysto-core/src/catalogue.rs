@@ -89,9 +89,9 @@ pub struct DefinedAction {
     /// desktop can answer, so the shell reads this and reports what it could
     /// not claim.
     pub hotkey: Option<String>,
-    /// The Selection kinds it will run on. Text is the only one v1 captures;
-    /// the field is here because the file states it and a save must not flatten
-    /// a file written for a Demysto that captures more.
+    /// The Selection kinds it will run on, in the order a file states them:
+    /// what the Palette filters on, and what the window that writes Actions
+    /// ticks. An Action stating none of them is refused rather than written.
     pub accepts: Vec<Kind>,
     pub standing: ActionStanding,
     /// The file it is stored in, `None` for a built-in nobody has changed.

@@ -6,6 +6,7 @@
     type ActionStanding,
     type Catalogue,
     type DefinedAction,
+    type Kind,
   } from "../lib/ipc";
   import { reading } from "../lib/hotkey";
   import { spokenTag, t } from "../lib/i18n.svelte";
@@ -45,6 +46,9 @@
   let actionProblem = $state<string | null>(null);
   let actionSaving = $state(false);
 
+  /** The Selection kinds an Action may accept, in the order a file states them. */
+  const KINDS: Kind[] = ["text", "image"];
+
   /** What an Action being written starts as. */
   function write() {
     actionProblem = null;
@@ -63,10 +67,9 @@
   /**
    * Opens an Action for editing.
    *
-   * Everything it states is carried into the draft, the Hotkey and the
-   * Selection kinds included — neither has a field here yet, and a save that
-   * dropped what the file already said would be this window destroying what it
-   * does not show.
+   * Everything it states is carried into the draft, and every one of them has a
+   * field below: what is saved is what is on screen, and nothing the file said
+   * is lost between the two.
    */
   function change(action: DefinedAction) {
     actionProblem = null;
@@ -91,6 +94,26 @@
   function unbind() {
     if (editing) editing.draft.hotkey = null;
     recording = null;
+  }
+
+  /** Whether the Action being edited says it runs on this kind of Selection. */
+  function takes(kind: Kind): boolean {
+    return editing?.draft.accepts.includes(kind) ?? false;
+  }
+
+  /**
+   * Ticks or unticks one kind, always leaving them in the one order.
+   *
+   * The order is the file's, not the order the boxes were pressed in: an
+   * Override states what differs from the built-in field by field, and a list
+   * holding the same two kinds the other way round differs from it.
+   */
+  function accepting(kind: Kind, taken: boolean) {
+    if (!editing) return;
+
+    editing.draft.accepts = KINDS.filter((each) =>
+      each === kind ? taken : takes(each),
+    );
   }
 
   /** The language this window was drawn in, so that a change can be noticed. */
@@ -321,6 +344,49 @@
         <p id="action-hotkey-rule" class="text-xs opacity-50">
           {t("settings-hotkey-rule")}
           {t("settings-action-hotkey-detail")}
+        </p>
+      </div>
+
+      <!-- What this Action runs on, in the row before the prompt because the
+           prompt is written differently for each kind: a picture travels
+           beside the words rather than in them, so an Action taking only
+           pictures has nothing to put where {{selection}} is. Two ticks and
+           not a choice of three, because the file states a list — a third
+           kind is a third tick here and nothing else. Ticking neither is left
+           to the save to refuse, the way an empty name and an empty prompt
+           are, so that the rule lives in one place. -->
+      <div class="flex flex-col gap-1">
+        <span id="action-accepts" class="text-xs opacity-60">
+          {t("settings-action-accepts")}
+        </span>
+        <div
+          role="group"
+          aria-labelledby="action-accepts"
+          aria-describedby="action-accepts-rule"
+          class="flex items-center gap-4"
+        >
+          <label class="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={takes("text")}
+              onchange={(event) =>
+                accepting("text", event.currentTarget.checked)}
+            />
+            {t("settings-action-accepts-text")}
+          </label>
+
+          <label class="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={takes("image")}
+              onchange={(event) =>
+                accepting("image", event.currentTarget.checked)}
+            />
+            {t("settings-action-accepts-image")}
+          </label>
+        </div>
+        <p id="action-accepts-rule" class="text-xs opacity-50">
+          {t("settings-action-accepts-detail")}
         </p>
       </div>
 

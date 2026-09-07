@@ -227,6 +227,10 @@ settings-action-name-example = Rewrite plainly
 settings-action-model = Model — leave at the default unless this Action needs its own
 settings-action-model-default = Whatever the defaults say
 settings-action-hotkey = Hotkey — runs this Action on what you have selected, with no Palette in the way
+settings-action-accepts = Runs on — what has to be selected for this Action to be offered
+settings-action-accepts-text = Text
+settings-action-accepts-image = Pictures
+settings-action-accepts-detail = At least one, or nothing could ever offer this Action. A picture travels beside the prompt rather than in it, so one that accepts pictures alone has nothing to put where the text would go.
 settings-action-prompt = Prompt
 settings-action-prompt-example =
     Explain the text below. The text is in {"{{"}selection_language{"}}"}; answer in {"{{"}ui_language{"}}"}.

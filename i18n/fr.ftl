@@ -226,6 +226,10 @@ settings-action-name-example = Réécrire simplement
 settings-action-model = Modèle — laissez la valeur par défaut à moins que cette action n'ait besoin du sien
 settings-action-model-default = Ce que disent les valeurs par défaut
 settings-action-hotkey = Raccourci — exécute cette action sur ce que vous avez sélectionné, sans passer par la palette
+settings-action-accepts = S'exécute sur — ce qu'il faut avoir sélectionné pour que cette action soit proposée
+settings-action-accepts-text = Texte
+settings-action-accepts-image = Images
+settings-action-accepts-detail = Au moins l'un des deux, sinon rien ne pourrait proposer cette action. Une image voyage à côté du prompt et non dedans : une action qui n'accepte que des images n'a donc rien à mettre là où irait le texte.
 settings-action-prompt = Prompt
 settings-action-prompt-example =
     Explique le texte ci-dessous. Le texte est en {"{{"}selection_language{"}}"} ; réponds en {"{{"}ui_language{"}}"}.

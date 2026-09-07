@@ -222,6 +222,10 @@ settings-action-name-example = Переписать просто
 settings-action-model = Модель — оставьте по умолчанию, если этому действию не нужна своя
 settings-action-model-default = Как скажут умолчания
 settings-action-hotkey = Горячая клавиша — запускает это действие на выделенном, минуя палитру
+settings-action-accepts = Работает с — что должно быть выделено, чтобы это действие предложили
+settings-action-accepts-text = Текст
+settings-action-accepts-image = Изображения
+settings-action-accepts-detail = Хотя бы одно, иначе это действие никогда не предложат. Изображение идёт рядом с промптом, а не внутри него, поэтому действию, принимающему только изображения, нечего подставить туда, где был бы текст.
 settings-action-prompt = Промпт
 settings-action-prompt-example =
     Объясни текст ниже. Текст на языке {"{{"}selection_language{"}}"}; отвечай на {"{{"}ui_language{"}}"}.
