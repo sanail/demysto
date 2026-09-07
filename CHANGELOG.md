@@ -2,6 +2,18 @@
 
 What each release brought, newest first.
 
+## 0.2.1 — 2026-09-08
+
+A release about one field the Action editor never had.
+
+### Actions
+
+- An Action says in the window which Selections it accepts — text, pictures, or
+  both — instead of being written for text and nothing else. Writing one that
+  answers about a picture no longer means editing a file by hand, and **describe
+  image** becomes a starting point rather than the whole of what a picture can
+  be asked. An Action accepting neither is refused, saying why.
+
 ## 0.2.0 — 2026-09-06
 
 A release about pictures. What you are looking at is no longer only text: copy a
