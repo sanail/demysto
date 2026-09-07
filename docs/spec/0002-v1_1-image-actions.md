@@ -305,15 +305,16 @@ cross-platform change is verified on each rather than inferred from one.
 
 ## Out of Scope
 
-**A path to a picture**, though `docs/initial.md` names it. There is no entry
-point for a path today — command-line arguments are discarded, no drag-and-drop
-is listened for, and no dialog plugin is present — so the only route would be a
-copied string that happens to be a path. That makes one Capture ambiguous: a
-string that is both a path to a picture and a piece of text either drops explain,
-translate and summarize from the Palette, or forces a Capture to carry two
-Selections at once, which `Demysto::actions` and `Demysto::run` are built around
-not doing. The ambiguity is real and worth solving once, for every file type, in
-v1.2 — not twice, the first time for one extension.
+**A path to a picture**, though it has been asked for since Demysto was first
+described. There is no entry point for a path today — command-line arguments
+are discarded, no drag-and-drop is listened for, and no dialog plugin is
+present — so the only route would be a copied string that happens to be a path.
+That makes one Capture ambiguous: a string that is both a path to a picture and
+a piece of text either drops explain, translate and summarize from the Palette,
+or forces a Capture to carry two Selections at once, which `Demysto::actions`
+and `Demysto::run` are built around not doing. The ambiguity is real and worth
+solving once, for every file type, in v1.2 — not twice, the first time for one
+extension.
 
 Everything v1.2 already owns: files, chunking, map-reduce summarisation, file
 type detection.
