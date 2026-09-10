@@ -2,6 +2,32 @@
 
 What each release brought, newest first.
 
+## 0.3.0 — 2026-09-11
+
+### Actions
+
+- **Custom…**, a fifth built-in Action, runs whatever prompt the user types,
+  over text or a picture. A one-off question no longer means writing an Action
+  first.
+
+### Interface
+
+- The five language catalogues are rewritten from the English out rather than
+  translated sentence by sentence, and help text that repeated what the window
+  already showed is gone.
+- An API key's state moves out of the field's placeholder, where the longest of
+  the five messages did not fit and all of them vanished on the first keystroke.
+- Verifying a key leaves the row it shared with "Add a Model", and takes the
+  Model it is verified on with it.
+- What a Provider answers appears under the button that asked it.
+- An Action's Parameters have labels instead of placeholders.
+
+### Icon
+
+- Demysto has an icon of its own in place of the Tauri default. In the tray it
+  is monochrome on macOS, following the menu bar, and a rounded plate on Windows
+  and Linux.
+
 ## 0.2.1 — 2026-09-08
 
 A release about one field the Action editor never had.
