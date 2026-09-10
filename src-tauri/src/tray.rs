@@ -41,16 +41,29 @@ fn action_in(item: &str) -> Option<&str> {
 const TRAY: &str = "main";
 
 pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
-    let icon = app
-        .default_window_icon()
-        .ok_or("no default window icon is embedded in this build")?
-        .clone();
+    // The icon the tray is given is not the one the application is bundled
+    // under, and neither platform wants the same picture.
+    //
+    // macOS draws the menu bar in whichever appearance the desktop is in and
+    // recolours a template icon to match it, so the glyph is handed over flat
+    // and black. Both `.icon` and `.icon_as_template` below: without the second
+    // the first is drawn as it was written, and a black glyph on a dark menu
+    // bar is an icon nobody can find.
+    #[cfg(target_os = "macos")]
+    let icon = tauri::include_image!("icons/tray-macos-template.png");
+    // Windows and Linux draw it as given, which is why they are given a plate
+    // and not the bare mark: a panel may be light or dark, and half the mark is
+    // nearly white. Rounded, because a square tile sits among flat panel glyphs
+    // as a block — measured on KDE, where the difference is plain.
+    #[cfg(not(target_os = "macos"))]
+    let icon = tauri::include_image!("icons/tray-plate.png");
 
     let demysto = app.state::<Demysto>();
     let actions = demysto.catalogue().actions;
 
     tauri::tray::TrayIconBuilder::with_id(TRAY)
         .icon(icon)
+        .icon_as_template(cfg!(target_os = "macos"))
         // What the icon is called. Windows shows it as a tooltip and, more to
         // the point, hands it to a screen reader — without one the icon is
         // nameless, and the mouse-only path user story 51 is about starts at an
