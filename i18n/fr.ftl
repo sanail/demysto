@@ -39,6 +39,8 @@ action-translate-name = Traduire
 action-translate-target-label = Vers quelle langue ?
 action-summarize-name = Résumer
 action-describe-image-name = Décrire l'image
+action-custom-name = Personnalisée…
+action-custom-prompt-label = Que faut-il en faire ?
 
 ## The Palette
 

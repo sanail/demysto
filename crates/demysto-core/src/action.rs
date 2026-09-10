@@ -129,6 +129,27 @@ pub(crate) fn built_in(words: &Words) -> Vec<Action> {
             accepts: vec![Kind::Image],
             template: DESCRIBE_IMAGE.to_owned(),
         },
+        // Last, because everything above runs on Enter alone and this one is
+        // worth reaching only when the user has something of their own to say.
+        // It accepts both kinds: the Model a Run arrives at is resolved from
+        // the Selection's kind rather than from the Action, so the same Action
+        // over a picture asks whatever answers for pictures.
+        Action {
+            id: "custom".to_owned(),
+            name: say!(words, "action-custom-name"),
+            parameters: vec![Parameter {
+                id: "custom_prompt".to_owned(),
+                label: say!(words, "action-custom-prompt-label"),
+                // Nothing to offer: what the user wants done is the whole of
+                // this Action. Empty is also what the Hotkey path always sends
+                // — it asks for no Parameter — which is what the template's
+                // second sentence answers.
+                default: String::new(),
+            }],
+            model: None,
+            accepts: vec![Kind::Text, Kind::Image],
+            template: CUSTOM.to_owned(),
+        },
     ]
 }
 
@@ -290,3 +311,29 @@ own terms to paraphrases of them. The text is in {{selection_language}}; answer 
 in {{ui_language}}.
 
 {{selection}}";
+
+/// The one built-in with nothing of its own to say: what it asks for is
+/// whatever the user typed into it.
+///
+/// The instruction is fenced and the Selection is fenced, because the two are
+/// far easier to confuse here than in any other template — one arbitrary piece
+/// of prose is being told apart from another. What the fence cannot say is that
+/// the second block is empty whenever the Selection is a picture: `render`
+/// substitutes and does not branch. So the first sentence says it in words
+/// instead, and the four cases — text or picture, with an instruction or
+/// without — each read as something.
+const CUSTOM: &str = "\
+Do what the instruction below asks. It is about the text that follows it, or, \
+where that block is empty, about the image below. If the instruction itself is \
+empty, say instead what that text or image is and what it is for. Answer in \
+{{ui_language}}, unless the instruction asks for another language.
+
+Instruction:
+```
+{{custom_prompt}}
+```
+
+Text:
+```
+{{selection}}
+```";

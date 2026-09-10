@@ -2435,7 +2435,10 @@ mod tests {
 
         // The order is the catalogue's, not the alphabet's: the first is the
         // one Enter runs without the user having read anything.
-        assert_eq!(offered(&demysto), ["Explain", "Translate", "Summarize"]);
+        assert_eq!(
+            offered(&demysto),
+            ["Explain", "Translate", "Summarize", "Custom…"]
+        );
     }
 
     #[test]
@@ -2552,7 +2555,7 @@ mod tests {
             .map(|action| action.name)
             .collect();
 
-        assert_eq!(named, ["Объяснить", "Перевести", "Пересказать"]);
+        assert_eq!(named, ["Объяснить", "Перевести", "Пересказать", "Своё…"]);
     }
 
     /// And the language the translation offers to translate into is the one the
@@ -2821,6 +2824,48 @@ mod tests {
         );
 
         running(&ready_to_run(&server, "a paragraph"), "summarize", &[]);
+
+        endpoint.assert();
+    }
+
+    /// The Action with no wording of its own: what it says to the Model is what
+    /// the user typed, and the Selection is fenced off from it because here the
+    /// two are prose of the same kind.
+    #[test]
+    fn the_custom_action_sends_what_the_user_typed_around_what_was_selected() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![
+                Matcher::Regex("Instruction:\\\\n```\\\\nmake it shout\\\\n```".to_owned()),
+                Matcher::Regex("Text:\\\\n```\\\\na paragraph\\\\n```".to_owned()),
+            ],
+        );
+
+        running(
+            &ready_to_run(&server, "a paragraph"),
+            "custom",
+            &[("custom_prompt", "make it shout")],
+        );
+
+        endpoint.assert();
+    }
+
+    /// And where nothing was typed — which is every Run reached by this
+    /// Action's own Hotkey, because that path asks for no Parameter — the
+    /// instruction arrives empty rather than the Run arriving nowhere.
+    #[test]
+    fn the_custom_action_asked_for_nothing_sends_an_empty_instruction() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![
+                Matcher::Regex("Instruction:\\\\n```\\\\n\\\\n```".to_owned()),
+                Matcher::Regex("If the instruction itself is empty".to_owned()),
+            ],
+        );
+
+        running(&ready_to_run(&server, "a paragraph"), "custom", &[]);
 
         endpoint.assert();
     }
@@ -4382,7 +4427,13 @@ mod tests {
 
         assert_eq!(
             catalogued(&demysto),
-            ["explain", "translate", "summarize", "describe-image"]
+            [
+                "explain",
+                "translate",
+                "summarize",
+                "describe-image",
+                "custom"
+            ]
         );
         assert!(demysto.catalogue().unreadable.is_empty());
 
@@ -4408,7 +4459,13 @@ mod tests {
         // for; the user's own follow.
         assert_eq!(
             offered(&demysto),
-            ["Explain", "Translate", "Summarize", "Rewrite plainly"]
+            [
+                "Explain",
+                "Translate",
+                "Summarize",
+                "Custom…",
+                "Rewrite plainly"
+            ]
         );
     }
 
@@ -4528,7 +4585,13 @@ mod tests {
 
         assert_eq!(
             catalogued(&demysto),
-            ["explain", "translate", "summarize", "describe-image"]
+            [
+                "explain",
+                "translate",
+                "summarize",
+                "describe-image",
+                "custom"
+            ]
         );
         assert!(!path.exists(), "the file should have gone with it");
     }
@@ -4568,7 +4631,13 @@ mod tests {
         // an Override changes an Action, it does not add one.
         assert_eq!(
             catalogued(&demysto),
-            ["explain", "translate", "summarize", "describe-image"]
+            [
+                "explain",
+                "translate",
+                "summarize",
+                "describe-image",
+                "custom"
+            ]
         );
         assert_eq!(
             defined(&demysto, "explain").standing,
@@ -4791,7 +4860,7 @@ mod tests {
         // creating an Action never takes one that is spoken for.
         assert_eq!(
             offered(&demysto),
-            ["Explain", "Translate", "Summarize", "Explain"]
+            ["Explain", "Translate", "Summarize", "Custom…", "Explain"]
         );
         assert_eq!(
             catalogued(&demysto),
@@ -4800,6 +4869,7 @@ mod tests {
                 "translate",
                 "summarize",
                 "describe-image",
+                "custom",
                 "explain-2"
             ]
         );
@@ -4863,6 +4933,7 @@ mod tests {
                 "translate",
                 "summarize",
                 "describe-image",
+                "custom",
                 "rewrite-plainly"
             ]
         );
@@ -4944,6 +5015,7 @@ mod tests {
                 "translate",
                 "summarize",
                 "describe-image",
+                "custom",
                 "rewrite-plainly"
             ]
         );
@@ -5082,6 +5154,7 @@ mod tests {
                 "translate",
                 "summarize",
                 "describe-image",
+                "custom",
                 "объяснить-проще"
             ]
         );
@@ -6233,14 +6306,17 @@ mod tests {
         // where the true answer is "nominate a Model, here".
         let demysto = looking_at(&one_provider("http://127.0.0.1:1"), 8, 6);
 
-        assert_eq!(offered(&demysto), ["Describe image"]);
+        assert_eq!(offered(&demysto), ["Describe image", "Custom…"]);
     }
 
     #[test]
     fn text_is_not_offered_the_action_that_accepts_a_picture() {
         let demysto = ready_with(&one_provider("http://127.0.0.1:1"), "a paragraph");
 
-        assert_eq!(offered(&demysto), ["Explain", "Translate", "Summarize"]);
+        assert_eq!(
+            offered(&demysto),
+            ["Explain", "Translate", "Summarize", "Custom…"]
+        );
     }
 
     #[test]
@@ -6280,6 +6356,35 @@ mod tests {
         both_kinds(&demysto);
 
         running(&demysto, "both-kinds", &[]);
+
+        endpoint.assert();
+    }
+
+    /// The built-in that takes either kind, over a picture: the text block is
+    /// empty because there is nothing written to put in it, and the picture is
+    /// a part of its own beside the words. Which is why the wording above the
+    /// blocks says what an empty one means — no template can branch on it.
+    #[test]
+    fn the_custom_action_over_a_picture_leaves_the_text_block_empty() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![
+                Matcher::Regex("Instruction:\\\\n```\\\\nread the sign\\\\n```".to_owned()),
+                Matcher::Regex("Text:\\\\n```\\\\n\\\\n```".to_owned()),
+                Matcher::PartialJson(json!({
+                    "messages": [{
+                        "content": [{ "type": "text" }, { "type": "image_url" }],
+                    }],
+                })),
+            ],
+        );
+
+        running(
+            &ready_to_look(&server, 8, 6),
+            "custom",
+            &[("custom_prompt", "read the sign")],
+        );
 
         endpoint.assert();
     }
@@ -6343,12 +6448,18 @@ mod tests {
         let looking = looking_at(&one_seeing_provider("http://127.0.0.1:1"), 8, 6);
         looking.save_action(&sign).expect("an Action to save");
 
-        assert_eq!(offered(&looking), ["Describe image", "Read the sign"]);
+        assert_eq!(
+            offered(&looking),
+            ["Describe image", "Custom…", "Read the sign"]
+        );
 
         let reading = ready_with(&one_provider("http://127.0.0.1:1"), "a paragraph");
         reading.save_action(&sign).expect("an Action to save");
 
-        assert_eq!(offered(&reading), ["Explain", "Translate", "Summarize"]);
+        assert_eq!(
+            offered(&reading),
+            ["Explain", "Translate", "Summarize", "Custom…"]
+        );
     }
 
     #[test]
@@ -6358,14 +6469,17 @@ mod tests {
         let looking = looking_at(&one_seeing_provider("http://127.0.0.1:1"), 8, 6);
         both_kinds(&looking);
 
-        assert_eq!(offered(&looking), ["Describe image", "Both kinds"]);
+        assert_eq!(
+            offered(&looking),
+            ["Describe image", "Custom…", "Both kinds"]
+        );
 
         let reading = ready_with(&one_provider("http://127.0.0.1:1"), "a paragraph");
         both_kinds(&reading);
 
         assert_eq!(
             offered(&reading),
-            ["Explain", "Translate", "Summarize", "Both kinds"]
+            ["Explain", "Translate", "Summarize", "Custom…", "Both kinds"]
         );
     }
 

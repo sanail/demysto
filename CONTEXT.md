@@ -17,7 +17,7 @@ _Avoid_: grab, read, fetch
 ### What the user invokes
 
 **Action**:
-A named, user-runnable operation defined by a prompt template, the Selection kinds it accepts, its parameters, and an optional Model binding. Built-in Actions (explain, translate, summarize, describe image) have the same shape as user-authored ones and run through the same path — there is no privileged built-in variety.
+A named, user-runnable operation defined by a prompt template, the Selection kinds it accepts, its parameters, and an optional Model binding. Built-in Actions (explain, translate, summarize, describe image, custom) have the same shape as user-authored ones and run through the same path — there is no privileged built-in variety.
 _Avoid_: function, command, tool, skill, feature
 
 **Parameter**:

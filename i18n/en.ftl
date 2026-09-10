@@ -40,6 +40,8 @@ action-translate-name = Translate
 action-translate-target-label = Into which language?
 action-summarize-name = Summarize
 action-describe-image-name = Describe image
+action-custom-name = Custom…
+action-custom-prompt-label = What should be done?
 
 ## The Palette
 
