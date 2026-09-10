@@ -44,11 +44,23 @@ export type Draft = {
   offered: string[] | null;
   /** Which of its Models a verification puts its request to. */
   trying: string;
-  /** Whether it is being asked something now. */
-  asking: boolean;
-  /** What it last said, and whether that was good news. */
-  said: { well: boolean; message: string } | null;
+  /**
+   * Which question is with the Provider now, `null` while none is.
+   *
+   * Named rather than counted, because the two questions are asked from two
+   * places and each answer belongs under the one that asked it: the Models a
+   * Provider offers are an extension of the list above, and whether a key
+   * works is about the key.
+   */
+  asking: Asked | null;
+  /** What each question last got back, and whether that was good news. */
+  said: Record<Asked, Said | null>;
 };
+
+/** The two things this window asks a Provider. */
+export type Asked = "models" | "key";
+
+export type Said = { well: boolean; message: string };
 
 /**
  * One Action being edited, and where its definition stood before the editing
@@ -87,8 +99,8 @@ export function drafted(provider: ConfiguredProvider): Draft {
     forgetting: false,
     offered: null,
     trying: provider.models[0]?.id ?? "",
-    asking: false,
-    said: null,
+    asking: null,
+    said: { models: null, key: null },
   };
 }
 
@@ -106,8 +118,8 @@ export function fresh(): Draft {
     forgetting: false,
     offered: null,
     trying: "",
-    asking: false,
-    said: null,
+    asking: null,
+    said: { models: null, key: null },
   };
 }
 

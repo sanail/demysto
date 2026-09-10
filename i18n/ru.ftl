@@ -47,7 +47,7 @@ palette-origin-clipboard = Из буфера обмена
 palette-picture = Изображение, { $dimensions }
 palette-nothing-captured = Ничего не выделено, и буфер обмена пуст. Выделите текст и нажмите горячую клавишу ещё раз.
 palette-filter = Фильтр действий…
-palette-no-action-matches = Ни одно действие так не называется.
+palette-no-action-matches = Ничего не найдено.
 palette-back = Назад
 palette-next = Далее
 palette-run = Запустить
@@ -58,23 +58,23 @@ palette-keys-closing = Esc — закрыть
 
 ## The Conversation window
 
-result-conversations = Беседы
-result-conversation-unnamed = Беседа
-result-nothing-asked-yet = Пока ничего не спрошено.
-result-quotation-label = Текст, о котором эта беседа
-result-picture-label = Изображение, о котором эта беседа
+result-conversations = Чаты
+result-conversation-unnamed = Чат
+result-nothing-asked-yet = Здесь пока пусто.
+result-quotation-label = Текст этого чата
+result-picture-label = Изображение этого чата
 result-show-more = Показать целиком
 result-show-less = Свернуть
 result-ask-at-original = Спросить снова в исходном разрешении — { $weight }
-result-picture-let-go = Demysto больше не хранит это изображение ({ $dimensions }).
-result-sealed = Эту беседу можно прочитать, но нельзя продолжить: изображение, о котором она, отпущено. Скопируйте изображение и нажмите горячую клавишу, чтобы спросить что-то новое.
+result-picture-let-go = Изображение больше не хранится.
+result-sealed = Изображение больше не хранится, поэтому продолжить чат нельзя. Скопируйте его и нажмите горячую клавишу, чтобы начать новый.
 result-asking = Спрашиваю модель…
 result-reasoning = Модель размышляет…
 result-copy-answer = Скопировать ответ
 result-copied = Скопировано
 result-stopped = Остановлено
 result-continue = Продолжить
-result-try-again = Попробовать снова
+result-try-again = Повторить
 result-ask-another-model = Спросить другую модель…
 result-open-provider-settings = Открыть настройки провайдера { $provider }
 result-open-accessibility = Открыть настройки Универсального доступа
@@ -97,7 +97,7 @@ settings-saving = Сохраняю…
 settings-saved = Сохранено.
 settings-keys = Esc — закрыть
 settings-reading = Читаю настройки…
-settings-unreadable-file = Demysto не станет переписывать файл, который не смог прочитать, поэтому изменить здесь ничего нельзя, пока файл не исправлен. Откройте его, поправьте написанное и откройте это окно снова.
+settings-unreadable-file = Изменить ничего нельзя, пока файл настроек не исправлен. Поправьте написанное и откройте это окно снова.
 
 settings-folder = Папка настроек
 
@@ -117,7 +117,7 @@ settings-add-provider = Добавить провайдера
 settings-remove-provider = Удалить этого провайдера
 settings-provider-edit = Изменить
 settings-provider-unnamed = (без имени)
-settings-no-providers = Ни один провайдер не настроен. Добавьте одного, чтобы начать спрашивать.
+settings-no-providers = Провайдеров пока нет. Добавьте одного, чтобы начать.
 settings-provider-name = Имя
 settings-provider-name-example = openai
 settings-provider-service = Сервис
@@ -129,7 +129,7 @@ settings-provider-base-url-example = https://api.example.com/v1
 settings-provider-key = Ключ API
 settings-provider-key-variable = Или переменная окружения, в которой он лежит
 settings-provider-key-variable-example = MY_API_KEY
-settings-key-in-file = Хранится в файле настроек — введите новый, чтобы заменить
+settings-key-in-file = Хранится в файле настроек
 settings-key-in-environment = Берётся из { $variable }
 settings-key-not-needed = У этого сервиса нет ключей
 settings-key-missing = Ключа пока нет
@@ -142,10 +142,10 @@ settings-remove-key = Удалить ключ из файла
 settings-models = Модели
 settings-fetch-models = Запросить
 settings-verify-key = Проверить ключ
+settings-verify-which-model = На какой модели?
 settings-add-model = Добавить модель
 settings-remove-model = Удалить
 settings-model-sees-images = Видит изображения
-settings-model-verify-with = Проверять на ней
 settings-no-models = Моделей пока нет. Запросите список или добавьте модель вручную.
 settings-asking-provider = Спрашиваю провайдера…
 settings-provider-offers-nothing = Он не предлагает ни одной модели.
@@ -154,57 +154,56 @@ settings-provider-answered = { $model } ответила.
 ### Defaults
 
 settings-defaults = Умолчания
-settings-default-model = Модель по умолчанию — та, что берёт действие без своей собственной
-settings-default-vision-model = Модель для изображений — та, что берётся вместо неё для картинки
+settings-default-model = Модель по умолчанию — если действие не указывает свою
+settings-default-vision-model = Модель по умолчанию для изображений
 settings-model-none = Нет
 settings-model-does-not-see = { $model } (не видит изображений)
-settings-large-selection = Предупреждать от — сколько символов может быть в выделении, прежде чем Demysto скажет об этом
-settings-large-selection-default = { $characters } — то, с чем Demysto поставляется
-settings-large-selection-detail = Ничего никогда не обрезается и ничего не отклоняется: предупреждение нужно затем, чтобы случайное «выделить всё» не было оплачено молча. Оставьте поле пустым, чтобы взять число Demysto, или поставьте 0, чтобы не получать предупреждений.
+settings-large-selection = Предупреждать, если знаков больше
+settings-large-selection-default = { $characters } по умолчанию
+settings-large-selection-detail = Ничего не обрезается — предупреждение нужно лишь затем, чтобы случайное «выделить всё» не оплатилось незаметно. Оставьте поле пустым, чтобы взять значение Demysto, или поставьте 0, чтобы не предупреждать.
 
 ### Language
 
 settings-language = Язык
-settings-language-field = Язык, на котором говорит Demysto
-settings-language-follows-system = Следовать за операционной системой
-settings-language-detail = Сохраняется кнопкой «Сохранить» ниже и начинает звучать сразу же — и в меню в трее, и в этом окне.
+settings-language-field = Язык интерфейса
+settings-language-follows-system = Как в системе
 settings-language-from-environment = { $variable } имеет значение { $value }, поэтому Demysto говорит на этом языке, что бы ни было выбрано здесь.
 
 ### Hotkeys
 
 settings-hotkeys = Горячие клавиши
-settings-palette-hotkey = Палитра — то, что открывает её поверх того, что вы читаете
+settings-palette-hotkey = Открывает список действий
 settings-hotkey-record = Записать
 settings-hotkey-clear = Очистить
 settings-hotkey-cancel = Отмена
-settings-hotkey-recording = Нажмите сочетание… Esc — прекратить
-settings-hotkey-default = { $hotkey } — то, с чем Demysto поставляется
-settings-hotkey-none = Нет — это действие вызывается через палитру
-settings-hotkey-rule = Удерживайте хотя бы один модификатор или нажмите клавишу, которая сама по себе ничего не печатает, — F13 и выше есть на большинстве клавиатур.
-settings-palette-hotkey-detail = Сохраняется кнопкой «Сохранить» ниже и начинает отвечать сразу же.
-settings-action-hotkey-detail = Параметры на этом пути не спрашиваются — каждый берёт то, что предлагает.
-settings-wayland-hotkeys = Wayland к тому же не позволяет приложению закрепить горячую клавишу за собой. Demysto просит сочетания ниже у портала GlobalShortcuts, и окружение само решает, чему какое отвечает, — меняйте их в настройках клавиатурных сокращений самого окружения, где они перечислены под именем Demysto.
+settings-hotkey-recording = Нажмите клавиши… Esc — отмена
+settings-hotkey-default = { $hotkey } — по умолчанию
+settings-hotkey-none = Нет — действие запускается из списка
+settings-palette-hotkey-rule = Удерживайте Ctrl, Alt или Shift и нажмите клавишу. Печатающую клавишу занять в одиночку нельзя: она перестанет печататься во всех программах.
+settings-action-hotkey-rule = Удерживайте Ctrl, Alt или Shift и нажмите клавишу. Печатающую клавишу занять в одиночку нельзя: она перестанет печататься во всех программах. Параметры при этом не спрашиваются — каждый берёт значение по умолчанию.
+settings-wayland-hotkeys = В Wayland горячие клавиши раздаёт окружение, а не Demysto. Меняйте их в настройках клавиатуры самого окружения — там они перечислены под именем Demysto.
 
 ### Startup
 
 settings-autostart = Запуск
 settings-autostart-choice = Запускать при входе
-settings-autostart-detail = Demysto ждёт горячую клавишу в трее и отвечает только пока запущен. Этот флажок действует сразу, а не по кнопке «Сохранить»: список автозапуска ведёт сама система, а не файл настроек Demysto, и тот же список правится в настройках системы.
+settings-autostart-changed = Готово
+settings-autostart-detail = Список автозапуска ведёт сама система, поэтому флажок срабатывает сразу и снять его можно там же.
 
 ### Logs
 
 settings-logs = Журналы
-settings-logs-detail = Demysto ведёт локальный журнал того, что он делал, — какое действие, какая модель, что пошло не так — и никогда того, что вы читали или что сказала модель. Никуда ничего не отправляется. Прикладывайте эти файлы к сообщению об ошибке.
+settings-logs-detail = В журнал попадает то, что делал Demysto, — какое действие, какая модель, что пошло не так, — и никогда то, что вы читали или что ответила модель. Прикладывайте его к сообщению об ошибке.
 settings-open-logs = Открыть папку с журналами
 
 ### Updates
 
 settings-updates = Обновления
-settings-updates-detail = Demysto ищет новую версию при запуске и предлагает то, что нашёл, — ничего не устанавливается, пока вы не скажете. Каждое обновление подписано собственным ключом Demysto и сверяется с ним, прежде чем встать на место.
-settings-version = Это Demysto { $version }.
-settings-check-for-update = Проверить, нет ли новой версии
+settings-updates-detail = Каждое обновление подписано ключом Demysto и проверяется перед установкой, и без вашего согласия ничего не устанавливается.
+settings-version = Demysto { $version }
+settings-check-for-update = Проверить обновления
 settings-checking = Проверяю…
-settings-up-to-date = Это самая новая версия, какая есть.
+settings-up-to-date = Установлена последняя версия.
 settings-update-found = Demysto { $version } готов к установке.
 settings-install-update = Установить и перезапустить
 settings-installing = Устанавливаю…
@@ -212,38 +211,41 @@ settings-installing = Устанавливаю…
 ### Actions
 
 settings-actions = Действия
-settings-write-action = Написать действие
-settings-actions-detail = Каждое действие — отдельный файл в <code>actions</code>, так что его можно сохранить в резервной копии или отправить кому-нибудь. Встроенные действия туда не пишутся: при изменении встроенного сохраняется только то, что вы изменили, а сброс это удаляет. Действие сохраняется само по себе, а не кнопкой «Сохранить» ниже.
+settings-write-action = Новое действие
+settings-actions-detail = Каждое действие — отдельный файл в <code>actions</code>: его можно сохранить про запас или передать другому.
 settings-action-changed = Изменено
 settings-action-yours = Ваше
+settings-action-unsaved = не сохранено
 settings-action-edit = Изменить
 settings-action-reset = Сбросить
 settings-action-delete = Удалить
-settings-action-name = Имя — то, что перечисляет палитра
+settings-action-name = Название
 settings-action-name-example = Переписать просто
-settings-action-model = Модель — оставьте по умолчанию, если этому действию не нужна своя
-settings-action-model-default = Как скажут умолчания
-settings-action-hotkey = Горячая клавиша — запускает это действие на выделенном, минуя палитру
-settings-action-accepts = Работает с — что должно быть выделено, чтобы это действие предложили
+settings-action-model = Модель
+settings-action-model-default = По умолчанию
+settings-action-hotkey = Горячая клавиша
+settings-action-accepts = Принимает
 settings-action-accepts-text = Текст
 settings-action-accepts-image = Изображения
-settings-action-accepts-detail = Хотя бы одно, иначе это действие никогда не предложат. Изображение идёт рядом с промптом, а не внутри него, поэтому действию, принимающему только изображения, нечего подставить туда, где был бы текст.
+settings-action-accepts-detail = Выберите хотя бы одно. Изображение идёт рядом с запросом, а не внутри него, поэтому для изображения {"{{"}selection{"}}"} пустой.
 settings-action-prompt = Промпт
 settings-action-prompt-example =
     Объясни текст ниже. Текст на языке {"{{"}selection_language{"}}"}; отвечай на {"{{"}ui_language{"}}"}.
 
     {"{{"}selection{"}}"}
-settings-action-prompt-detail = <code>{"{{"}selection{"}}"}</code> — то, что вы выделили; <code>{"{{"}ui_language{"}}"}</code> и <code>{"{{"}selection_language{"}}"}</code> — язык, на котором вы читаете, и тот, на котором оказался текст. Всё остальное в двойных фигурных скобках — параметр, который палитра спросит перед запуском; объявите его ниже.
+settings-action-prompt-detail = <code>{"{{"}selection{"}}"}</code> — то, что вы выделили. <code>{"{{"}ui_language{"}}"}</code> — язык, на котором вы читаете, <code>{"{{"}selection_language{"}}"}</code> — язык самого текста. Всё остальное в двойных фигурных скобках — параметр.
 settings-parameters = Параметры
-settings-declare-parameter = Объявить параметр
+settings-declare-parameter = Добавить параметр
 settings-remove-parameter = Удалить
-settings-no-parameters = Нет. Это действие запускается сразу, как только выбрано.
+settings-no-parameters = Нет — действие запускается сразу.
+settings-parameter-id = Имя
+settings-parameter-label = Вопрос
+settings-parameter-default = По умолчанию
 settings-parameter-id-example = target
 settings-parameter-label-example = На какой язык?
-settings-parameter-default-example = Что предлагается
-settings-save-action = Сохранить это действие
+settings-save-action = Сохранить действие
 settings-cancel = Отменить
-settings-reset-by-saving = Сохранение без изменений возвращает встроенное действие.
+settings-reset-by-saving = Сохранение без изменений вернёт встроенное действие.
 
 ## The first run
 #
@@ -258,28 +260,28 @@ welcome-back = Назад
 welcome-continue = Дальше
 welcome-finish = Начать работу
 welcome-language-title = Demysto определил ваш язык
-welcome-language-detail = На этом языке вы читаете — так говорит операционная система. Если это не так, поменяйте здесь, а потом хоть когда в настройках.
+welcome-language-detail = Система говорит, что вы читаете на нём. Поменяйте здесь или потом в настройках.
 welcome-provider-title = Откуда берутся ответы
-welcome-provider-detail = Demysto спрашивает модель, которую вы выбрали сами, через вашу собственную учётную запись. Выберите сервис, вставьте выданный им ключ и спросите, какие модели он предлагает.
-welcome-provider-model = Модель, которую Demysto спрашивает, если действие не говорит иного
-welcome-provider-verify-first = Ключ предъявляется провайдеру до конца этого шага, чтобы неверный обнаружился сейчас, а не при первом вашем вопросе.
+welcome-provider-detail = Demysto спрашивает модель через вашу учётную запись. Выберите сервис, вставьте ключ и запросите список моделей.
+welcome-provider-model = Модель по умолчанию
+welcome-provider-verify-first = Проверьте ключ, чтобы продолжить: пусть неверный найдётся сейчас, а не при первом вопросе.
 welcome-accessibility-title = Разрешите Demysto читать выделенное
-welcome-accessibility-detail = Demysto читает выделение, отправляя сочетание копирования тому, что вы читаете, а macOS выдаёт это только с разрешением «Универсальный доступ». Откройте «Конфиденциальность и безопасность» → «Универсальный доступ» и включите Demysto.
+welcome-accessibility-detail = Чтение выделенного macOS выдаёт только с разрешением «Универсальный доступ». Откройте «Конфиденциальность и безопасность» → «Универсальный доступ» и включите Demysto.
 welcome-open-accessibility = Открыть настройки Универсального доступа
-welcome-accessibility-later = Demysto спрашивает об этом macOS при каждом запуске, так что выдать разрешение позже — то же самое. После обновления его попросят снова: для macOS это уже другое приложение.
+welcome-accessibility-later = Разрешение можно выдать позже — Demysto спрашивает его при каждом запуске действия. После обновления macOS спросит снова: для неё это уже другое приложение.
 welcome-autostart-title = Запускать Demysto при входе в систему
-welcome-autostart-detail = Demysto ждёт горячую клавишу в трее и отвечает только пока запущен. Без вашего согласия здесь ничего не прописывается, а настройки самой системы уберут запись обратно.
+welcome-autostart-detail = Demysto ждёт в трее и отвечает, только пока запущен.
 welcome-autostart-choice = Запускать при входе
 welcome-done-title = Вот и всё
-welcome-done-detail = Выделите где угодно текст и нажмите { $hotkey }. Рядом с курсором откроется палитра с тем, что Demysto может с ним сделать, а Enter запустит выделенное.
-welcome-done-clipboard = Скопируйте текст через Ctrl+C и нажмите { $hotkey }. Рядом с курсором откроется палитра с тем, что Demysto может с ним сделать, а Enter запустит выделенное.
-welcome-done-tray = Дальше Demysto ждёт в трее, и из его меню доступны палитра, действия и настройки: горячая клавиша — быстрый путь, но не единственный.
+welcome-done-detail = Выделите где угодно текст и нажмите { $hotkey }. Рядом с курсором откроется список действий; Enter запустит выбранное.
+welcome-done-clipboard = Скопируйте текст через Ctrl+C и нажмите { $hotkey }. Рядом с курсором откроется список действий; Enter запустит выбранное.
+welcome-done-tray = Дальше Demysto ждёт в трее, и через его меню доступно всё то же, что и по горячей клавише.
 
 ## What an update could not do
 
 update-refused = Demysto не смог спросить, есть ли новая версия: { $detail }
 update-install-refused = Обновление не удалось установить: { $detail }
-update-nothing-found = Устанавливать нечего: сперва проверьте, нет ли новой версии.
+update-nothing-found = Устанавливать нечего: сперва проверьте обновления.
 
 ## What the login items would not do
 
@@ -290,21 +292,21 @@ autostart-refused = Demysto не смог изменить запуск при �
 # The Palette and Settings say these; the core reports which one happened and
 # leaves the sentence to whoever is on screen.
 
-capture-clipboard-only = Это сеанс Wayland, а Wayland не позволяет одному приложению печатать в другое. Demysto не может прочитать выделенное вами: скопируйте его сами через Ctrl+C, затем нажмите горячую клавишу — и Demysto прочитает буфер обмена.
+capture-clipboard-only = Wayland не позволяет одному приложению печатать в другое, поэтому Demysto не может прочитать выделенное. Скопируйте его через Ctrl+C и нажмите горячую клавишу.
 capture-clipboard-unavailable = Буфер обмена недоступен: { $detail }
 capture-keystroke-refused = Не удалось отправить сочетание копирования: { $detail }
-capture-no-accessibility = macOS не даёт Demysto прочитать выделенное: Demysto нужно разрешение «Универсальный доступ». Откройте «Конфиденциальность и безопасность» → «Универсальный доступ» и включите Demysto.
-capture-picture-unreadable = В буфере обмена изображение, которое Demysto не смог прочитать. Скопируйте его ещё раз или скопируйте другое.
+capture-no-accessibility = macOS не даёт Demysto прочитать выделенное без разрешения «Универсальный доступ». Откройте «Конфиденциальность и безопасность» → «Универсальный доступ» и включите Demysto.
+capture-picture-unreadable = Demysto не смог прочитать изображение из буфера обмена. Скопируйте его ещё раз или скопируйте другое.
 accessibility-pane-unreachable = Demysto не смог открыть Системные настройки: { $detail }. Разрешение находится в «Конфиденциальность и безопасность» → «Универсальный доступ».
-accessibility-only-macos = Только macOS спрашивает разрешение, прежде чем Demysto сможет прочитать выделенное.
+accessibility-only-macos = Разрешение на чтение выделенного спрашивает только macOS.
 
 ## What stopped a Run
 
-run-nothing-to-run = Не на чем запускать действие: выделите текст или скопируйте его и нажмите горячую клавишу ещё раз.
-run-no-conversation = Нет беседы, в которой можно это спросить. Нажмите горячую клавишу, чтобы начать новую.
-run-conversation-sealed = Изображение, о котором эта беседа, отпущено, и спрашивать больше не о чем. Скопируйте его и нажмите горячую клавишу, чтобы начать новую беседу.
-run-no-such-action = Нет действия с именем «{ $action }». Возможно, его удалили после того, как открылась палитра; нажмите горячую клавишу ещё раз.
-run-nothing-to-retry = Нет реплики, которую можно повторить. Задайте вопрос заново, чтобы начать новую.
+run-nothing-to-run = Запускать действие не на чем. Выделите или скопируйте текст и нажмите горячую клавишу ещё раз.
+run-no-conversation = Нет чата, в котором можно спросить. Нажмите горячую клавишу, чтобы начать.
+run-conversation-sealed = Изображение, о котором этот чат, больше не хранится. Скопируйте его и нажмите горячую клавишу, чтобы начать новый чат.
+run-no-such-action = Действия «{ $action }» нет — возможно, его удалили. Нажмите горячую клавишу ещё раз.
+run-nothing-to-retry = Повторять нечего. Задайте вопрос заново.
 
 # The one warning a Conversation carries, said before the Model is asked so that
 # it is on screen while the answer is still being paid for.
@@ -356,12 +358,12 @@ provider-timed-out =
        *[many] { $seconds } секунд
     }, и Demysto перестал ждать.
 provider-unreachable = До { $provider } не удалось достучаться: { $detail }
-provider-went-quiet = { $provider } замолчал посреди ответа, и Demysto перестал ждать.
+provider-went-quiet = { $provider } замолчал на полуслове.
 provider-stopped-answering = { $provider } перестал отвечать посреди ответа: { $detail }
 provider-closed-early = { $provider } закрыл соединение прежде, чем ответ был закончен.
 provider-refused = Провайдер отклонил запрос (HTTP { $status }).
 provider-refused-saying = Провайдер отклонил запрос (HTTP { $status }): { $detail }
-provider-malformed = Ответ провайдера оказался не таким, какой Demysto может прочитать ({ $reason }): { $body }
+provider-malformed = Demysto не смог разобрать ответ провайдера ({ $reason }): { $body }
 provider-no-answer-in-it = в нём нет ответа
 
 ## What an Action could not be made into
@@ -369,15 +371,15 @@ provider-no-answer-in-it = в нём нет ответа
 action-file-preamble = # Действие, которое запускает Demysto. Правьте его здесь или в настройках Demysto.
 action-needs-name = Действию нужно имя, под которым оно будет перечислено.
 action-needs-prompt = Действию нужен промпт: то, что оно говорит модели, с {"{{"}selection{"}}"} там, где встаёт выделение.
-action-accepts-nothing = Действие, которое не принимает ни одного вида выделения, никогда не появится в палитре.
+action-accepts-nothing = Действие, которое ничего не принимает, никогда не будет предложено. Выберите хотя бы один вид выделения.
 action-parameter-needs-name = Параметру нужно имя, чтобы его можно было написать в промпте как {"{{"}like_this{"}}"}.
-action-parameter-reserved = Параметр не может называться «{ $parameter }»: так промпт обращается к тому, что подставляет сам Demysto, и такой параметр никто никогда не спросит.
-action-parameter-needs-label = Параметру «{ $parameter }» нужна подпись — это то, чем палитра его спрашивает.
+action-parameter-reserved = Параметр нельзя назвать «{ $parameter }»: это имя Demysto заполняет сам.
+action-parameter-needs-label = Параметру «{ $parameter }» нужен вопрос, которым его спросят.
 action-parameter-twice = Два параметра называются «{ $parameter }», поэтому {"{{"}{ $parameter }{"}}"} в промпте может означать любой из них.
 action-binds-nothing-configured = Это действие привязано к модели «{ $model }», а не настроено ни одной модели.
 action-binds-unknown-model = Это действие привязано к модели «{ $model }», и ни один провайдер не предлагает модель с таким именем. Настроены такие модели: { $models }.
 action-id-not-a-file-name = «{ $action }» не может быть именем файла, поэтому под ним нельзя хранить действие.
-action-none-to-remove = Нет действия с именем «{ $action }», которое можно удалить. Возможно, оно уже удалено; откройте это окно заново.
+action-none-to-remove = Действия «{ $action }» нет — возможно, оно уже удалено. Откройте это окно заново.
 action-file-newer-version = { $path } объявляет себя версией { $stated }, а этот Demysto понимает версию { $understood }. Обновите Demysto или уберите файл из этого каталога.
 action-file-states-no-field = { $path } не указывает { $field }. Действие, которого у Demysto ещё нет, обязано указать своё имя и свой шаблон.
 action-file-unreadable = { $path } не удалось прочитать: { $detail }
@@ -390,26 +392,26 @@ action-file-invalid = { $path } — не действительное дейст
 ## Hotkeys the desktop would not give up
 
 hotkey-palette-fell-back = { $why } Demysto использует { $hotkey } вместо неё.
-hotkey-palette-unclaimable = Demysto не смог закрепить за собой { $hotkey } — горячую клавишу, открывающую палитру: { $detail }. Возможно, её уже занимает другое приложение. Меню в трее ведёт туда же, куда и горячая клавиша.
-hotkey-palette-not-a-combination = Настройки указывают для палитры горячую клавишу «{ $hotkey }», а это не то сочетание, которое Demysto понимает.
-hotkey-palette-types-something = Настройки указывают для палитры горячую клавишу «{ $hotkey }», а это одна клавиша, которая что-то печатает. Горячая клавиша закрепляется во всей системе, поэтому одиночная клавиша должна быть такой, которая не попадает туда, где вы печатаете.
-hotkey-palette-refused = Настройки указывают для палитры горячую клавишу «{ $hotkey }», и Demysto не смог её закрепить: { $detail }. Возможно, её уже занимает другое приложение.
-hotkey-action-not-a-combination = { $action } указывает горячую клавишу «{ $hotkey }», а это не то сочетание, которое Demysto понимает. Горячая клавиша — это её модификаторы и одна клавиша, записанные как «Ctrl+Shift+E».
-hotkey-action-types-something = { $action } указывает горячую клавишу «{ $hotkey }», а это одна клавиша, которая что-то печатает. Горячая клавиша закрепляется во всей системе, поэтому одиночная клавиша должна быть такой, которая не попадает туда, где вы печатаете, — Pause, ScrollLock, PrintScreen, F13 и выше или клавиша громкости либо управления воспроизведением. Всему остальному нужен модификатор.
+hotkey-palette-unclaimable = Demysto не смог занять { $hotkey }, которая открывает список действий: { $detail }. Возможно, сочетание уже занято другим приложением. Через меню в трее доступно всё то же самое.
+hotkey-palette-not-a-combination = В настройках указано сочетание «{ $hotkey }», которого Demysto не понимает. Сочетание — это модификаторы и одна клавиша, например «Ctrl+Shift+E».
+hotkey-palette-types-something = В настройках указано сочетание «{ $hotkey }» — это одна печатающая клавиша. Добавьте Ctrl, Alt или Shift: сама по себе она перестанет печататься во всех программах.
+hotkey-palette-refused = Demysto не смог занять указанное в настройках сочетание «{ $hotkey }»: { $detail }. Возможно, оно уже занято другим приложением.
+hotkey-action-not-a-combination = { $action } указывает сочетание «{ $hotkey }», которого Demysto не понимает. Сочетание — это модификаторы и одна клавиша, например «Ctrl+Shift+E».
+hotkey-action-types-something = { $action } указывает сочетание «{ $hotkey }» — это одна печатающая клавиша. Добавьте Ctrl, Alt или Shift: сама по себе она перестанет печататься во всех программах.
 hotkey-action-already-held = { $action } указывает горячую клавишу «{ $hotkey }», и её уже занимает { $holder }. Отвечает на неё только { $holder }; дайте { $action } другую.
-hotkey-action-refused = { $action } указывает горячую клавишу «{ $hotkey }», и Demysto не смог её закрепить: { $detail }. Возможно, её уже занимает другое приложение.
-hotkey-palette-holder = палитра
+hotkey-action-refused = { $action } указывает сочетание «{ $hotkey }», и Demysto не смог его занять: { $detail }. Возможно, оно уже занято другим приложением.
+hotkey-palette-holder = список действий
 
 ## What a Wayland desktop made of the Hotkeys it was asked for
 
-portal-palette-description = Demysto — открыть палитру
+portal-palette-description = Demysto — открыть список действий
 portal-action-description = Demysto — { $action }
 portal-not-taken-yet = Окружение пока не приняло горячую клавишу для «{ $wanted }», поэтому на неё ничего не отвечает. Demysto спрашивает снова.
 portal-not-taken = Окружение не приняло горячую клавишу для «{ $wanted }», поэтому на неё ничего не отвечает. Клавиатурные сокращения Demysto назначаются в настройках самого окружения.
 portal-held-under-nothing = Окружение держит горячую клавишу для «{ $wanted }» без сочетания, поэтому на неё пока ничего не отвечает. Назначьте его в настройках клавиатурных сокращений самого окружения.
 portal-stopped-answering = Портал GlobalShortcuts перестал отвечать, а значит, перестали отвечать и горячие клавиши. Перезапуск Demysto запросит их снова; пока этого не случилось, меню в трее ведёт туда же, куда и горячая клавиша.
-portal-asking-again = Так выглядит окружение, которое ещё поднимается: оно принимает запрос на горячую клавишу и не даёт ей ничего — или не отвечает вовсе. Demysto продолжает спрашивать несколько минут, а затем оставляет окружение в покое.
-portal-taken-in-the-end = Окружение приняло горячие клавиши Demysto, когда его спросили снова.
+portal-asking-again = Похоже, окружение ещё запускается: оно принимает запрос на горячую клавишу и ни к чему её не привязывает. Demysto продолжит спрашивать несколько минут.
+portal-taken-in-the-end = Окружение выдало горячие клавиши со второй попытки.
 portal-asked-enough =
     Demysto спрашивал у окружения свои горячие клавиши { $asked ->
         [one] { $asked } раз
@@ -417,7 +419,7 @@ portal-asked-enough =
        *[many] { $asked } раз
     } в течение нескольких минут, и оно приняло не все. Больше он не спросит, пока Demysto не перезапустят: клавиатурные сокращения Demysto назначаются в настройках самого окружения, а меню в трее ведёт туда же, куда и горячая клавиша.
 portal-refused = Окружение не отдало Demysto горячие клавиши, о которых он попросил: { $detail }. Пока этого не произошло, на них ничего не отвечает — назначаются они в настройках клавиатурных сокращений, а меню в трее ведёт туда же, куда и горячая клавиша.
-portal-unreachable = Это сеанс Wayland, где Demysto приходится просить горячую клавишу у портала GlobalShortcuts, — и достучаться до него не удалось: { $detail }. Ни одна горячая клавиша не отвечает. Портал приходит вместе с xdg-desktop-portal: в KDE и в GNOME начиная с версии 48. Меню в трее ведёт туда же, куда и горячая клавиша.
+portal-unreachable = Demysto не смог достучаться до портала GlobalShortcuts, поэтому горячие клавиши не отвечают: { $detail }. Портал приходит с xdg-desktop-portal, в KDE и в GNOME начиная с 48-й версии. Через меню в трее доступно всё то же самое.
 
 ## The log folder
 
@@ -464,11 +466,12 @@ settings-file-preamble =
     # привязываются. `default_model` — то, к чему сводится действие, не привязанное
     # к своей модели, а `default_vision_model` — то, к чему оно сводится для картинки.
     #
-    # `palette_hotkey` — сочетание клавиш, открывающее палитру. Не пишите его, чтобы
-    # взять то, с которым Demysto поставляется. Оно записывается как модификаторы и
-    # одна клавиша — "Ctrl+Alt+Space", — а клавиша, которая ничего не печатает,
-    # например F13, может стоять сама по себе. Окно настроек запишет сочетание за
-    # вас, если нажать его проще, чем выписать.
+    # `palette_hotkey` — сочетание клавиш, открывающее список действий. Не пишите
+    # его, чтобы взять то, с которым Demysto поставляется. Оно записывается как
+    # модификаторы и одна клавиша — "Ctrl+Alt+Space". Клавиша, которая ничего не
+    # печатает, — громкости, воспроизведения или F13 и выше — может стоять сама по
+    # себе. Окно настроек запишет сочетание за вас, если нажать его проще, чем
+    # выписать.
     #
     # `language` — язык, на котором говорит Demysto: "en", "de", "es", "fr" или
     # "ru". Не пишите его, и Demysto пойдёт за операционной системой, откатываясь

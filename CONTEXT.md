@@ -29,7 +29,7 @@ A user's change to a built-in Action — an edited prompt, a bound Model, a pers
 _Avoid_: customisation, patch, user config
 
 **Palette**:
-The window shown by the global hotkey, listing the Actions that accept the current Selection.
+The window shown by the global hotkey, listing the Actions that accept the current Selection. Not named to the user, who has no word for it: the interface calls it the list of Actions, and says where it opens rather than what it is called.
 _Avoid_: launcher, menu, popup, command bar
 
 **Hotkey**:
@@ -73,15 +73,15 @@ One execution of an Action against one Selection. A Run produces a Conversation.
 _Avoid_: invocation, execution, call, request
 
 **Conversation**:
-One Run of an Action plus the follow-up Turns the user takes on the same Selection. The unit the result window shows and the unit history is counted in.
-_Avoid_: chat, thread, session, dialogue
+One Run of an Action plus the follow-up Turns the user takes on the same Selection. The unit the result window shows and the unit history is counted in. Called a chat where the user reads it, which is the word they already have for it; Conversation is what the code, this glossary and the documents say, because it names the Run and its follow-ups together rather than the window they happen in.
+_Avoid_: thread, session, dialogue
 
 **Turn**:
 A single user message and the Model's reply within a Conversation.
 _Avoid_: message, exchange, round
 
 **Sealed**:
-A Conversation that can be read but not added to, because the Selection it was about has been let go. Only a picture is ever let go — one weighs enough that holding every Conversation's would cost a resident tool more memory than it may take — so a text Conversation is never Sealed.
+A Conversation that can be read but not added to, because the Selection it was about has been let go. Only a picture is ever let go — one weighs enough that holding every Conversation's would cost a resident tool more memory than it may take — so a text Conversation is never Sealed. Internal: the window never says "sealed" or "let go of", it says the picture is no longer kept and what to do about it.
 _Avoid_: closed, archived, expired, stale
 
 **Reasoning**:

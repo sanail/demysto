@@ -40,14 +40,14 @@ action-custom-prompt-label = ¿Qué hay que hacer?
 
 ## The Palette
 
-palette-reading-selection = Leyendo lo que has seleccionado…
+palette-reading-selection = Leyendo la selección…
 palette-reading-clipboard = Leyendo el portapapeles…
 palette-origin-selection = Selección
 palette-origin-clipboard = Del portapapeles
 palette-picture = Una imagen, { $dimensions }
 palette-nothing-captured = No hay nada seleccionado y el portapapeles está vacío. Selecciona un texto y pulsa el atajo otra vez.
 palette-filter = Filtrar acciones…
-palette-no-action-matches = Ninguna acción se llama así.
+palette-no-action-matches = No hay coincidencias.
 palette-back = Atrás
 palette-next = Siguiente
 palette-run = Ejecutar
@@ -58,23 +58,23 @@ palette-keys-closing = Esc para cerrar
 
 ## The Conversation window
 
-result-conversations = Conversaciones
-result-conversation-unnamed = Conversación
-result-nothing-asked-yet = Todavía no se ha preguntado nada.
-result-quotation-label = El texto del que trata esta conversación
-result-picture-label = La imagen de la que trata esta conversación
+result-conversations = Chats
+result-conversation-unnamed = Chat
+result-nothing-asked-yet = Aún no has preguntado nada.
+result-quotation-label = El texto de este chat
+result-picture-label = La imagen de este chat
 result-show-more = Mostrar más
 result-show-less = Mostrar menos
-result-ask-at-original = Preguntar otra vez en resolución original — { $weight }
-result-picture-let-go = Demysto ya no guarda esta imagen ({ $dimensions }).
-result-sealed = Esta conversación se puede leer, pero no continuar: la imagen de la que trata ya se ha soltado. Copia la imagen y pulsa el atajo para preguntar algo nuevo.
+result-ask-at-original = Volver a preguntar en resolución original — { $weight }
+result-picture-let-go = Esta imagen ya no se conserva.
+result-sealed = La imagen ya no se conserva, así que este chat no puede seguir. Cópiala y pulsa el atajo para empezar otro.
 result-asking = Preguntando al modelo…
 result-reasoning = El modelo está razonando…
 result-copy-answer = Copiar la respuesta
 result-copied = Copiado
 result-stopped = Detenido
 result-continue = Continuar
-result-try-again = Intentarlo de nuevo
+result-try-again = Reintentar
 result-ask-another-model = Preguntar a otro modelo…
 result-open-provider-settings = Abrir los ajustes de { $provider }
 result-open-accessibility = Abrir los ajustes de Accesibilidad
@@ -97,7 +97,7 @@ settings-saving = Guardando…
 settings-saved = Guardado.
 settings-keys = Esc para cerrar
 settings-reading = Leyendo los ajustes…
-settings-unreadable-file = Los ajustes no sobrescriben un archivo que no han podido leer, así que aquí no se puede editar nada hasta que ese archivo esté reparado. Ábrelo, corrige lo que dice y vuelve a abrir esta ventana.
+settings-unreadable-file = No se puede editar nada hasta reparar el archivo de ajustes. Corrígelo y vuelve a abrir esta ventana.
 
 settings-folder = Carpeta de ajustes
 
@@ -117,7 +117,7 @@ settings-add-provider = Añadir un proveedor
 settings-remove-provider = Quitar este proveedor
 settings-provider-edit = Editar
 settings-provider-unnamed = (sin nombre)
-settings-no-providers = Todavía no hay ningún proveedor configurado. Añade uno para empezar a preguntar cosas.
+settings-no-providers = Todavía no hay ningún proveedor. Añade uno para empezar.
 settings-provider-name = Nombre
 settings-provider-name-example = openai
 settings-provider-service = Servicio
@@ -129,7 +129,7 @@ settings-provider-base-url-example = https://api.example.com/v1
 settings-provider-key = Clave de API
 settings-provider-key-variable = O la variable de entorno que la guarda
 settings-provider-key-variable-example = MY_API_KEY
-settings-key-in-file = Guardada en el archivo de ajustes — escribe para reemplazarla
+settings-key-in-file = Guardada en el archivo de ajustes
 settings-key-in-environment = Tomada de { $variable }
 settings-key-not-needed = Este servicio no tiene claves
 settings-key-missing = Todavía no hay clave
@@ -142,10 +142,10 @@ settings-remove-key = Quitar la clave del archivo
 settings-models = Modelos
 settings-fetch-models = Consultar
 settings-verify-key = Verificar la clave
+settings-verify-which-model = ¿Con qué modelo?
 settings-add-model = Añadir un modelo
 settings-remove-model = Quitar
 settings-model-sees-images = Ve imágenes
-settings-model-verify-with = Verificar con
 settings-no-models = Todavía no hay ningún modelo. Consulta la lista, o añade uno a mano.
 settings-asking-provider = Preguntando al proveedor…
 settings-provider-offers-nothing = No ofrece ningún modelo.
@@ -154,57 +154,56 @@ settings-provider-answered = { $model } ha respondido.
 ### Defaults
 
 settings-defaults = Valores por defecto
-settings-default-model = Modelo por defecto — el que usa una acción que no tiene uno propio
-settings-default-vision-model = Modelo de visión por defecto — el que se usa en su lugar para una imagen
+settings-default-model = Modelo por defecto — salvo que una acción indique el suyo
+settings-default-vision-model = Modelo por defecto para imágenes
 settings-model-none = Ninguno
 settings-model-does-not-see = { $model } (no ve imágenes)
-settings-large-selection = Avisar a partir de — cuántos caracteres puede tener una selección antes de que Demysto lo diga
-settings-large-selection-default = { $characters } — lo que trae Demysto
-settings-large-selection-detail = Nunca se corta nada y nunca se rechaza nada: el aviso está para que un «seleccionar todo» accidental no se pague en silencio. Deja el campo vacío para la cifra de Demysto, o ponlo a 0 para que no te diga nada.
+settings-large-selection = Avisar a partir de tantos caracteres
+settings-large-selection-default = { $characters } por defecto
+settings-large-selection-detail = Nunca se recorta nada: el aviso solo evita que un «seleccionar todo» accidental se pague sin que te enteres. Déjalo vacío para el valor de Demysto, o pon 0 para no avisar.
 
 ### Language
 
 settings-language = Idioma
-settings-language-field = El idioma en el que habla Demysto
-settings-language-follows-system = Seguir al sistema operativo
-settings-language-detail = Se guarda con el botón Guardar de abajo, y se habla en cuanto se guarda: tanto el menú de la bandeja como esta ventana.
+settings-language-field = Idioma de la interfaz
+settings-language-follows-system = El del sistema
 settings-language-from-environment = { $variable } vale { $value }, así que ese es el idioma en el que habla Demysto, se elija lo que se elija aquí.
 
 ### Hotkeys
 
 settings-hotkeys = Atajos de teclado
-settings-palette-hotkey = La paleta — lo que la abre sobre aquello que estés leyendo
+settings-palette-hotkey = Abre la lista de acciones
 settings-hotkey-record = Grabar
 settings-hotkey-clear = Borrar
 settings-hotkey-cancel = Cancelar
-settings-hotkey-recording = Pulsa una combinación… Esc para parar
-settings-hotkey-default = { $hotkey } — lo que trae Demysto
-settings-hotkey-none = Ninguno — a esta acción se llega por la paleta
-settings-hotkey-rule = Mantén pulsado al menos un modificador, o pulsa una tecla que por sí sola no escriba nada: F13 y superiores son las que más teclados pueden enviar.
-settings-palette-hotkey-detail = Se guarda con el botón Guardar de abajo, y responde en cuanto se guarda.
-settings-action-hotkey-detail = Por este camino no se piden los parámetros: cada uno toma lo que ofrece.
-settings-wayland-hotkeys = Wayland tampoco deja que ninguna aplicación se reserve un atajo para sí. Demysto pide las combinaciones de abajo al portal GlobalShortcuts del escritorio, y es el escritorio quien decide a qué responde cada una: cámbialas en los ajustes de atajos de teclado del propio escritorio, donde aparecen bajo Demysto.
+settings-hotkey-recording = Pulsa las teclas… Esc para cancelar
+settings-hotkey-default = { $hotkey } — por defecto
+settings-hotkey-none = Ninguno — esta acción se lanza desde la lista
+settings-palette-hotkey-rule = Mantén Ctrl, Alt o Shift y pulsa una tecla. Una tecla que escribe algo no se puede reservar sola: dejaría de escribirse en todas partes.
+settings-action-hotkey-rule = Mantén Ctrl, Alt o Shift y pulsa una tecla. Una tecla que escribe algo no se puede reservar sola: dejaría de escribirse en todas partes. Por esta vía no se piden los parámetros: cada uno toma su valor por defecto.
+settings-wayland-hotkeys = En Wayland los atajos los reparte el escritorio, no Demysto. Cámbialos en los ajustes de teclado del propio escritorio, donde aparecen bajo Demysto.
 
 ### Startup
 
 settings-autostart = Inicio
 settings-autostart-choice = Iniciarlo al iniciar sesión
-settings-autostart-detail = Demysto espera en la bandeja a que pulses el atajo, así que solo puede responder mientras se está ejecutando. Esta casilla surte efecto al marcarla y no al guardar: la lista de inicio es del propio sistema y no una línea de los ajustes de Demysto, y esa misma lista se edita también en los ajustes del sistema.
+settings-autostart-changed = Hecho
+settings-autostart-detail = Los elementos de inicio son la lista de tu sistema, así que esto surte efecto al instante y también se cambia allí.
 
 ### Logs
 
 settings-logs = Registros
-settings-logs-detail = Demysto guarda un registro local de lo que hizo —qué acción, qué modelo, qué salió mal— y nunca de lo que estabas mirando ni de lo que dijo un modelo. No se envía nada a ninguna parte. Adjunta estos archivos a un informe de error.
+settings-logs-detail = El registro anota lo que hizo Demysto — qué acción, qué modelo, qué falló — y nunca lo que estabas mirando ni lo que dijo un modelo. Adjúntalo a un informe de error.
 settings-open-logs = Abrir la carpeta de los registros
 
 ### Updates
 
 settings-updates = Actualizaciones
-settings-updates-detail = Demysto busca una versión nueva al arrancar y ofrece lo que encuentra: no se instala nada hasta que lo digas. Cada actualización va firmada con la clave propia de Demysto y se comprueba con ella antes de instalarse.
-settings-version = Esto es Demysto { $version }.
-settings-check-for-update = Buscar una versión nueva
+settings-updates-detail = Cada actualización va firmada con la clave de Demysto y se verifica antes de instalarse, y nada se instala sin que tú lo digas.
+settings-version = Demysto { $version }
+settings-check-for-update = Buscar actualizaciones
 settings-checking = Buscando…
-settings-up-to-date = Esta es la versión más reciente que hay.
+settings-up-to-date = Esta es la versión más reciente.
 settings-update-found = Demysto { $version } está listo para instalarse.
 settings-install-update = Instalar y reiniciar
 settings-installing = Instalando…
@@ -212,38 +211,41 @@ settings-installing = Instalando…
 ### Actions
 
 settings-actions = Acciones
-settings-write-action = Escribir una acción
-settings-actions-detail = Cada acción es un archivo propio en <code>actions</code>, así que se puede guardar en una copia de seguridad o enviar a alguien. Las acciones integradas no se escriben ahí: cambiar una guarda solo lo que has cambiado, y restablecerla lo borra. Una acción se guarda por su cuenta, no con el botón Guardar de abajo.
+settings-write-action = Nueva acción
+settings-actions-detail = Cada acción es un archivo suyo en <code>actions</code>: puedes guardarla como copia o enviársela a alguien.
 settings-action-changed = Cambiada
 settings-action-yours = Tuya
+settings-action-unsaved = sin guardar
 settings-action-edit = Editar
 settings-action-reset = Restablecer
 settings-action-delete = Eliminar
-settings-action-name = Nombre — lo que lista la paleta
+settings-action-name = Nombre
 settings-action-name-example = Reescribir en llano
-settings-action-model = Modelo — déjalo en el valor por defecto salvo que esta acción necesite uno propio
-settings-action-model-default = Lo que digan los valores por defecto
-settings-action-hotkey = Atajo — ejecuta esta acción sobre lo que tengas seleccionado, sin pasar por la paleta
-settings-action-accepts = Se ejecuta sobre — lo que hay que tener seleccionado para que se ofrezca esta acción
+settings-action-model = Modelo
+settings-action-model-default = Por defecto
+settings-action-hotkey = Atajo
+settings-action-accepts = Se ejecuta sobre
 settings-action-accepts-text = Texto
 settings-action-accepts-image = Imágenes
-settings-action-accepts-detail = Al menos uno; si no, nada podría ofrecer esta acción. Una imagen viaja junto al prompt y no dentro de él, así que una que solo acepta imágenes no tiene nada que poner donde iría el texto.
+settings-action-accepts-detail = Elige al menos uno. La imagen viaja junto al prompt y no dentro de él, así que con una imagen {"{{"}selection{"}}"} queda vacío.
 settings-action-prompt = Prompt
 settings-action-prompt-example =
     Explica el texto de abajo. El texto está en {"{{"}selection_language{"}}"}; responde en {"{{"}ui_language{"}}"}.
 
     {"{{"}selection{"}}"}
-settings-action-prompt-detail = <code>{"{{"}selection{"}}"}</code> es lo que has seleccionado; <code>{"{{"}ui_language{"}}"}</code> y <code>{"{{"}selection_language{"}}"}</code> son el idioma en el que lees y aquel en el que resultó estar. Cualquier otra cosa entre llaves dobles es un parámetro, que la paleta pide antes de la ejecución: decláralo abajo.
+settings-action-prompt-detail = <code>{"{{"}selection{"}}"}</code> es lo que has seleccionado. <code>{"{{"}ui_language{"}}"}</code> es el idioma en que lees, <code>{"{{"}selection_language{"}}"}</code> el del propio texto. Cualquier otra cosa entre llaves dobles es un parámetro.
 settings-parameters = Parámetros
-settings-declare-parameter = Declarar un parámetro
+settings-declare-parameter = Añadir un parámetro
 settings-remove-parameter = Quitar
-settings-no-parameters = Ninguno. Esta acción se ejecuta en cuanto se elige.
+settings-no-parameters = Ninguno — esta acción se ejecuta nada más elegirla.
+settings-parameter-id = Nombre
+settings-parameter-label = Pregunta
+settings-parameter-default = Por defecto
 settings-parameter-id-example = target
 settings-parameter-label-example = ¿A qué idioma?
-settings-parameter-default-example = Lo que ofrece
-settings-save-action = Guardar esta acción
+settings-save-action = Guardar la acción
 settings-cancel = Cancelar
-settings-reset-by-saving = Guardarla sin haber cambiado nada devuelve la integrada.
+settings-reset-by-saving = Guardar sin cambios devuelve la acción integrada.
 
 ## The first run
 #
@@ -258,28 +260,28 @@ welcome-back = Atrás
 welcome-continue = Continuar
 welcome-finish = Empezar a usar Demysto
 welcome-language-title = Demysto ha encontrado tu idioma
-welcome-language-detail = Este es el idioma en el que lees según tu sistema operativo. Cámbialo aquí si no es así, y vuelve a cambiarlo en los ajustes cuando quieras.
+welcome-language-detail = Tu sistema dice que lees en este idioma. Cámbialo aquí, o más tarde en los ajustes.
 welcome-provider-title = De dónde vienen las respuestas
-welcome-provider-detail = Demysto le pregunta a un modelo que eliges tú, con tu propia cuenta. Elige el servicio, pega la clave que te dio y pregúntale qué modelos ofrece.
-welcome-provider-model = El modelo al que pregunta Demysto salvo que una acción diga otra cosa
-welcome-provider-verify-first = La clave se le presenta al proveedor antes de terminar este paso, para que una equivocada se descubra ahora y no en tu primera pregunta.
+welcome-provider-detail = Demysto pregunta a un modelo con tu propia cuenta. Elige el servicio, pega su clave y pide los modelos que ofrece.
+welcome-provider-model = Modelo por defecto
+welcome-provider-verify-first = Verifica la clave para continuar: mejor descubrir ahora que es incorrecta que en tu primera pregunta.
 welcome-accessibility-title = Deja que Demysto lea lo que has seleccionado
-welcome-accessibility-detail = Demysto lee una selección enviando la pulsación de copiar a lo que estés leyendo, y macOS lo condiciona al permiso de Accesibilidad. Abre Privacidad y seguridad → Accesibilidad y activa Demysto.
+welcome-accessibility-detail = macOS solo permite leer lo seleccionado con el permiso de Accesibilidad. Abre Privacidad y seguridad → Accesibilidad y activa Demysto.
 welcome-open-accessibility = Abrir los ajustes de Accesibilidad
-welcome-accessibility-later = Demysto le pregunta esto a macOS en cada ejecución, así que concederlo más tarde funciona igual de bien. Vuelve a pedirse después de una actualización, que para macOS es otra aplicación.
+welcome-accessibility-later = Puedes concederlo más tarde: Demysto lo pide en cada ejecución. Tras una actualización macOS vuelve a pedirlo, porque lo trata como otra aplicación.
 welcome-autostart-title = Iniciar Demysto al iniciar sesión
-welcome-autostart-detail = Demysto espera en la bandeja a que pulses el atajo, así que solo puede responder mientras se está ejecutando. No se registra nada si no lo pides aquí, y los ajustes de tu sistema pueden quitarlo de nuevo.
+welcome-autostart-detail = Demysto espera en la bandeja y solo responde mientras está en marcha.
 welcome-autostart-choice = Iniciarlo al iniciar sesión
 welcome-done-title = Eso es todo
-welcome-done-detail = Selecciona texto en cualquier sitio y pulsa { $hotkey }. La paleta se abre junto al cursor con lo que Demysto puede hacer con él, e Intro ejecuta lo que esté resaltado.
-welcome-done-clipboard = Copia texto con Ctrl+C y pulsa después { $hotkey }. La paleta se abre junto al cursor con lo que Demysto puede hacer con él, e Intro ejecuta lo que esté resaltado.
-welcome-done-tray = A partir de ahora Demysto espera en la bandeja, y su menú llega a la paleta, a las acciones y a los ajustes: el atajo es el camino rápido, no el único.
+welcome-done-detail = Selecciona texto en cualquier sitio y pulsa { $hotkey }. Junto al cursor se abre una lista de acciones; Enter ejecuta la resaltada.
+welcome-done-clipboard = Copia texto con Ctrl+C y pulsa { $hotkey }. Junto al cursor se abre una lista de acciones; Enter ejecuta la resaltada.
+welcome-done-tray = A partir de ahora Demysto espera en la bandeja, y su menú llega a todo lo que llega el atajo.
 
 ## What an update could not do
 
 update-refused = Demysto no ha podido preguntar si hay una versión nueva: { $detail }
 update-install-refused = La actualización no se ha podido instalar: { $detail }
-update-nothing-found = No hay ninguna actualización que instalar: busca antes una versión nueva.
+update-nothing-found = No hay nada que instalar: busca actualizaciones primero.
 
 ## What the login items would not do
 
@@ -290,21 +292,21 @@ autostart-refused = Demysto no ha podido cambiar si se inicia al iniciar sesión
 # The Palette and Settings say these; the core reports which one happened and
 # leaves the sentence to whoever is on screen.
 
-capture-clipboard-only = Esta es una sesión de Wayland, y Wayland no deja que una aplicación escriba en otra. Demysto no puede leer lo que has seleccionado: cópialo tú con Ctrl+C, pulsa después el atajo y Demysto leerá el portapapeles.
+capture-clipboard-only = Wayland no deja que una aplicación escriba en otra, así que Demysto no puede leer lo que seleccionaste. Cópialo con Ctrl+C y pulsa el atajo.
 capture-clipboard-unavailable = El portapapeles no está disponible: { $detail }
 capture-keystroke-refused = No se ha podido enviar la pulsación de copiar: { $detail }
-capture-no-accessibility = macOS no deja que Demysto lea lo que has seleccionado: Demysto necesita el permiso de Accesibilidad. Abre Privacidad y seguridad → Accesibilidad y activa Demysto.
-capture-picture-unreadable = El portapapeles tiene una imagen que Demysto no ha podido leer. Cópiala otra vez, o copia otra distinta.
+capture-no-accessibility = macOS no deja que Demysto lea lo que seleccionaste sin el permiso de Accesibilidad. Abre Privacidad y seguridad → Accesibilidad y activa Demysto.
+capture-picture-unreadable = Demysto no pudo leer la imagen del portapapeles. Cópiala otra vez, o copia otra.
 accessibility-pane-unreachable = Demysto no ha podido abrir Ajustes del Sistema: { $detail }. El permiso está en Privacidad y seguridad → Accesibilidad.
-accessibility-only-macos = Solo macOS pide un permiso antes de que Demysto pueda leer lo que has seleccionado.
+accessibility-only-macos = Solo macOS pide un permiso antes de que Demysto pueda leer lo que seleccionaste.
 
 ## What stopped a Run
 
-run-nothing-to-run = No hay nada sobre lo que ejecutar una acción: selecciona un texto, o cópialo, y pulsa el atajo otra vez.
-run-no-conversation = No hay ninguna conversación en la que preguntar esto. Pulsa el atajo para empezar una.
-run-conversation-sealed = La imagen de la que trata esta conversación ya se ha soltado, así que no queda nada sobre lo que preguntar. Cópiala y pulsa el atajo para empezar una conversación nueva.
-run-no-such-action = No hay ninguna acción llamada «{ $action }». Puede que la hayan quitado desde que se abrió la paleta; pulsa el atajo otra vez.
-run-nothing-to-retry = No hay ningún turno que repetir. Vuelve a hacer la pregunta para empezar uno nuevo.
+run-nothing-to-run = No hay sobre qué ejecutar una acción. Selecciona o copia texto y vuelve a pulsar el atajo.
+run-no-conversation = No hay ningún chat en el que preguntar esto. Pulsa el atajo para empezar uno.
+run-conversation-sealed = La imagen de este chat ya no se conserva. Cópiala y pulsa el atajo para empezar un chat nuevo.
+run-no-such-action = No hay ninguna acción llamada «{ $action }»: puede que la hayan quitado. Vuelve a pulsar el atajo.
+run-nothing-to-retry = No hay nada que reintentar. Vuelve a hacer la pregunta.
 
 # The one warning a Conversation carries, said before the Model is asked so that
 # it is on screen while the answer is still being paid for.
@@ -354,12 +356,12 @@ provider-timed-out =
        *[other] { $seconds } segundos
     }, así que Demysto ha dejado de esperar.
 provider-unreachable = No se ha podido contactar con { $provider }: { $detail }
-provider-went-quiet = { $provider } se ha quedado callado a media respuesta, así que Demysto ha dejado de esperar.
+provider-went-quiet = { $provider } se quedó callado a mitad de la respuesta.
 provider-stopped-answering = { $provider } ha dejado de responder a media respuesta: { $detail }
 provider-closed-early = { $provider } ha cerrado la conexión antes de terminar la respuesta.
 provider-refused = El proveedor ha rechazado la petición (HTTP { $status }).
 provider-refused-saying = El proveedor ha rechazado la petición (HTTP { $status }): { $detail }
-provider-malformed = La respuesta del proveedor no era una que Demysto pudiera leer ({ $reason }): { $body }
+provider-malformed = Demysto no pudo leer la respuesta del proveedor ({ $reason }): { $body }
 provider-no-answer-in-it = no contiene ninguna respuesta
 
 ## What an Action could not be made into
@@ -367,15 +369,15 @@ provider-no-answer-in-it = no contiene ninguna respuesta
 action-file-preamble = # Una acción que ejecuta Demysto. Edítala aquí, o en los ajustes de Demysto.
 action-needs-name = Una acción necesita un nombre bajo el que aparecer en la lista.
 action-needs-prompt = Una acción necesita un prompt: lo que le dice al modelo, con {"{{"}selection{"}}"} donde va la selección.
-action-accepts-nothing = Una acción que no acepta ningún tipo de selección nunca podría aparecer en la paleta.
+action-accepts-nothing = Una acción que no acepta nada nunca podría ofrecerse. Elige al menos un tipo de selección.
 action-parameter-needs-name = Un parámetro necesita un nombre para poder escribirse como {"{{"}like_this{"}}"} en el prompt.
-action-parameter-reserved = Un parámetro no puede llamarse «{ $parameter }»: así es como un prompt alcanza algo que rellena el propio Demysto, de modo que nadie llegaría a pedirlo nunca.
-action-parameter-needs-label = El parámetro «{ $parameter }» necesita una etiqueta, que es con lo que la paleta lo pide.
+action-parameter-reserved = Un parámetro no puede llamarse «{ $parameter }»: ese lo rellena Demysto.
+action-parameter-needs-label = El parámetro «{ $parameter }» necesita una pregunta con la que pedirlo.
 action-parameter-twice = Dos parámetros se llaman «{ $parameter }», así que {"{{"}{ $parameter }{"}}"} en el prompt podría ser cualquiera de los dos.
 action-binds-nothing-configured = Esta acción ata el modelo «{ $model }», y no hay ningún modelo configurado.
 action-binds-unknown-model = Esta acción ata el modelo «{ $model }», y ningún proveedor ofrece uno con ese nombre. Los modelos configurados son: { $models }.
 action-id-not-a-file-name = «{ $action }» no puede ser el nombre de un archivo, así que no se puede guardar ninguna acción con él.
-action-none-to-remove = No hay ninguna acción llamada «{ $action }» que quitar. Puede que ya se haya eliminado; vuelve a abrir esta ventana.
+action-none-to-remove = No hay ninguna acción llamada «{ $action }» que quitar: puede que ya no exista. Vuelve a abrir esta ventana.
 action-file-newer-version = { $path } dice ser de la versión { $stated }, y este Demysto entiende la versión { $understood }. Actualiza Demysto, o saca el archivo de ese directorio.
 action-file-states-no-field = { $path } no indica { $field }. Una acción que Demysto no tenga ya debe indicar su nombre y su plantilla.
 action-file-unreadable = No se ha podido leer { $path }: { $detail }
@@ -388,33 +390,33 @@ action-file-invalid = { $path } no es una acción válida: { $detail }
 ## Hotkeys the desktop would not give up
 
 hotkey-palette-fell-back = { $why } Demysto está usando { $hotkey } en su lugar.
-hotkey-palette-unclaimable = Demysto no ha podido reservar { $hotkey }, el atajo que abre la paleta: { $detail }. Puede que ya lo tenga otra aplicación. El menú de la bandeja llega a todo lo que llega el atajo.
-hotkey-palette-not-a-combination = Los ajustes indican el atajo «{ $hotkey }» para la paleta, y no es una combinación que Demysto entienda.
-hotkey-palette-types-something = Los ajustes indican el atajo «{ $hotkey }» para la paleta, y es una sola tecla que escribe algo. Un atajo se reserva en todo el sistema, así que una tecla sola tiene que ser una que no llegue a aquello en lo que estabas escribiendo.
-hotkey-palette-refused = Los ajustes indican el atajo «{ $hotkey }» para la paleta, y Demysto no ha podido reservarlo: { $detail }. Puede que ya lo tenga otra aplicación.
-hotkey-action-not-a-combination = { $action } indica el atajo «{ $hotkey }», y no es una combinación que Demysto entienda. Un atajo son sus modificadores y después una tecla, escrito como «Ctrl+Shift+E».
-hotkey-action-types-something = { $action } indica el atajo «{ $hotkey }», y es una sola tecla que escribe algo. Un atajo se reserva en todo el sistema, así que una tecla sola tiene que ser una que no llegue a aquello en lo que estabas escribiendo: Pause, ScrollLock, PrintScreen, F13 y superiores, o una tecla de volumen o de reproducción. Cualquier otra necesita un modificador.
+hotkey-palette-unclaimable = Demysto no pudo reservar { $hotkey }, que abre la lista de acciones: { $detail }. Puede que ya lo tenga otra aplicación. El menú de la bandeja llega a todo lo que llega el atajo.
+hotkey-palette-not-a-combination = Los ajustes indican el atajo «{ $hotkey }», que Demysto no entiende. Un atajo son sus modificadores y luego una tecla, escrito como «Ctrl+Shift+E».
+hotkey-palette-types-something = Los ajustes indican el atajo «{ $hotkey }», que es una sola tecla que escribe. Añade Ctrl, Alt o Shift: sola dejaría de escribirse en todas partes.
+hotkey-palette-refused = Demysto no pudo reservar el atajo «{ $hotkey }» que indican los ajustes: { $detail }. Puede que ya lo tenga otra aplicación.
+hotkey-action-not-a-combination = { $action } indica el atajo «{ $hotkey }», que Demysto no entiende. Un atajo son sus modificadores y luego una tecla, escrito como «Ctrl+Shift+E».
+hotkey-action-types-something = { $action } indica el atajo «{ $hotkey }», que es una sola tecla que escribe. Añade Ctrl, Alt o Shift: sola dejaría de escribirse en todas partes.
 hotkey-action-already-held = { $action } indica el atajo «{ $hotkey }», y { $holder } ya lo tiene. Solo { $holder } responde a él; dale otro a { $action }.
-hotkey-action-refused = { $action } indica el atajo «{ $hotkey }», y Demysto no ha podido reservarlo: { $detail }. Puede que ya lo tenga otra aplicación.
-hotkey-palette-holder = la paleta
+hotkey-action-refused = { $action } indica el atajo «{ $hotkey }», y Demysto no pudo reservarlo: { $detail }. Puede que ya lo tenga otra aplicación.
+hotkey-palette-holder = la lista de acciones
 
 ## What a Wayland desktop made of the Hotkeys it was asked for
 
-portal-palette-description = Demysto — abrir la paleta
+portal-palette-description = Demysto — abrir la lista de acciones
 portal-action-description = Demysto — { $action }
 portal-not-taken-yet = El escritorio todavía no ha tomado un atajo para { $wanted }, así que aún no responde nada. Demysto lo está pidiendo otra vez.
 portal-not-taken = El escritorio no ha tomado un atajo para { $wanted }, así que no responde nada. Los atajos de Demysto se asignan en los ajustes de atajos de teclado del escritorio.
 portal-held-under-nothing = El escritorio guarda un atajo para { $wanted } sin ninguna combinación, así que aún no responde nada. Dale una en los ajustes de atajos de teclado del propio escritorio.
 portal-stopped-answering = El portal GlobalShortcuts del escritorio ha dejado de responder, así que tampoco responde ningún atajo. Reiniciar Demysto vuelve a pedirlos; mientras tanto, el menú de la bandeja llega a todo lo que llega el atajo.
-portal-asking-again = Así se ve un escritorio que todavía está arrancando: toma la petición de un atajo y se la da a nada, o no la responde nunca. Demysto sigue pidiendo unos minutos, y después deja al escritorio en paz.
-portal-taken-in-the-end = El escritorio ha tomado los atajos que Demysto pedía cuando se le ha preguntado otra vez.
+portal-asking-again = Así se ve un escritorio que todavía está arrancando: acepta la petición de un atajo y no se lo da a nada. Demysto sigue pidiéndolos unos minutos.
+portal-taken-in-the-end = El escritorio aceptó los atajos cuando se le pidió de nuevo.
 portal-asked-enough =
     Demysto ha pedido sus atajos al escritorio { $asked ->
         [one] una vez
        *[other] { $asked } veces
     } a lo largo de varios minutos, y no los ha tomado todos. No los volverá a pedir hasta que se reinicie Demysto: los atajos de Demysto se asignan en los ajustes de atajos de teclado del propio escritorio, y el menú de la bandeja llega a todo lo que llega el atajo.
 portal-refused = El escritorio no le ha dado a Demysto los atajos que ha pedido: { $detail }. Hasta que lo haga no responde nada a ninguno: se asignan en sus ajustes de atajos de teclado, y el menú de la bandeja llega a todo lo que llega el atajo.
-portal-unreachable = Esta es una sesión de Wayland, donde Demysto tiene que pedirle un atajo al portal GlobalShortcuts del escritorio, y no ha podido alcanzar ninguno: { $detail }. No responde ningún atajo. El portal viene con xdg-desktop-portal, en KDE y en GNOME a partir de la versión 48. El menú de la bandeja llega a todo lo que llega el atajo.
+portal-unreachable = Demysto no pudo alcanzar el portal GlobalShortcuts del escritorio, así que ningún atajo responde: { $detail }. Llega con xdg-desktop-portal, en KDE y en GNOME desde la versión 48. El menú de la bandeja llega a todo lo que llega el atajo.
 
 ## The log folder
 
@@ -462,11 +464,11 @@ settings-file-preamble =
     # `default_model` es a lo que se reduce una acción que no ata ningún modelo
     # propio, y `default_vision_model` es a lo que se reduce para una imagen.
     #
-    # `palette_hotkey` es la combinación de teclas que abre la paleta. Déjalo fuera
-    # para usar la que trae Demysto. Se escribe como sus modificadores y después una
-    # tecla — "Ctrl+Alt+Space" —, y una tecla que no escribe nada, como F13, puede ir
-    # sola. La ventana de ajustes graba una por ti si prefieres pulsarla a
-    # deletrearla.
+    # `palette_hotkey` es la combinación de teclas que abre la lista de acciones.
+    # Déjalo fuera para usar la que trae Demysto. Se escribe como sus modificadores
+    # y después una tecla — "Ctrl+Alt+Space". Una tecla que no escribe nada —de
+    # volumen o de reproducción, o F13 y superiores— puede ir sola. La ventana de
+    # ajustes graba una por ti si prefieres pulsarla a deletrearla.
     #
     # `language` es el idioma en el que habla Demysto: "en", "de", "es", "fr" o "ru".
     # Déjalo fuera y Demysto sigue al sistema operativo, recurriendo al inglés.

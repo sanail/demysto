@@ -676,7 +676,7 @@
           <!-- Nothing left to show: the exchange below reads exactly as it did,
                and this is where the picture was. -->
           <p class="text-sm opacity-50">
-            {t("result-picture-let-go", { dimensions: showing.preview ?? "" })}
+            {t("result-picture-let-go")}
           </p>
         {:else}
           {#if shown}

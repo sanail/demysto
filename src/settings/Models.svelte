@@ -3,7 +3,7 @@
   import { providerModels, verifyProvider, type Preset } from "../lib/ipc";
   import { t } from "../lib/i18n.svelte";
   import { saidBy } from "../lib/sending";
-  import { edited, fresh, type Draft } from "./drafts";
+  import { edited, fresh, type Asked, type Draft } from "./drafts";
   import { BUTTON, FIELD } from "./style";
 
   let {
@@ -130,7 +130,7 @@
   /** Fills in what a preset knows, so that picking one is the whole of setup. */
   function picked(draft: Draft) {
     draft.offered = null;
-    draft.said = null;
+    draft.said = { models: null, key: null };
 
     // Only into a name nobody has typed over: a Provider called something of
     // the user's own is not renamed by their changing its service.
@@ -156,41 +156,59 @@
   /** Asks a Provider what it offers, as this window has it rather than as the
       file holds it: the commonest moment to want the list is before saving. */
   async function askForModels(draft: Draft) {
-    draft.asking = true;
-    draft.said = null;
+    draft.asking = "models";
+    draft.said.models = null;
 
     try {
       draft.offered = await providerModels(edited(draft));
 
       if (draft.offered.length === 0) {
-        draft.said = { well: false, message: t("settings-provider-offers-nothing") };
+        draft.said.models = {
+          well: false,
+          message: t("settings-provider-offers-nothing"),
+        };
       }
     } catch (error) {
-      draft.said = { well: false, message: saidBy(error) };
+      draft.said.models = { well: false, message: saidBy(error) };
     } finally {
-      draft.asking = false;
+      draft.asking = null;
     }
   }
 
   /** Puts the smallest real request to a Provider, to learn now rather than at
       the first Run whether the key works (user story 42). */
   async function verify(draft: Draft) {
-    draft.asking = true;
-    draft.said = null;
+    draft.asking = "key";
+    draft.said.key = null;
 
     try {
       await verifyProvider(edited(draft), draft.trying);
-      draft.said = {
+      draft.said.key = {
         well: true,
         message: t("settings-provider-answered", { model: draft.trying }),
       };
     } catch (error) {
-      draft.said = { well: false, message: saidBy(error) };
+      draft.said.key = { well: false, message: saidBy(error) };
     } finally {
-      draft.asking = false;
+      draft.asking = null;
     }
   }
 </script>
+
+{#snippet answer(draft: Draft, asked: Asked)}
+  {@const said = draft.said[asked]}
+  {#if draft.asking === asked}
+    <p class="text-xs opacity-50">{t("settings-asking-provider")}</p>
+  {:else if said}
+    <p
+      class="text-xs {said.well
+        ? 'text-green-700 dark:text-green-400'
+        : 'text-red-600 dark:text-red-400'}"
+    >
+      {said.message}
+    </p>
+  {/if}
+{/snippet}
 
 <section class="flex flex-col gap-3">
   <div class="flex items-baseline justify-between gap-3">
@@ -328,8 +346,12 @@
             bind:value={draft.typed}
             oninput={() => (draft.forgetting = false)}
             class={FIELD}
-            placeholder={about(draft)}
           />
+          <!-- The state of the key is a line of its own and not the field's
+               placeholder: the longest of the five does not fit a field this
+               wide, and a placeholder goes the moment somebody types — which
+               is the moment "held in the settings file" is worth reading. -->
+          <span class="text-xs opacity-50">{about(draft)}</span>
         </label>
 
         <label class="flex flex-col gap-1">
@@ -370,18 +392,10 @@
             <button
               type="button"
               class={BUTTON}
-              disabled={draft.asking}
+              disabled={draft.asking !== null}
               onclick={() => askForModels(draft)}
             >
               {t("settings-fetch-models")}
-            </button>
-            <button
-              type="button"
-              class={BUTTON}
-              disabled={draft.asking || draft.trying === ""}
-              onclick={() => verify(draft)}
-            >
-              {t("settings-verify-key")}
             </button>
           </div>
         </div>
@@ -400,16 +414,6 @@
                 {t("settings-model-sees-images")}
               </label>
 
-              <label class="flex items-center gap-1 text-xs opacity-70">
-                <input
-                  type="radio"
-                  name="verifying-{at}"
-                  value={model.id}
-                  bind:group={draft.trying}
-                />
-                {t("settings-model-verify-with")}
-              </label>
-
               <button
                 type="button"
                 class={BUTTON}
@@ -423,27 +427,7 @@
           {/each}
         </ul>
 
-        <!-- Removing a Provider is on its row and not here, where it used to
-             sit beside "Add a Model": the row is where a Provider is picked
-             out of the others, and it is the one place a Provider that is not
-             open can be got rid of. -->
-        <div class="flex gap-2">
-          <button type="button" class={BUTTON} onclick={() => offer(draft, "")}>
-            {t("settings-add-model")}
-          </button>
-        </div>
-
-        {#if draft.asking}
-          <p class="text-xs opacity-50">{t("settings-asking-provider")}</p>
-        {:else if draft.said}
-          <p
-            class="text-xs {draft.said.well
-              ? 'text-green-700 dark:text-green-400'
-              : 'text-red-600 dark:text-red-400'}"
-          >
-            {draft.said.message}
-          </p>
-        {/if}
+        {@render answer(draft, "models")}
 
         {#if draft.offered && draft.offered.length > 0}
           <ul class="flex max-h-32 flex-wrap gap-1 overflow-y-auto">
@@ -462,6 +446,54 @@
             {/each}
           </ul>
         {/if}
+
+        <!-- Removing a Provider is on its row and not here, where it used to
+             sit beside "Add a Model": the row is where a Provider is picked
+             out of the others, and it is the one place a Provider that is not
+             open can be got rid of. -->
+        <div class="flex gap-2">
+          <button type="button" class={BUTTON} onclick={() => offer(draft, "")}>
+            {t("settings-add-model")}
+          </button>
+        </div>
+
+        <!-- Verifying the key is not one more thing to do to the list above, and
+             a row it shared with "Add a Model" read as though it were. It is
+             about the key: a key is proved by a real request (ADR-0008), which
+             is why it needs a Model named at all, and the Model it names is the
+             only reason it stands down here rather than beside the key field.
+             The rule above it is what says the two are different things.
+
+             The Model stands beside the button rather than as a radio on every
+             Model's row, which was the one place that never said what it was
+             for. It is also the shape the first-run window already asks in. -->
+        <div
+          class="flex flex-wrap items-center gap-2 border-t border-neutral-200
+                 pt-3 dark:border-neutral-700"
+        >
+          <select
+            bind:value={draft.trying}
+            aria-label={t("settings-verify-which-model")}
+            class="{FIELD} max-w-48 truncate"
+          >
+            <option value="">{t("settings-verify-which-model")}</option>
+            {#each draft.models.filter((model) => model.id !== "") as model, index (index)}
+              <option value={model.id}>{model.id}</option>
+            {/each}
+          </select>
+
+          <button
+            type="button"
+            class={BUTTON}
+            disabled={draft.asking !== null || draft.trying === ""}
+            onclick={() => verify(draft)}
+          >
+            {t("settings-verify-key")}
+          </button>
+        </div>
+
+        {@render answer(draft, "key")}
+
       </div>
     </article>
   {/if}

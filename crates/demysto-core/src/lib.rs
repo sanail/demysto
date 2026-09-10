@@ -4783,7 +4783,7 @@ mod tests {
             },
         );
 
-        assert!(why.contains("Palette"), "{why}");
+        assert!(why.contains("at least one"), "{why}");
     }
 
     #[test]
@@ -5091,7 +5091,7 @@ mod tests {
         // asked for: the template's own variables are answered first.
         assert!(refused(&demysto, &declaring("selection", "Which?")).contains("selection"));
         assert!(refused(&demysto, &declaring("reader", "Which?")).contains("Two Parameters"));
-        assert!(refused(&demysto, &declaring("tone", "  ")).contains("label"));
+        assert!(refused(&demysto, &declaring("tone", "  ")).contains("question"));
         assert!(refused(&demysto, &declaring(" ", "Which?")).contains("Parameter"));
     }
 
@@ -6258,7 +6258,7 @@ mod tests {
         assert!(
             outcome
                 .error()
-                .is_some_and(|error| error.message().contains("let go of")),
+                .is_some_and(|error| error.message().contains("no longer kept")),
             "{outcome:?}"
         );
         assert_eq!(
@@ -6545,7 +6545,7 @@ mod tests {
         };
 
         assert!(!demysto.about_to_follow_up("and the axis labels?"));
-        assert!(error.message().contains("let go of"), "{error}");
+        assert!(error.message().contains("no longer kept"), "{error}");
         endpoint.assert();
     }
 

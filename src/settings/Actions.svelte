@@ -11,7 +11,7 @@
   import { reading } from "../lib/hotkey";
   import { spokenTag, t } from "../lib/i18n.svelte";
   import { saidBy } from "../lib/sending";
-  import type { Editing } from "./drafts";
+  import { changed, type Editing } from "./drafts";
   import { BUTTON, FIELD } from "./style";
 
   let {
@@ -342,8 +342,7 @@
           </button>
         </div>
         <p id="action-hotkey-rule" class="text-xs opacity-50">
-          {t("settings-hotkey-rule")}
-          {t("settings-action-hotkey-detail")}
+          {t("settings-action-hotkey-rule")}
         </p>
       </div>
 
@@ -415,25 +414,43 @@
 
         <ul class="flex flex-col gap-1">
           {#each editing.draft.parameters as parameter, at (at)}
-            <li class="flex items-center gap-2">
-              <input
-                bind:value={parameter.id}
-                class="{FIELD} flex-1 font-mono text-xs"
-                autocorrect="off"
-                placeholder={t("settings-parameter-id-example")}
-              />
-              <input
-                bind:value={parameter.label}
-                class="{FIELD} flex-1"
-                autocorrect="off"
-                placeholder={t("settings-parameter-label-example")}
-              />
-              <input
-                bind:value={parameter.default}
-                class="{FIELD} flex-1"
-                autocorrect="off"
-                placeholder={t("settings-parameter-default-example")}
-              />
+            <li class="flex items-end gap-2">
+              <!-- Labelled, and not told apart by their placeholders alone: a
+                   placeholder goes the moment somebody types into the field,
+                   and three fields in a row that no longer say which is which
+                   is the state this block spent most of its life in. -->
+              <label class="flex flex-1 flex-col gap-1">
+                <span class="text-xs opacity-60">
+                  {t("settings-parameter-id")}
+                </span>
+                <input
+                  bind:value={parameter.id}
+                  class="{FIELD} font-mono text-xs"
+                  autocorrect="off"
+                  placeholder={t("settings-parameter-id-example")}
+                />
+              </label>
+              <label class="flex flex-1 flex-col gap-1">
+                <span class="text-xs opacity-60">
+                  {t("settings-parameter-label")}
+                </span>
+                <input
+                  bind:value={parameter.label}
+                  class={FIELD}
+                  autocorrect="off"
+                  placeholder={t("settings-parameter-label-example")}
+                />
+              </label>
+              <label class="flex flex-1 flex-col gap-1">
+                <span class="text-xs opacity-60">
+                  {t("settings-parameter-default")}
+                </span>
+                <input
+                  bind:value={parameter.default}
+                  class={FIELD}
+                  autocorrect="off"
+                />
+              </label>
               <button
                 type="button"
                 class={BUTTON}
@@ -464,6 +481,16 @@
         <button type="button" class={BUTTON} onclick={stopEditing}>
           {t("settings-cancel")}
         </button>
+        <!-- Said beside the button that writes it, and not as a dot on the tab:
+             the tab's dot is what the other two panels use for "press Save
+             below", and the Save button below does not write an Action. Here it
+             also reaches an Action being written for the first time, which has
+             no row of its own in the list above to be marked on. -->
+        {#if changed(editing)}
+          <span class="text-xs opacity-60">
+            {t("settings-action-unsaved")}
+          </span>
+        {/if}
         {#if editing.standing === "overridden"}
           <span class="text-xs opacity-50">{t("settings-reset-by-saving")}</span>
         {/if}

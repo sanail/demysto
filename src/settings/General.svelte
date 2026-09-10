@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { Exported } from "../lib/ipc";
   import { reading } from "../lib/hotkey";
   import { LANGUAGES } from "../lib/languages";
@@ -40,8 +41,37 @@
     autostartWanted: boolean;
     /** What the system said the last time it would not change them. */
     autostartProblem: string | null;
-    onAutostart: (wanted: boolean) => void;
+    /** Changes the login items, answering whether the system did it. */
+    onAutostart: (wanted: boolean) => Promise<boolean>;
   } = $props();
+
+  /** How long the box says it took effect, which is the Save button's own. */
+  const ACKNOWLEDGED = 1600;
+
+  let autostartDone = $state(false);
+  let acknowledging: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Ticks the box and says so.
+   *
+   * This one field acts as it is ticked rather than waiting for Save, and until
+   * it said as much the only way to learn that was the sentence under it. The
+   * system's own answer is what is acknowledged, not the click: a refusal
+   * leaves the box where it was and puts its reason below instead.
+   */
+  async function autostart(wanted: boolean) {
+    if (acknowledging) clearTimeout(acknowledging);
+    autostartDone = false;
+
+    if (!(await onAutostart(wanted))) return;
+
+    autostartDone = true;
+    acknowledging = setTimeout(() => (autostartDone = false), ACKNOWLEDGED);
+  }
+
+  onDestroy(() => {
+    if (acknowledging) clearTimeout(acknowledging);
+  });
 
   /** Takes the Palette back to the Hotkey Demysto comes with. */
   function unbindPalette() {
@@ -67,8 +97,6 @@
         {/each}
       </select>
     </label>
-
-    <span class="text-xs opacity-50">{t("settings-language-detail")}</span>
 
     {#if languageFixed}
       <!-- Said where the field is, for the reason a key found in a variable
@@ -175,8 +203,7 @@
         </button>
       </div>
       <p id="palette-hotkey-rule" class="text-xs opacity-50">
-        {t("settings-hotkey-rule")}
-        {t("settings-palette-hotkey-detail")}
+        {t("settings-palette-hotkey-rule")}
       </p>
     </div>
   {/if}
@@ -191,16 +218,26 @@
     {t("settings-autostart")}
   </h2>
 
-  <p class="text-xs opacity-50">{t("settings-autostart-detail")}</p>
+  <div class="flex items-center gap-2">
+    <label class="flex items-center gap-2 text-sm">
+      <input
+        type="checkbox"
+        checked={autostartWanted}
+        onchange={(event) => autostart(event.currentTarget.checked)}
+      />
+      {t("settings-autostart-choice")}
+    </label>
 
-  <label class="flex items-center gap-2 text-sm">
-    <input
-      type="checkbox"
-      checked={autostartWanted}
-      onchange={(event) => onAutostart(event.currentTarget.checked)}
-    />
-    {t("settings-autostart-choice")}
-  </label>
+    <!-- Drawn empty rather than left out, so that the live region is already
+         there when it has something to say. -->
+    <span role="status" class="text-xs opacity-50">
+      {autostartDone ? t("settings-autostart-changed") : ""}
+    </span>
+  </div>
+
+  <!-- Under the box now that the box says for itself that it took effect:
+       what is left is a footnote about whose list this is. -->
+  <p class="text-xs opacity-50">{t("settings-autostart-detail")}</p>
 
   {#if autostartProblem}
     <p class="text-xs text-red-600 dark:text-red-400">{autostartProblem}</p>

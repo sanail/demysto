@@ -526,7 +526,6 @@
               bind:value={key}
               oninput={changed}
               class={FIELD}
-              placeholder={t("settings-key-missing")}
             />
           </label>
         </div>

@@ -30,7 +30,7 @@
   import Actions from "./Actions.svelte";
   import General from "./General.svelte";
   import Models from "./Models.svelte";
-  import { changed, drafted, edited, type Draft, type Editing } from "./drafts";
+  import { drafted, edited, type Draft, type Editing } from "./drafts";
   import { BUTTON } from "./style";
   import Unreadable from "./Unreadable.svelte";
 
@@ -344,7 +344,7 @@
    * so a save would have nothing of this to write, and a box waiting for one
    * would be a choice with nowhere to land. The sentence below it says so.
    */
-  async function autostartIs(wanted: boolean) {
+  async function autostartIs(wanted: boolean): Promise<boolean> {
     const mine = ++acted;
     const was = autostartWanted;
     autostartWanted = wanted;
@@ -353,10 +353,10 @@
 
     // A click that has been overtaken says nothing about the list any more:
     // the click after it is the answer, and it is still on its way.
-    if (mine !== acted) return;
+    if (mine !== acted) return false;
 
     autostartProblem = refused;
-    if (refused === null) return;
+    if (refused === null) return true;
 
     // What the system says it did, rather than what it was asked for: a
     // refusal leaves the box where it was rather than lying about it. Where
@@ -364,6 +364,8 @@
     // is — and it is the one the user had before they clicked.
     const said = await inTheList();
     if (mine === acted) autostartWanted = said ?? was;
+
+    return false;
   }
 
   /**
@@ -468,7 +470,6 @@
   // the file disagrees with.
   const modelsUnsaved = $derived(savedSettings !== null && ofModels() !== savedModels);
   const generalUnsaved = $derived(savedSettings !== null && ofGeneral() !== savedGeneral);
-  const actionUnsaved = $derived(changed(editing));
 
   /** Whether the Save button below has anything to write. */
   const unsaved = $derived(modelsUnsaved || generalUnsaved);
@@ -483,7 +484,7 @@
   function mark(tab: Tab): "unsaved" | "update" | null {
     if (tab === "models") return modelsUnsaved ? "unsaved" : null;
     if (tab === "general") return generalUnsaved ? "unsaved" : null;
-    if (tab === "actions") return actionUnsaved ? "unsaved" : null;
+    if (tab === "actions") return null;
 
     return newer ? "update" : null;
   }
