@@ -2,6 +2,18 @@
 
 What each release brought, newest first.
 
+## 0.3.1 — 2026-09-11
+
+A release about one picture Windows kept drawing from memory.
+
+### Windows
+
+- The taskbar button of an updated copy shows Demysto's own icon instead of the
+  Tauri one it was installed with. The picture was never in the application —
+  the tray, the window and the file itself all carried the new one — but the
+  shell remembers an icon per application and an update in place never told it
+  otherwise. The installer now does.
+
 ## 0.3.0 — 2026-09-11
 
 ### Actions
