@@ -4429,9 +4429,9 @@ mod tests {
             catalogued(&demysto),
             [
                 "explain",
+                "describe-image",
                 "translate",
                 "summarize",
-                "describe-image",
                 "custom"
             ]
         );
@@ -4587,9 +4587,9 @@ mod tests {
             catalogued(&demysto),
             [
                 "explain",
+                "describe-image",
                 "translate",
                 "summarize",
-                "describe-image",
                 "custom"
             ]
         );
@@ -4633,9 +4633,9 @@ mod tests {
             catalogued(&demysto),
             [
                 "explain",
+                "describe-image",
                 "translate",
                 "summarize",
-                "describe-image",
                 "custom"
             ]
         );
@@ -4866,9 +4866,9 @@ mod tests {
             catalogued(&demysto),
             [
                 "explain",
+                "describe-image",
                 "translate",
                 "summarize",
-                "describe-image",
                 "custom",
                 "explain-2"
             ]
@@ -4930,9 +4930,9 @@ mod tests {
             catalogued(&demysto),
             [
                 "explain",
+                "describe-image",
                 "translate",
                 "summarize",
-                "describe-image",
                 "custom",
                 "rewrite-plainly"
             ]
@@ -5012,9 +5012,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 "explain",
+                "describe-image",
                 "translate",
                 "summarize",
-                "describe-image",
                 "custom",
                 "rewrite-plainly"
             ]
@@ -5151,9 +5151,9 @@ mod tests {
             catalogued(&demysto),
             [
                 "explain",
+                "describe-image",
                 "translate",
                 "summarize",
-                "describe-image",
                 "custom",
                 "объяснить-проще"
             ]
@@ -6306,7 +6306,10 @@ mod tests {
         // where the true answer is "nominate a Model, here".
         let demysto = looking_at(&one_provider("http://127.0.0.1:1"), 8, 6);
 
-        assert_eq!(offered(&demysto), ["Describe image", "Custom…"]);
+        assert_eq!(
+            offered(&demysto),
+            ["Describe image", "Translate", "Custom…"]
+        );
     }
 
     #[test]
@@ -6389,6 +6392,38 @@ mod tests {
         endpoint.assert();
     }
 
+    /// Translate over a picture: the same Action, the same Parameter, and a
+    /// prompt whose second sentence is the whole of what tells the Model which
+    /// of the two it was handed. The text block is empty, so what is left of
+    /// the prompt has to read as something on its own.
+    #[test]
+    fn translating_a_picture_asks_about_the_picture_and_leaves_the_text_empty() {
+        let mut server = Server::new();
+        let endpoint = asked_for(
+            &mut server,
+            vec![
+                Matcher::Regex(
+                    "Translate the text below into Georgian\\. Where nothing follows".to_owned(),
+                ),
+                // And ends there: nothing was substituted under the words.
+                Matcher::Regex("formatting the text already has\\.\\\\n\\\\n\"".to_owned()),
+                Matcher::PartialJson(json!({
+                    "messages": [{
+                        "content": [{ "type": "text" }, { "type": "image_url" }],
+                    }],
+                })),
+            ],
+        );
+
+        running(
+            &ready_to_look(&server, 8, 6),
+            "translate",
+            &[("target", "Georgian")],
+        );
+
+        endpoint.assert();
+    }
+
     /// An Action of the user's own that takes either kind, saved the way the
     /// window that writes Actions saves one.
     fn both_kinds(demysto: &Demysto) {
@@ -6450,7 +6485,7 @@ mod tests {
 
         assert_eq!(
             offered(&looking),
-            ["Describe image", "Custom…", "Read the sign"]
+            ["Describe image", "Translate", "Custom…", "Read the sign"]
         );
 
         let reading = ready_with(&one_provider("http://127.0.0.1:1"), "a paragraph");
@@ -6471,7 +6506,7 @@ mod tests {
 
         assert_eq!(
             offered(&looking),
-            ["Describe image", "Custom…", "Both kinds"]
+            ["Describe image", "Translate", "Custom…", "Both kinds"]
         );
 
         let reading = ready_with(&one_provider("http://127.0.0.1:1"), "a paragraph");

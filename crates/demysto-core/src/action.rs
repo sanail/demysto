@@ -80,6 +80,12 @@ pub struct Parameter {
 ///
 /// Ordered by how often they are reached for rather than alphabetically: the
 /// first is the one Enter runs without the user reading anything.
+///
+/// One order for both kinds of Selection, filtered rather than rewritten, which
+/// is why the Action about pictures is listed ahead of the ones that take
+/// either: over a picture the first of these is what Enter runs, and asking a
+/// picture to be described is what somebody who pressed the Hotkey over one
+/// most often wants.
 pub(crate) fn built_in(words: &Words) -> Vec<Action> {
     vec![
         Action {
@@ -89,6 +95,18 @@ pub(crate) fn built_in(words: &Words) -> Vec<Action> {
             model: None,
             accepts: vec![Kind::Text],
             template: EXPLAIN.to_owned(),
+        },
+        // One Action for pictures and not two. "Read the text in this picture"
+        // is a follow-up Turn in the Conversation that is already open, the
+        // Palette is worth less the longer it gets, and a built-in is ten lines
+        // here plus a message in five catalogues if it turns out to be wanted.
+        Action {
+            id: "describe-image".to_owned(),
+            name: say!(words, "action-describe-image-name"),
+            parameters: Vec::new(),
+            model: None,
+            accepts: vec![Kind::Image],
+            template: DESCRIBE_IMAGE.to_owned(),
         },
         Action {
             id: "translate".to_owned(),
@@ -106,7 +124,11 @@ pub(crate) fn built_in(words: &Words) -> Vec<Action> {
                 default: words.interface().prompt_name().to_owned(),
             }],
             model: None,
-            accepts: vec![Kind::Text],
+            // Both kinds: a sign, a screenshot of a dialogue and a page of a
+            // scan are as much what somebody wants translated as a paragraph
+            // is, and the only thing the two cases need apart is the sentence
+            // the template spends on them.
+            accepts: vec![Kind::Text, Kind::Image],
             template: TRANSLATE.to_owned(),
         },
         Action {
@@ -116,18 +138,6 @@ pub(crate) fn built_in(words: &Words) -> Vec<Action> {
             model: None,
             accepts: vec![Kind::Text],
             template: SUMMARIZE.to_owned(),
-        },
-        // One Action for pictures and not two. "Read the text in this picture"
-        // is a follow-up Turn in the Conversation that is already open, the
-        // Palette is worth less the longer it gets, and a built-in is ten lines
-        // here plus a message in five catalogues if it turns out to be wanted.
-        Action {
-            id: "describe-image".to_owned(),
-            name: say!(words, "action-describe-image-name"),
-            parameters: Vec::new(),
-            model: None,
-            accepts: vec![Kind::Image],
-            template: DESCRIBE_IMAGE.to_owned(),
         },
         // Last, because everything above runs on Enter alone and this one is
         // worth reaching only when the user has something of their own to say.
@@ -284,10 +294,16 @@ answer in {{ui_language}}.
 
 {{selection}}";
 
+/// Its second sentence is what `CUSTOM` below says at greater length and for
+/// the same reason: `{{selection}}` is empty whenever the Selection is a
+/// picture — the picture travels as a content part of its own — and `render`
+/// substitutes rather than branches. So what an empty block means is said in
+/// words, and both cases read as something.
 const TRANSLATE: &str = "\
-Translate the text below into {{target}}. Answer with the translation and \
-nothing else: no commentary, no notes, no transliteration, and no repetition of \
-the original. Keep whatever formatting the text already has.
+Translate the text below into {{target}}. Where nothing follows, translate the \
+text in the image instead. Answer with the translation and nothing else: no \
+commentary, no notes, no transliteration, and no repetition of the original. \
+Keep whatever formatting the text already has.
 
 {{selection}}";
 
