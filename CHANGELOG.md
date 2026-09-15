@@ -2,6 +2,15 @@
 
 What each release brought, newest first.
 
+## 0.3.2 — 2026-09-15
+
+### Actions
+
+- **Translate** takes a picture as well as text. A sign, a screenshot of a
+  dialogue or a page of a scan is translated by the Action that was already
+  there, without writing one. Over a picture the list still opens on **Describe
+  image**, so Enter does what it did.
+
 ## 0.3.1 — 2026-09-11
 
 A release about one picture Windows kept drawing from memory.
