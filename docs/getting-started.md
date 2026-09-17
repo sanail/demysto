@@ -136,7 +136,13 @@ resolution in case the answer missed a detail.
 
 ## Your own Actions
 
-Open **Settings → Actions** and click **New Action**. An Action is:
+Open **Settings → Actions** and click **New Action**.
+
+<p align="center">
+  <img src="images/action-editor.png" width="560" alt="The Action editor in Settings, with a custom Action called Reply politely bound to its own Hotkey">
+</p>
+
+An Action is:
 
 - **Name.** How it appears in the list of Actions.
 - **Prompt.** What the Model is told. Use `{{selection}}` where your selection
