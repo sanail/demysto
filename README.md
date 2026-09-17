@@ -31,6 +31,11 @@ asked about.
   application.
 - **Works on pictures too.** Copy a screenshot, a diagram or a photo of a sign
   and ask about it the same way.
+
+  <p align="center">
+    <img src="docs/images/translate-picture.png" width="440" alt="A German station notice translated into English in a Demysto chat">
+  </p>
+
 - **Keep asking.** Every answer is a chat about your selection, so a follow-up is
   one line of typing, with nothing to paste again.
 - **Custom… for one-off questions.** Type the instruction when none of the
@@ -38,9 +43,9 @@ asked about.
 - **Your own Actions.** A name and a prompt make a new Action. Give the ones you
   use most a Hotkey of their own and skip the list of Actions entirely.
 
-<p align="center">
-  <img src="docs/images/translate-picture.png" width="440" alt="A German station notice translated into English in a Demysto chat">
-</p>
+  <p align="center">
+    <img src="docs/images/action-editor.png" width="480" alt="The Action editor in Settings, with a custom Action called Reply politely bound to its own Hotkey">
+  </p>
 
 ## Why Demysto
 
@@ -56,10 +61,6 @@ asked about.
 - **At home on every desktop.** macOS, Windows, and Linux on both X11 and
   Wayland.
 - **Free and open source,** under the MIT License.
-
-<p align="center">
-  <img src="docs/images/action-editor.png" width="480" alt="The Action editor in Settings, with a custom Action called Reply politely bound to its own Hotkey">
-</p>
 
 ## Get started
 
