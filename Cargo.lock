@@ -920,6 +920,7 @@ dependencies = [
  "futures-util",
  "gdkx11",
  "gtk",
+ "notify-rust",
  "objc2",
  "objc2-app-kit",
  "serde",
@@ -933,6 +934,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tokio",
+ "windows-sys 0.61.2",
  "x11",
 ]
 

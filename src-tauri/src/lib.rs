@@ -8,6 +8,10 @@ mod autostart;
 mod commands;
 mod dock;
 mod folder;
+/// The foreground window on Windows, which the tray menu takes away from the
+/// application the user is reading.
+#[cfg(target_os = "windows")]
+mod foreground;
 mod hotkey;
 /// The menu bar, which exists on macOS alone and only for the key equivalents —
 /// the module says why.

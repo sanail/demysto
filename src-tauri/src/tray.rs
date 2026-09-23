@@ -72,7 +72,10 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
         .menu(&menu(app, &actions, &demysto)?)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            SHOW => crate::palette::reveal(app),
+            SHOW => {
+                give_back_the_foreground();
+                crate::palette::reveal(app)
+            }
             // Settings rather than the installation itself: taking an update
             // ends this process and starts another, and that is not something
             // to set off from a menu with nothing said first. What is said is
@@ -82,8 +85,9 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
             id => {
                 if let Some(action) = action_in(id) {
                     // The same path an Action's own Hotkey takes, Capture and
-                    // all: what the user is looking at is still the foreground
-                    // application while the tray menu is open.
+                    // all: what the user is looking at is the foreground
+                    // application again once the menu has closed.
+                    give_back_the_foreground();
                     crate::result::straight_to(app, action.to_owned());
                 }
             }
@@ -91,6 +95,19 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
         .build(app)?;
 
     Ok(())
+}
+
+/// Hands the foreground back to the application the user was reading, for the
+/// Capture an item of this menu starts.
+///
+/// On macOS a status item's menu leaves the frontmost application where it
+/// was. On Windows the click on the icon puts the taskbar in front, and showing
+/// the menu puts Demysto's own window there; a copy keystroke sent then reaches
+/// neither the text nor the user, and Capture falls back on a clipboard they
+/// never meant.
+fn give_back_the_foreground() {
+    #[cfg(target_os = "windows")]
+    crate::foreground::give_back();
 }
 
 /// Puts the Actions the catalogue now holds in the menu.

@@ -12,6 +12,7 @@
 
 use demysto_core::{Demysto, RunOutcome};
 use tauri::{AppHandle, Manager, Runtime};
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_notification::NotificationExt;
 
 /// Tells the user a Run failed, when nothing on screen is going to.
@@ -46,10 +47,25 @@ pub fn a_failure_nobody_can_see<R: Runtime>(app: &AppHandle<R>, outcome: &RunOut
     // one the Conversation would have shown. Notifications are truncated by
     // every desktop that shows them, and a message trimmed by the system is
     // still better than one Demysto trimmed on its behalf.
-    let _ = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(error.message())
+    show(app, title, error.message());
+}
+
+/// On Linux, not through the plugin. Its `show` hands notify-rust to a task on
+/// Tauri's tokio runtime, and notify-rust waits for D-Bus with zbus's
+/// `block_on` — which, with the `tokio` feature ashpd turns on for the portal,
+/// starts a runtime of its own and panics inside that task. The notification
+/// never left, and nothing said so. Called from a thread of its own
+/// (`result::straight_to`), where waiting on D-Bus is allowed.
+#[cfg(target_os = "linux")]
+fn show<R: Runtime>(_app: &AppHandle<R>, title: String, body: &str) {
+    let _ = notify_rust::Notification::new()
+        .summary(&title)
+        .body(body)
+        .auto_icon()
         .show();
+}
+
+#[cfg(not(target_os = "linux"))]
+fn show<R: Runtime>(app: &AppHandle<R>, title: String, body: &str) {
+    let _ = app.notification().builder().title(title).body(body).show();
 }
