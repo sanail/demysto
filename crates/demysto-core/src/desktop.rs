@@ -196,7 +196,7 @@ impl Desktop for SystemDesktop {
         // The Hotkey that got us here is itself a chord, and its modifiers may
         // still be down. Releasing them first keeps the copy from arriving as
         // something else entirely.
-        for modifier in [Key::Shift, Key::Control, Key::Alt, Key::Meta] {
+        for modifier in to_release(is_down) {
             let _ = enigo.key(modifier, Direction::Release);
         }
         std::thread::sleep(MODIFIER_SETTLE);
@@ -222,6 +222,47 @@ impl Desktop for SystemDesktop {
     fn permitted(&self) -> Result<(), CaptureError> {
         accessibility()
     }
+}
+
+/// The modifiers to release before the copy chord: those still down, in the
+/// order they are let go of.
+///
+/// Only those, because a release is a keystroke of its own. An Alt let go of
+/// that was never pressed is what a user's tap on Alt looks like to Windows,
+/// and an application with access keys takes it as one: the Windows 11 Notepad
+/// shows its KeyTips and moves the focus to its File menu, and the copy chord
+/// that follows copies nothing, so the Capture fell back on the clipboard.
+fn to_release(is_down: impl Fn(Key) -> bool) -> Vec<Key> {
+    [Key::Shift, Key::Control, Key::Alt, Key::Meta]
+        .into_iter()
+        .filter(|&key| is_down(key))
+        .collect()
+}
+
+/// Whether a modifier is down, as Windows keeps the keyboard's state.
+#[cfg(target_os = "windows")]
+fn is_down(key: Key) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+    };
+    let keys: &[u16] = match key {
+        Key::Shift => &[VK_SHIFT],
+        Key::Control => &[VK_CONTROL],
+        Key::Alt => &[VK_MENU],
+        Key::Meta => &[VK_LWIN, VK_RWIN],
+        _ => &[],
+    };
+    // The high bit says the key is down now.
+    keys.iter()
+        .any(|&vk| unsafe { GetAsyncKeyState(i32::from(vk)) } < 0)
+}
+
+/// Elsewhere every modifier counts as down: a release nobody pressed has not
+/// been seen to do harm there, and asking the display server would need a
+/// connection of its own.
+#[cfg(not(target_os = "windows"))]
+fn is_down(_key: Key) -> bool {
+    true
 }
 
 /// Whether macOS is letting Demysto type into another application.
@@ -337,6 +378,17 @@ mod tests {
     #[test]
     fn a_platform_that_sets_no_session_type_reads_the_selection() {
         assert_eq!(on(None), Capturing::Selection);
+    }
+
+    #[test]
+    fn no_modifier_is_released_that_is_not_down() {
+        assert_eq!(to_release(|_| false), Vec::<Key>::new());
+    }
+
+    #[test]
+    fn the_modifiers_still_down_are_released() {
+        let down = |key: Key| matches!(key, Key::Control | Key::Shift);
+        assert_eq!(to_release(down), vec![Key::Shift, Key::Control]);
     }
 
     // The sentence itself is `capture-clipboard-only` in the catalogues, and

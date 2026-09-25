@@ -23,6 +23,11 @@ fluent = "0.17.0"
 unic-langid = "0.9.6"
 sys-locale = "0.3.2"
 
+# Which modifiers are down before a copy chord: see `desktop::to_release`. The
+# version Tauri already builds.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+
 [dev-dependencies]
 fluent-syntax = "0.12.0"
 mockito = "1"
