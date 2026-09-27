@@ -123,9 +123,9 @@ fn bound(pressed: &Shortcut) -> Option<Bound> {
 /// Claims every Hotkey Demysto answers to, and answers with the ones it could
 /// not, in whole sentences.
 ///
-/// The whole set every time rather than the difference: it is a few
-/// registrations, and a Hotkey an Action has just given up has to stop
-/// answering as surely as a new one has to start.
+/// The whole set is worked out every time, but only the difference reaches the
+/// operating system: a Hotkey an Action has just given up stops answering as
+/// surely as a new one starts, and one that stays is never let go of in between.
 ///
 /// Claiming is also what decides whether a combination is free, rather than a
 /// check made when the Action is saved. Two Actions can come to hold the same
@@ -164,32 +164,83 @@ pub fn claim<R: Runtime>(
     let mut claimed = Vec::new();
     let mut unclaimed = Vec::new();
 
-    // Everything is given up first, and the new set is put together beside
-    // [`CLAIMED`] rather than in it. Registering waits on the thread the windows
-    // are drawn on, and that is the thread a Hotkey arrives on: holding the lock
-    // across the wait would let one press take a lock this is waiting to
-    // release. Nothing answers to anything in between, so the set nobody can
-    // reach is never wrong.
-    let _ = hotkeys.unregister_all();
+    // Only what changed is given up or taken, and the new set is put together
+    // beside [`CLAIMED`] rather than in it. Registering waits on the thread the
+    // windows are drawn on, and that is the thread a Hotkey arrives on: holding
+    // the lock across the wait would let one press take a lock this is waiting
+    // to release.
+    //
+    // A Hotkey already held stays registered throughout. Giving it up to take it
+    // again leaves a moment in which a press reaches nothing — or, on macOS, has
+    // its release delivered as the Hotkey registered last, which opened the
+    // Palette in place of an Action. And this runs a few seconds after every
+    // start, when the Settings window loads out of sight and reads the
+    // catalogue: exactly when somebody who has just launched Demysto presses
+    // its Hotkey.
+    let held: Vec<Shortcut> = CLAIMED
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|claim| claim.hotkey)
+        .collect();
 
     // The Palette's first, so that an Action stating it finds it taken rather
     // than taking it: the Hotkey the whole tool opens with is not something a
     // stray Action file gets to quietly take.
-    unclaimed.append(&mut palettes(app, hotkeys, &mut claimed, palette, &words));
+    unclaimed.append(&mut palettes(
+        app,
+        hotkeys,
+        &held,
+        &mut claimed,
+        palette,
+        &words,
+    ));
 
     for action in actions {
         let Some(stated) = action.hotkey.as_deref() else {
             continue;
         };
 
-        if let Err(said) = claiming(app, hotkeys, &mut claimed, action, stated, &words) {
+        if let Err(said) = claiming(app, hotkeys, &held, &mut claimed, action, stated, &words) {
             unclaimed.push(said);
         }
     }
 
+    let kept: Vec<Shortcut> = claimed.iter().map(|claim| claim.hotkey).collect();
     *CLAIMED.lock().unwrap() = claimed;
 
+    // Given up only once the new set answers, so that nothing is left holding a
+    // combination the set no longer names.
+    for hotkey in given_up(&held, &kept) {
+        let _ = hotkeys.unregister(hotkey);
+    }
+
     unclaimed
+}
+
+/// Whether `hotkey` has to be registered, given the ones Demysto already holds.
+fn to_register(held: &[Shortcut], hotkey: &Shortcut) -> bool {
+    !held.contains(hotkey)
+}
+
+/// The Hotkeys held before a claim that the claimed set no longer names.
+fn given_up(held: &[Shortcut], kept: &[Shortcut]) -> Vec<Shortcut> {
+    held.iter()
+        .filter(|hotkey| !kept.contains(hotkey))
+        .copied()
+        .collect()
+}
+
+/// Registers `hotkey` unless Demysto already holds it.
+fn take<R: Runtime>(
+    hotkeys: &GlobalShortcut<R>,
+    held: &[Shortcut],
+    hotkey: Shortcut,
+) -> Result<(), tauri_plugin_global_shortcut::Error> {
+    match to_register(held, &hotkey) {
+        true => hotkeys.register(hotkey),
+        false => Ok(()),
+    }
 }
 
 /// Claims the Palette's Hotkey: the one the settings state, or the one Demysto
@@ -203,6 +254,7 @@ pub fn claim<R: Runtime>(
 fn palettes<R: Runtime>(
     app: &AppHandle<R>,
     hotkeys: &GlobalShortcut<R>,
+    held: &[Shortcut],
     claimed: &mut Vec<Claim>,
     stated: Option<&str>,
     words: &Words,
@@ -222,7 +274,7 @@ fn palettes<R: Runtime>(
     };
 
     if let Some(stated) = stated {
-        match wanted(app, hotkeys, stated, words) {
+        match wanted(app, hotkeys, held, stated, words) {
             Ok(hotkey) => {
                 claim(claimed, hotkey);
                 return said;
@@ -236,7 +288,7 @@ fn palettes<R: Runtime>(
         }
     }
 
-    match hotkeys.register(built_in_palette()) {
+    match take(hotkeys, held, built_in_palette()) {
         Ok(()) => claim(claimed, built_in_palette()),
         Err(error) => said.push(say!(
             words,
@@ -253,6 +305,7 @@ fn palettes<R: Runtime>(
 fn wanted<R: Runtime>(
     app: &AppHandle<R>,
     hotkeys: &GlobalShortcut<R>,
+    held: &[Shortcut],
     stated: &str,
     words: &Words,
 ) -> Result<Shortcut, String> {
@@ -272,20 +325,23 @@ fn wanted<R: Runtime>(
         ));
     }
 
-    hotkeys.register(hotkey).map(|()| hotkey).map_err(|error| {
-        say!(
-            words,
-            "hotkey-palette-refused",
-            "hotkey" = stated.to_owned(),
-            "detail" = error.to_string()
-        )
-    })
+    take(hotkeys, held, hotkey)
+        .map(|()| hotkey)
+        .map_err(|error| {
+            say!(
+                words,
+                "hotkey-palette-refused",
+                "hotkey" = stated.to_owned(),
+                "detail" = error.to_string()
+            )
+        })
 }
 
 /// Claims one Action's Hotkey, or says in a whole sentence why it could not be.
 fn claiming<R: Runtime>(
     app: &AppHandle<R>,
     hotkeys: &GlobalShortcut<R>,
+    held: &[Shortcut],
     claimed: &mut Vec<Claim>,
     action: &DefinedAction,
     stated: &str,
@@ -325,7 +381,7 @@ fn claiming<R: Runtime>(
         ));
     }
 
-    if let Err(error) = hotkeys.register(hotkey) {
+    if let Err(error) = take(hotkeys, held, hotkey) {
         return Err(say!(
             words,
             "hotkey-action-refused",
@@ -436,6 +492,41 @@ mod tests {
             assert!(hotkey.mods.is_empty(), "{key}");
             assert_eq!(hotkey.key.to_string(), key);
         }
+    }
+
+    fn keys(hotkeys: &[&str]) -> Vec<Shortcut> {
+        hotkeys
+            .iter()
+            .map(|hotkey| hotkey.parse().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn a_hotkey_already_held_is_not_registered_again() {
+        // Registering one again means giving it up first, and a key pressed in
+        // between reaches nothing — or, on macOS, whichever Hotkey was
+        // registered last, which opened the Palette in place of an Action.
+        let held = keys(&["Cmd+Shift+Space", "Ctrl+Alt+Shift+E"]);
+
+        assert!(!to_register(&held, &keys(&["Ctrl+Alt+Shift+E"])[0]));
+        assert!(to_register(&held, &keys(&["Ctrl+Alt+Shift+R"])[0]));
+    }
+
+    #[test]
+    fn claiming_the_same_set_again_gives_nothing_up() {
+        let held = keys(&["Cmd+Shift+Space", "Ctrl+Alt+Shift+E"]);
+
+        assert!(given_up(&held, &keys(&["Ctrl+Alt+Shift+E", "Cmd+Shift+Space"])).is_empty());
+    }
+
+    #[test]
+    fn a_hotkey_no_longer_claimed_is_given_up() {
+        let held = keys(&["Cmd+Shift+Space", "Ctrl+Alt+Shift+E"]);
+
+        assert_eq!(
+            given_up(&held, &keys(&["Cmd+Shift+Space", "Ctrl+Alt+Shift+R"])),
+            keys(&["Ctrl+Alt+Shift+E"])
+        );
     }
 
     #[test]
