@@ -1,0 +1,4 @@
+#!/bin/sh
+# The Regression suite: every saved Scenario on every Lab, or what the arguments name.
+# Takes what `vmlab run` takes (see `--help`). Created by `vmlab init`.
+exec "$(dirname "$0")/vmlab" run "$@"

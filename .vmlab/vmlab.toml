@@ -1,0 +1,128 @@
+# vmlab project config. A Lab describes one Guest (a virtual machine running one
+# OS) that the Scenarios in scenarios/*.py run on. vmlab never rewrites this file.
+#
+# Declare one table per Lab. Uncomment and adapt, e.g.:
+#
+# [labs.mac]
+# provider = "tart"        # tart: macOS on Apple Silicon; fusion: Linux and Windows (VMware Fusion); fake: no hypervisor (utm, parallels: stubs)
+# os = "macos"             # macos | windows | linux
+# arch = "arm64"           # arm64 | x86_64; defaults to the Host's
+# language = "en-US"       # the Lab language (ll-RR): system element names come in it; en-US by default
+# memory_gb = 4            # Host RAM the Guest takes; `run --parallel` queues Labs that don't fit
+# boot_timeout = 300       # seconds from power-on until the Guest must be reachable (the Host's sleep does not count)
+# step_timeout = 60        # default seconds per Guest call
+# scenario_timeout = 600   # default seconds per Scenario
+#
+# [labs.mac.app]           # the application under test; every key is optional
+# artifact = "dist/MyApp.app"          # Build artifact on the Host (glob: newest match), relative to the project root
+# build = "npm run build"              # Host command run in the project root when the artifact is stale
+# inputs = ["src", "package.json"]     # the artifact is stale when older than any of these
+# install = 'cp -R "$VMLAB_ARTIFACT" /Applications/'   # Guest shell; $VMLAB_ARTIFACT is the delivered copy
+# quit = "pkill -x MyApp"              # before every Run (exit code ignored), and in g.quit()
+# process = "MyApp"                    # the app's process: every quit waits for it to go (default: ready's process, if any)
+# quit_timeout = 30                    # seconds to wait for it to go (default: step_timeout; needs a process)
+# launch = "open -a MyApp"             # before every Run, after the state paths are removed
+# ready = { process = "MyApp" }        # optional (needs launch): one wait_for condition that says the launched app is ready
+# ready_timeout = 30                   # seconds to wait for ready (default: step_timeout; needs ready)
+# env = { RUST_LOG = "debug" }         # extra environment for install, quit and launch
+# state = ["~/Library/Application Support/MyApp"]  # Guest paths removed before every Run
+# notification_id = "com.example.myapp"  # the app as its Notifications' sender (macOS bundle id, Windows AppUserModelID, Linux app name)
+#
+# [labs.mac.tart]          # options of the Lab's Provider
+# base = "macos-tahoe"     # Base guest to clone; create it once with `vmlab base create macos-tahoe`
+# cpu = 4
+# display = "1920x1080"
+#
+# [labs.linux]
+# provider = "fusion"
+# os = "linux"
+#
+# [labs.linux.fusion]
+# base = "ubuntu-26.04"    # Base guest to clone; create it once with `vmlab base create ubuntu-26.04`
+# cpu = 4
+# session = "wayland"      # GNOME on Wayland; "x11": Xfce on X11
+#
+# [labs.win]
+# provider = "fusion"
+# os = "windows"
+#
+# [labs.win.fusion]
+# base = "windows-11"      # Base guest to copy; create it once with `vmlab base create windows-11`
+# cpu = 4
+
+# Demysto's Labs: one per desktop OS, each built the way a release is (a .app,
+# an NSIS installer, a .deb), so the Guest runs what users install. Every build
+# leaves the updater artifacts out: they need the release signing key.
+
+[labs.mac]
+provider = "tart"
+os = "macos"
+
+[labs.mac.tart]
+base = "macos-tahoe"
+
+[labs.mac.app]
+artifact = "target/release/bundle/macos/Demysto.app"
+build = """npm run tauri build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'"""
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html"]
+build_timeout = 1800
+# Capture copies the selection with a synthetic keystroke, which needs
+# Accessibility. Granted by bundle id, after removing any denial macOS wrote.
+install = '''
+set -e
+rm -rf /Applications/Demysto.app && cp -R "$VMLAB_ARTIFACT" /Applications/
+db="/Library/Application Support/com.apple.TCC/TCC.db"
+sudo sqlite3 -cmd ".timeout 15000" "$db" "DELETE FROM access WHERE client='app.demysto';"
+sudo sqlite3 -cmd ".timeout 15000" "$db" "INSERT INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified) VALUES ('kTCCServiceAccessibility', 'app.demysto', 0, 2, 4, 1, 0, CAST(strftime('%s','now') AS INTEGER));"
+'''
+quit = "pkill -x demysto; defaults delete app.demysto 2>/dev/null; true"
+process = "demysto"
+launch = "open -a /Applications/Demysto.app"
+ready = { tray = "Demysto" }
+state = ["~/Library/Application Support/demysto", "~/Library/WebKit/app.demysto", "~/Library/Caches/app.demysto"]
+notification_id = "app.demysto"
+
+[labs.win]
+provider = "fusion"
+os = "windows"
+
+[labs.win.fusion]
+base = "windows-11"
+
+[labs.win.app]
+artifact = "target/aarch64-pc-windows-msvc/release/bundle/nsis/Demysto_*_arm64-setup.exe"
+build = """RC=/opt/homebrew/opt/llvm/bin/llvm-rc npm run tauri build -- --runner cargo-xwin --target aarch64-pc-windows-msvc --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'"""
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "src-tauri/installer-hooks.nsh", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html"]
+build_timeout = 2400
+# The installer, not the bare .exe: Windows records Notifications only under
+# the AppUserModelID the installer gives the Start menu shortcut.
+install = "Start-Process -Wait $env:VMLAB_ARTIFACT /S"
+quit = "Stop-Process -Name demysto -ErrorAction SilentlyContinue"
+process = "demysto"
+launch = 'Start-Process "$env:LOCALAPPDATA\Demysto\demysto.exe"'
+ready = { tray = "demysto" }
+state = ['%APPDATA%\demysto', '%LOCALAPPDATA%\app.demysto']
+notification_id = "app.demysto"
+
+[labs.linux]
+provider = "fusion"
+os = "linux"
+
+[labs.linux.fusion]
+base = "ubuntu-26.04"
+# X11 (Xfce): the global Hotkey and Capture work there without the portal's
+# first-run approval. Wayland would be a Lab of its own.
+session = "x11"
+
+[labs.linux.app]
+artifact = "target/linux-arm64/release/bundle/deb/Demysto_*_arm64.deb"
+build = "sh .vmlab/build-linux.sh"
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html", ".vmlab/build-linux.sh"]
+build_timeout = 3600
+install = 'sudo apt-get install -y --reinstall -o DPkg::Lock::Timeout=300 "$VMLAB_ARTIFACT"'
+quit = "pkill -x demysto"
+process = "demysto"
+launch = "setsid /usr/bin/demysto >/dev/null 2>&1 &"
+ready = { tray = "demysto" }
+state = ["~/.config/demysto", "~/.local/share/app.demysto", "~/.cache/app.demysto"]
+notification_id = "demysto"
