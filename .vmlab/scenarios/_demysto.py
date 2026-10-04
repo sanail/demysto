@@ -20,17 +20,19 @@ def language(g):
     return g.language.split("-")[0]
 
 
-def say(g, key, **args):
-    """A message from Demysto's own catalogue in the Lab language, so that a
-    Scenario matches what the app draws however its translations change.
-    Only single-line messages are read; a { $name } is filled from args."""
-    for line in (CATALOGUES / f"{language(g)}.ftl").read_text(encoding="utf-8").splitlines():
+def say(g, key, lang=None, **args):
+    """A message from Demysto's own catalogue in the Lab language (or in lang,
+    for an app started with DEMYSTO_LANGUAGE), so that a Scenario matches what
+    the app draws however its translations change. Only single-line messages
+    are read; a { $name } is filled from args."""
+    lang = lang or language(g)
+    for line in (CATALOGUES / f"{lang}.ftl").read_text(encoding="utf-8").splitlines():
         if line.startswith(key + " = "):
             text = line[len(key) + 3:]
             for name, value in args.items():
                 text = text.replace("{ $" + name + " }", str(value))
             return text
-    raise KeyError(f"{key} is not in i18n/{language(g)}.ftl")
+    raise KeyError(f"{key} is not in i18n/{lang}.ftl")
 PORT = 18080
 APP = "demysto"  # the process, which every OS's ui commands accept as the app
 
