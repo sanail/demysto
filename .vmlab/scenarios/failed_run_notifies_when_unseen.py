@@ -17,7 +17,8 @@ def scenario(g):
     g.press("escape")
     away = g.wait_for(text=text, app=APP, gone=True, timeout=10)
     g.check("Escape puts the Conversation window away", away["met"], detail=away)
-    told = g.wait_for(notification=tag, timeout=30)
+    # macOS files a fresh clone's first Notification 5-25 s after it is sent, longer under load.
+    told = g.wait_for(notification=tag, timeout=60)
     g.check("a failure nobody can see is notified, with the Provider's error", told["met"], detail=told)
     titles = [n["title"] for n in told.get("notifications", [])]
     g.check("the notification says Demysto could not answer",

@@ -37,6 +37,13 @@ PORT = 18080
 APP = "demysto"  # the process, which every OS's ui commands accept as the app
 
 
+def in_app(g, text):
+    """The app's elements matching text, without its Tray menu's items, which
+    macOS keeps in the app's tree: they name the Actions too, so a match there
+    says nothing about the Palette. Read once the Palette is known to be up."""
+    return [m for m in g.find(text=text, app=APP)["matches"] if m["role"] != "menuitem"]
+
+
 def nonce():
     return uuid.uuid4().hex[:8]
 
