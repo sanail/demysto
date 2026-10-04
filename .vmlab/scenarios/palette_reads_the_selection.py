@@ -1,4 +1,4 @@
-from _demysto import APP, configured_launch, nonce, palette_hotkey
+from _demysto import APP, configured_launch, nonce, palette_hotkey, say
 
 LAUNCH = False
 
@@ -14,7 +14,7 @@ def scenario(g):
             staged["frontmost"] == staged["app"] and staged["selected"] == text, detail=staged)
     palette = g.wait_for(text=text, app=APP, timeout=15)
     g.check("the Palette shows the selected text", palette["met"], detail=palette)
-    origin = g.wait_for(text="Selection", app=APP, timeout=5)
+    origin = g.wait_for(text=say(g, "palette-origin-selection"), app=APP, timeout=5)
     g.check("the Palette says the text is the Selection", origin["met"], detail=origin)
     g.check("the Palette does not show the clipboard instead",
             not g.find(text=clip, app=APP)["matches"], detail=g.find(text=clip, app=APP))

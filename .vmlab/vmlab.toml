@@ -126,3 +126,82 @@ launch = "setsid /usr/bin/demysto >/dev/null 2>&1 &"
 ready = { tray = "demysto" }
 state = ["~/.config/demysto", "~/.local/share/app.demysto", "~/.cache/app.demysto"]
 notification_id = "demysto"
+
+# The same three Labs with Russian as the Lab language: Demysto follows the
+# system's language, and the Scenarios read what it should say from i18n/ru.ftl.
+
+[labs.mac-ru]
+language = "ru-RU"
+provider = "tart"
+os = "macos"
+
+[labs.mac-ru.tart]
+base = "macos-tahoe"
+
+[labs.mac-ru.app]
+artifact = "target/release/bundle/macos/Demysto.app"
+build = """npm run tauri build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'"""
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html"]
+build_timeout = 1800
+# Capture copies the selection with a synthetic keystroke, which needs
+# Accessibility. Granted by bundle id, after removing any denial macOS wrote.
+install = '''
+set -e
+rm -rf /Applications/Demysto.app && cp -R "$VMLAB_ARTIFACT" /Applications/
+db="/Library/Application Support/com.apple.TCC/TCC.db"
+sudo sqlite3 -cmd ".timeout 15000" "$db" "DELETE FROM access WHERE client='app.demysto';"
+sudo sqlite3 -cmd ".timeout 15000" "$db" "INSERT INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified) VALUES ('kTCCServiceAccessibility', 'app.demysto', 0, 2, 4, 1, 0, CAST(strftime('%s','now') AS INTEGER));"
+'''
+quit = "pkill -x demysto; defaults delete app.demysto 2>/dev/null; true"
+process = "demysto"
+launch = "open -a /Applications/Demysto.app"
+ready = { tray = "Demysto" }
+state = ["~/Library/Application Support/demysto", "~/Library/WebKit/app.demysto", "~/Library/Caches/app.demysto"]
+notification_id = "app.demysto"
+
+[labs.win-ru]
+language = "ru-RU"
+provider = "fusion"
+os = "windows"
+
+[labs.win-ru.fusion]
+base = "windows-11"
+
+[labs.win-ru.app]
+artifact = "target/aarch64-pc-windows-msvc/release/bundle/nsis/Demysto_*_arm64-setup.exe"
+build = """RC=/opt/homebrew/opt/llvm/bin/llvm-rc npm run tauri build -- --runner cargo-xwin --target aarch64-pc-windows-msvc --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'"""
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "src-tauri/installer-hooks.nsh", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html"]
+build_timeout = 2400
+# The installer, not the bare .exe: Windows records Notifications only under
+# the AppUserModelID the installer gives the Start menu shortcut.
+install = "Start-Process -Wait $env:VMLAB_ARTIFACT /S"
+quit = "Stop-Process -Name demysto -ErrorAction SilentlyContinue"
+process = "demysto"
+launch = 'Start-Process "$env:LOCALAPPDATA\Demysto\demysto.exe"'
+ready = { tray = "demysto" }
+state = ['%APPDATA%\demysto', '%LOCALAPPDATA%\app.demysto']
+notification_id = "app.demysto"
+
+[labs.linux-ru]
+language = "ru-RU"
+provider = "fusion"
+os = "linux"
+
+[labs.linux-ru.fusion]
+base = "ubuntu-26.04"
+# X11 (Xfce): the global Hotkey and Capture work there without the portal's
+# first-run approval. Wayland would be a Lab of its own.
+session = "x11"
+
+[labs.linux-ru.app]
+artifact = "target/linux-arm64/release/bundle/deb/Demysto_*_arm64.deb"
+build = "sh .vmlab/build-linux.sh"
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html", ".vmlab/build-linux.sh"]
+build_timeout = 3600
+install = 'sudo apt-get install -y --reinstall -o DPkg::Lock::Timeout=300 "$VMLAB_ARTIFACT"'
+quit = "pkill -x demysto"
+process = "demysto"
+launch = "setsid /usr/bin/demysto >/dev/null 2>&1 &"
+ready = { tray = "demysto" }
+state = ["~/.config/demysto", "~/.local/share/app.demysto", "~/.cache/app.demysto"]
+notification_id = "demysto"

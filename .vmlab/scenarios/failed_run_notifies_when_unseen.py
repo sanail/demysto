@@ -1,4 +1,4 @@
-from _demysto import APP, configured_launch, explain_hotkey, mock, nonce
+from _demysto import APP, configured_launch, explain_hotkey, mock, nonce, say
 
 LAUNCH = False
 
@@ -21,7 +21,7 @@ def scenario(g):
     g.check("a failure nobody can see is notified, with the Provider's error", told["met"], detail=told)
     titles = [n["title"] for n in told.get("notifications", [])]
     g.check("the notification says Demysto could not answer",
-            "Demysto could not answer" in titles, detail=told.get("notifications"))
+            say(g, "notification-could-not-answer") in titles, detail=told.get("notifications"))
     g.close_staged(staged)
 
     seen = "seen failure " + tag
