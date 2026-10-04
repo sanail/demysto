@@ -1,6 +1,6 @@
 import pathlib
 
-from _demysto import APP, CATALOGUES, configure, say, tray
+from _demysto import APP, CATALOGUES, configure, language, say, tray
 
 LAUNCH = False
 TIMEOUT = 1200
@@ -51,7 +51,10 @@ def misfits(g, lang):
 def scenario(g):
     configure(g)
     tab_role = "radiobutton" if g.os == "macos" else "tab"
-    for lang in LANGUAGES:
+    # Every language once, on the en-US Labs; a Lab in another language checks
+    # only its own, rather than the same five again.
+    languages = LANGUAGES if g.language == "en-US" else [language(g)]
+    for lang in languages:
         g.quit()
         g.launch(env={"DEMYSTO_LANGUAGE": lang})
         g.tray(tray(g), choose=say(g, "tray-settings", lang), timeout=15)
