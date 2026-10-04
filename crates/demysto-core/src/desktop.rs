@@ -12,7 +12,7 @@
 
 use std::ffi::OsStr;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
@@ -32,6 +32,20 @@ const SESSION_TYPE_ENV: &str = "XDG_SESSION_TYPE";
 /// back up before the copy chord is sent, so that the chord is not read as the
 /// user's own keys plus ours.
 const MODIFIER_SETTLE: Duration = Duration::from_millis(60);
+
+/// How long the user is given to let go of the Hotkey's modifiers themselves
+/// before Demysto lets go of them on the user's behalf.
+///
+/// The Hotkey answers when its key comes up, and the fingers on its modifiers
+/// leave tens of milliseconds later. Let go of for them, a modifier still comes
+/// up for real afterwards, and a real Ctrl coming up between the copy chord's
+/// Ctrl and its C turned the copy into a typed "c" over the user's Selection.
+/// Only Windows says whether a key is down (see `is_down`); elsewhere there is
+/// nothing to wait for.
+#[cfg(target_os = "windows")]
+const RELEASE_PATIENCE: Duration = Duration::from_millis(500);
+#[cfg(not(target_os = "windows"))]
+const RELEASE_PATIENCE: Duration = Duration::ZERO;
 
 /// The Capture this session can actually perform, and what it can read.
 ///
@@ -194,9 +208,10 @@ impl Desktop for SystemDesktop {
             Enigo::new(&Settings::default()).map_err(|error| keystroke(&error.to_string()))?;
 
         // The Hotkey that got us here is itself a chord, and its modifiers may
-        // still be down. Releasing them first keeps the copy from arriving as
-        // something else entirely.
-        for modifier in to_release(is_down) {
+        // still be down. Waiting for the user to let go of them, and releasing
+        // whatever is held past that, keeps the copy from arriving as something
+        // else entirely.
+        for modifier in still_down(is_down, RELEASE_PATIENCE) {
             let _ = enigo.key(modifier, Direction::Release);
         }
         std::thread::sleep(MODIFIER_SETTLE);
@@ -237,6 +252,19 @@ fn to_release(is_down: impl Fn(Key) -> bool) -> Vec<Key> {
         .into_iter()
         .filter(|&key| is_down(key))
         .collect()
+}
+
+/// The modifiers still down once the user has had `patience` to let go of
+/// them, polled rather than slept through so that a quick hand costs nothing.
+fn still_down(is_down: impl Fn(Key) -> bool, patience: Duration) -> Vec<Key> {
+    let deadline = Instant::now() + patience;
+    loop {
+        let down = to_release(&is_down);
+        if down.is_empty() || Instant::now() >= deadline {
+            return down;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 /// Whether a modifier is down, as Windows keeps the keyboard's state.
@@ -389,6 +417,25 @@ mod tests {
     fn the_modifiers_still_down_are_released() {
         let down = |key: Key| matches!(key, Key::Control | Key::Shift);
         assert_eq!(to_release(down), vec![Key::Shift, Key::Control]);
+    }
+
+    #[test]
+    fn the_user_is_waited_for_to_let_go_of_the_modifiers() {
+        let polls = std::cell::Cell::new(0);
+        let down = |_: Key| {
+            polls.set(polls.get() + 1);
+            polls.get() <= 12
+        };
+        assert_eq!(still_down(down, Duration::from_secs(5)), Vec::<Key>::new());
+    }
+
+    #[test]
+    fn modifiers_held_past_the_patience_are_released_for_the_user() {
+        let down = |key: Key| key == Key::Control;
+        assert_eq!(
+            still_down(down, Duration::from_millis(30)),
+            vec![Key::Control]
+        );
     }
 
     // The sentence itself is `capture-clipboard-only` in the catalogues, and
