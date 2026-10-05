@@ -1,4 +1,4 @@
-from _demysto import APP, in_app, configured_launch, copy_picture, mock, nonce, palette_hotkey, pictures, say
+from _demysto import APP, configured_launch, copy_picture, mock, nonce, palette_hotkey, pictures, say
 
 LAUNCH = False
 
@@ -19,9 +19,9 @@ def scenario(g):
     g.press(palette_hotkey(g))
     shown = g.wait_for(text=say(g, "palette-picture", dimensions=f"{WIDTH} × {HEIGHT}"), app=APP, timeout=15)
     g.check("the Palette shows the copied picture with its size", shown["met"], detail=shown)
-    offered = in_app(g, say(g, "action-describe-image-name"))
+    offered = g.find(text=say(g, "action-describe-image-name"), app=APP)["matches"]
     g.check("the Palette offers Describe image for a picture", offered != [], detail=offered)
-    explain = in_app(g, say(g, "action-explain-name"))
+    explain = g.find(text=say(g, "action-explain-name"), app=APP)["matches"]
     g.check("the Palette leaves out Explain, which runs on text only", not explain, detail=explain)
     g.screenshot("palette on a picture")
 

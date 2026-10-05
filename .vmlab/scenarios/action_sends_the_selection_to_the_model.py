@@ -1,4 +1,4 @@
-from _demysto import APP, in_app, configured_launch, mock, nonce, palette_hotkey, prompts, say
+from _demysto import APP, configured_launch, mock, nonce, palette_hotkey, prompts, say
 
 LAUNCH = False
 
@@ -15,7 +15,7 @@ def scenario(g):
     staged = g.stage_text(text, then=palette_hotkey(g))
     palette = g.wait_for(text=text, app=APP, timeout=15)
     g.check("the Palette shows a Cyrillic selection", palette["met"], detail=[palette, staged])
-    listed = in_app(g, say(g, "action-explain-name"))
+    listed = g.find(text=say(g, "action-explain-name"), app=APP)["matches"]
     g.check("the Palette lists Explain", listed != [], detail=listed)
 
     g.press("enter")

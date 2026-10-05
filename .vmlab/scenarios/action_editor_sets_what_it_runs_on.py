@@ -1,4 +1,4 @@
-from _demysto import APP, config_file, configured_launch, copy_picture, in_app, nonce, palette_hotkey, say, tray
+from _demysto import APP, config_file, configured_launch, copy_picture, nonce, palette_hotkey, say, tray
 
 LAUNCH = False
 
@@ -18,17 +18,9 @@ def tab_to(g, label, role=None, presses=15):
 
 
 def typed(g, field, text):
-    """Types into the focused field and waits until the page holds all of it:
-    on macOS the keys are still arriving when g.type returns, and a Tab pressed
-    then takes the rest of them to the next control. A field left short (keys
-    lost on the way, seen once in twenty runs on macOS) is typed again, once:
-    what is measured here is the editor, not the typing."""
+    """Types into the focused field, and checks the field holds all of it."""
     g.type(text)
     held = g.wait_for(text=text, app=APP, timeout=10)
-    if not held["met"]:
-        g.press("cmd+a" if g.os == "macos" else "ctrl+a")
-        g.type(text)
-        held = g.wait_for(text=text, app=APP, timeout=10)
     g.check(f"the {field} field holds what was typed", held["met"], detail=held)
 
 
@@ -104,7 +96,8 @@ def scenario(g):
     picture = say(g, "palette-picture").split("{")[0].strip()
     shown = g.wait_for(text=picture, app=APP, timeout=15)
     g.check("the Palette opens on the picture", shown["met"], detail=shown)
-    g.check("the Palette offers the Action for a picture", in_app(g, name) != [], detail=in_app(g, name))
+    offered = g.find(text=name, app=APP)["matches"]
+    g.check("the Palette offers the Action for a picture", offered != [], detail=offered)
     g.press("escape")
     closed = g.wait_for(text=picture, app=APP, gone=True, timeout=10)
     g.check("Escape closes the Palette on the picture", closed["met"], detail=closed)
@@ -114,7 +107,8 @@ def scenario(g):
     staged = g.stage_text(text, then=palette_hotkey(g))
     captured = g.wait_for(text=text, app=APP, timeout=15)
     if g.check("the Palette shows the selected text", captured["met"], detail=[captured, staged]):
-        g.check("the Palette leaves the Action out for text", not in_app(g, name), detail=in_app(g, name))
+        offered = g.find(text=name, app=APP)["matches"]
+        g.check("the Palette leaves the Action out for text", not offered, detail=offered)
     else:
         g.skip("the Palette leaves the Action out for text", "the Palette did not take the selected text")
     g.press("escape")
