@@ -1,6 +1,8 @@
 from _demysto import APP, config_file, configured_launch, copy_picture, nonce, palette_hotkey, say, tray
 
 LAUNCH = False
+# What this measures is the same in every Lab language.
+LANGUAGES = ["en-US"]
 
 
 def tab_to(g, label, role=None, presses=15):
@@ -25,21 +27,10 @@ def typed(g, field, text):
 
 
 def toggle(g, label, ticked):
-    """Space on the focused tick. macOS shows a tick's state in the tree, so
-    there the press is checked and repeated when it did not take; Windows and
-    Linux show none, and get the one press."""
-    def took():
-        boxes = g.find(text=label, role="checkbox", app=APP)["matches"]
-        return bool(boxes) and (boxes[0]["value"] in ("1", 1, True)) == ticked
-
-    for _ in range(3):
-        g.press("space")
-        if g.os != "macos":
-            return
-        for _ in range(5):  # up to a second for the page to redraw the tick
-            if took():
-                return
-            g.exec(["sleep", "0.2"])
+    """Space on the focused tick, and checks the tick took it."""
+    g.press("space")
+    took = g.wait_for(text=label, role="checkbox", app=APP, checked=ticked, timeout=5)
+    g.check(f"{label} is {'ticked' if ticked else 'cleared'}", took["met"], detail=took)
 
 
 def scenario(g):

@@ -1,12 +1,14 @@
 import pathlib
 
-from _demysto import APP, CATALOGUES, configure, language, say, tray
+from _demysto import APP, CATALOGUES, configure, say, tray
 
 LAUNCH = False
 TIMEOUT = 1200
+# An en-US Lab measures every catalogue; another Lab language adds nothing.
+LANGUAGES = ["en-US"]
 
 # Every interface language Demysto has a catalogue for.
-LANGUAGES = sorted(p.stem for p in pathlib.Path(CATALOGUES).glob("*.ftl"))
+CATALOGUE_LANGUAGES = sorted(p.stem for p in pathlib.Path(CATALOGUES).glob("*.ftl"))
 TABS = ["settings-tab-models", "settings-tab-actions", "settings-tab-general", "settings-tab-about"]
 CONTROLS = {"button", "tab", "radiobutton", "textfield", "textarea", "combobox", "checkbox"}
 SLACK = 1  # a pixel of rounding between how the toolkit and the window report bounds
@@ -51,10 +53,7 @@ def misfits(g, lang):
 def scenario(g):
     configure(g)
     tab_role = "radiobutton" if g.os == "macos" else "tab"
-    # Every language once, on the en-US Labs; a Lab in another language checks
-    # only its own, rather than the same five again.
-    languages = LANGUAGES if g.language == "en-US" else [language(g)]
-    for lang in languages:
+    for lang in CATALOGUE_LANGUAGES:
         g.quit()
         g.launch(env={"DEMYSTO_LANGUAGE": lang})
         g.tray(tray(g), choose=say(g, "tray-settings", lang), timeout=15)

@@ -1,6 +1,8 @@
 from _demysto import APP, configured_launch, copy_picture, mock, nonce, palette_hotkey, pictures, say
 
 LAUNCH = False
+# What this measures is the same in every Lab language.
+LANGUAGES = ["en-US"]
 
 # Larger than the 1568-pixel ceiling, so the fitted picture and the original differ.
 WIDTH, HEIGHT = 2000, 1200

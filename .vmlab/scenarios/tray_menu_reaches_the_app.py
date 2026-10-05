@@ -1,6 +1,8 @@
 from _demysto import APP, configured_launch, nonce, say, tray
 
 LAUNCH = False
+# What this measures is the same in every Lab language.
+LANGUAGES = ["en-US"]
 
 
 def scenario(g):

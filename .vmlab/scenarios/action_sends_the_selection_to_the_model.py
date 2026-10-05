@@ -1,6 +1,8 @@
 from _demysto import APP, configured_launch, mock, nonce, palette_hotkey, prompts, say
 
 LAUNCH = False
+# What this measures is the same in every Lab language.
+LANGUAGES = ["en-US"]
 
 
 def scenario(g):
