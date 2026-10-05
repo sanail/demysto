@@ -101,9 +101,9 @@ everyday Model often can't see images. When you add a Model by hand, tick
 1. Select text in any application.
 2. Press the Hotkey: <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> on macOS,
    <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> on Windows and Linux.
-3. The list of Actions opens at your cursor. Press <kbd>Enter</kbd> to run the
-   highlighted one, use the arrow keys or type a few letters to pick another,
-   or press <kbd>Esc</kbd> to close the list.
+3. The list of Actions opens in the middle of the screen. Press <kbd>Enter</kbd>
+   to run the highlighted one, use the arrow keys or type a few letters to pick
+   another, or press <kbd>Esc</kbd> to close the list.
 4. The answer streams into a chat window. Type a follow-up question underneath
    and press <kbd>Enter</kbd>. The chat already has your selection, so there's
    nothing to paste.

@@ -4,7 +4,8 @@ use std::sync::atomic::AtomicBool;
 
 use demysto_core::Demysto;
 use tauri::{
-    AppHandle, Emitter, Manager, Monitor, PhysicalPosition, Runtime, WebviewWindow, Window,
+    AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalRect,
+    PhysicalSize, Runtime, WebviewWindow, Window,
 };
 
 use crate::underway::Underway;
@@ -18,10 +19,6 @@ const CAPTURED_EVENT: &str = "palette://captured";
 /// Emitted to the Palette when a Capture begins, so that it stops showing the
 /// one before it.
 const CAPTURING_EVENT: &str = "palette://capturing";
-
-/// How far from the cursor the Palette's corner sits, in logical pixels, so
-/// that the window does not open underneath the pointer itself.
-const CURSOR_OFFSET: f64 = 12.0;
 
 /// How close the Palette may come to the edge of the screen, in logical pixels.
 const SCREEN_MARGIN: f64 = 8.0;
@@ -85,7 +82,7 @@ fn open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     // application until the Palette takes the focus away from it.
     let outcome = app.state::<Demysto>().capture();
 
-    let _ = position_at_cursor(app, window);
+    let _ = position_on_screen(app, window);
 
     // Also before the window is shown, so that what it comes up showing is this
     // Capture rather than the one before it. A window that has never loaded
@@ -95,43 +92,85 @@ fn open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     show(app, window);
 }
 
-/// Puts the Palette next to the pointer, kept whole on the screen it is on.
-fn position_at_cursor<R: Runtime>(
+/// Puts the Palette in the middle of the screen the pointer is on.
+///
+/// Not beside the pointer: the pointer is often nowhere near what is being
+/// read — the text was selected with the keyboard, or the pointer was left
+/// parked — and a fixed place is one the eyes learn (ticket 36).
+fn position_on_screen<R: Runtime>(
     app: &AppHandle<R>,
     window: &WebviewWindow<R>,
 ) -> tauri::Result<()> {
-    let cursor = app.cursor_position()?;
-    let size = window.outer_size()?;
-    let screen = screen_holding(app, cursor)?;
-
-    // The scale of the screen the cursor is on, not of the one the Palette was
-    // last shown on. Everything else here is in physical pixels, and only
-    // CURSOR_OFFSET and SCREEN_MARGIN are stated in logical ones, so this is
-    // what carries those two across — and on a mixed-DPI desktop the screens
-    // disagree about it, which is what turns a 12-pixel gap into 24, or 6.
-    let scale = match &screen {
-        Some(screen) => screen.scale_factor(),
-        None => window.scale_factor()?,
+    // No screen at all, not even a primary one: the Palette opens where it was.
+    let Some(screen) = screen_holding(app, app.cursor_position()?)? else {
+        return Ok(());
     };
 
-    let mut x = cursor.x + CURSOR_OFFSET * scale;
-    let mut y = cursor.y + CURSOR_OFFSET * scale;
+    // The scale of the screen the Palette is going to, not of the one it was
+    // last shown on: on a mixed-DPI desktop the two disagree, and the window
+    // takes the new one's size the moment it lands there.
+    let scale = screen.scale_factor();
+    let size = logical_size(app, window)?.to_physical(scale);
 
-    if let Some(screen) = screen {
-        let origin = screen.position();
-        let bounds = screen.size();
-        let margin = SCREEN_MARGIN * scale;
+    let at = placement(*screen.work_area(), size, scale);
 
-        let furthest_x = f64::from(origin.x + bounds.width as i32 - size.width as i32) - margin;
-        let furthest_y = f64::from(origin.y + bounds.height as i32 - size.height as i32) - margin;
+    window.set_position(at)
+}
 
-        // `max` after `min`, so that a window larger than the screen still has
-        // its top-left corner on it rather than off the near edge.
-        x = x.min(furthest_x).max(f64::from(origin.x) + margin);
-        y = y.min(furthest_y).max(f64::from(origin.y) + margin);
+/// The Palette's size in logical pixels.
+///
+/// GTK knows no size for a window it has never drawn and answers 0×0, which
+/// would centre the Palette's corner rather than the Palette the first time it
+/// opens on Linux. The size it is configured with stands in until then.
+fn logical_size<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &WebviewWindow<R>,
+) -> tauri::Result<LogicalSize<f64>> {
+    let drawn = window.outer_size()?;
+
+    if drawn.width > 0 && drawn.height > 0 {
+        return Ok(drawn.to_logical(window.scale_factor()?));
     }
 
-    window.set_position(PhysicalPosition::new(x, y))
+    Ok(app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|configured| configured.label == LABEL)
+        .map_or(drawn.to_logical(1.0), |configured| {
+            LogicalSize::new(configured.width, configured.height)
+        }))
+}
+
+/// Where the Palette's top-left corner goes on a screen: centred across its
+/// work area, the top edge a quarter of the way down, and kept off the edges
+/// by [`SCREEN_MARGIN`], which `scale` turns into physical pixels.
+fn placement(
+    work_area: PhysicalRect<i32, u32>,
+    size: PhysicalSize<u32>,
+    scale: f64,
+) -> PhysicalPosition<f64> {
+    let (left, top) = (
+        f64::from(work_area.position.x),
+        f64::from(work_area.position.y),
+    );
+    let (width, height) = (
+        f64::from(work_area.size.width),
+        f64::from(work_area.size.height),
+    );
+    let (wide, tall) = (f64::from(size.width), f64::from(size.height));
+    let margin = SCREEN_MARGIN * scale;
+
+    let x = left + (width - wide) / 2.0;
+    let y = top + height / 4.0;
+
+    // `max` after `min`, so that a window larger than the screen still has its
+    // top-left corner on it rather than off the near edge.
+    PhysicalPosition::new(
+        x.min(left + width - wide - margin).max(left + margin),
+        y.min(top + height - tall - margin).max(top + margin),
+    )
 }
 
 /// The screen the pointer is on, or the primary one when it is on none.
@@ -141,14 +180,12 @@ fn position_at_cursor<R: Runtime>(
 /// one the pointer arrives in: `cursor_position` is physical pixels, and that
 /// lookup compares against `CGDisplayBounds`, which is logical points. On a
 /// screen at 2x the two agree only for a pointer in the top-left quarter, and
-/// past that the screen was simply lost — which used to mean the Palette was
-/// not kept on it at all, exactly where it most needed to be. A monitor's own
+/// past that the screen was simply lost. A monitor's own
 /// position and size are physical, so walking them keeps everything here in one
 /// space and needs no conversion on any platform.
 ///
 /// The primary screen stands in when the pointer is on none, which is a gap
-/// between two of them: somewhere to clamp against is better than nowhere, and
-/// nowhere is how this went wrong.
+/// between two of them.
 fn screen_holding<R: Runtime>(
     app: &AppHandle<R>,
     cursor: PhysicalPosition<f64>,
@@ -393,4 +430,44 @@ pub fn into_panel<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
     panel.set_released_when_closed(false);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn area(x: i32, y: i32, width: u32, height: u32) -> PhysicalRect<i32, u32> {
+        PhysicalRect {
+            position: PhysicalPosition::new(x, y),
+            size: PhysicalSize::new(width, height),
+        }
+    }
+
+    #[test]
+    fn the_palette_is_centred_a_quarter_of_the_way_down_the_work_area() {
+        // A work area that starts away from the origin, as one does beside a
+        // menu bar or on a second screen to the left of the primary one.
+        let at = placement(
+            area(-1920, 50, 1920, 1000),
+            PhysicalSize::new(600, 400),
+            1.0,
+        );
+
+        assert_eq!(at, PhysicalPosition::new(-1260.0, 300.0));
+    }
+
+    #[test]
+    fn a_palette_too_big_for_the_work_area_is_held_off_its_edges_at_its_scale() {
+        // At 2x the logical margin is twice as many physical pixels.
+        let at = placement(area(100, 60, 800, 600), PhysicalSize::new(1000, 900), 2.0);
+
+        assert_eq!(at, PhysicalPosition::new(116.0, 76.0));
+    }
+
+    #[test]
+    fn a_palette_taller_than_the_room_below_a_quarter_stays_centred_across() {
+        let at = placement(area(0, 0, 1000, 800), PhysicalSize::new(400, 700), 2.0);
+
+        assert_eq!(at, PhysicalPosition::new(300.0, 84.0));
+    }
 }

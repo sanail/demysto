@@ -273,8 +273,8 @@ welcome-autostart-title = Запускать Demysto при входе в сис
 welcome-autostart-detail = Demysto ждёт в трее и отвечает, только пока запущен.
 welcome-autostart-choice = Запускать при входе
 welcome-done-title = Вот и всё
-welcome-done-detail = Выделите где угодно текст и нажмите { $hotkey }. Рядом с курсором откроется список действий; Enter запустит выбранное.
-welcome-done-clipboard = Скопируйте текст через Ctrl+C и нажмите { $hotkey }. Рядом с курсором откроется список действий; Enter запустит выбранное.
+welcome-done-detail = Выделите где угодно текст и нажмите { $hotkey }. Посреди экрана откроется список действий; Enter запустит выбранное.
+welcome-done-clipboard = Скопируйте текст через Ctrl+C и нажмите { $hotkey }. Посреди экрана откроется список действий; Enter запустит выбранное.
 welcome-done-tray = Дальше Demysto ждёт в трее, и через его меню доступно всё то же, что и по горячей клавише.
 
 ## What an update could not do

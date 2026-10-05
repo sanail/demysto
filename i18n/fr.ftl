@@ -277,8 +277,8 @@ welcome-autostart-title = Lancer Demysto à l'ouverture de session
 welcome-autostart-detail = Demysto attend dans la zone de notification et ne répond que tant qu'il tourne.
 welcome-autostart-choice = Le lancer à l'ouverture de session
 welcome-done-title = C'est tout
-welcome-done-detail = Sélectionnez du texte n'importe où et appuyez sur { $hotkey }. Une liste d'actions s'ouvre près du curseur ; Entrée lance celle qui est en surbrillance.
-welcome-done-clipboard = Copiez du texte avec Ctrl+C et appuyez sur { $hotkey }. Une liste d'actions s'ouvre près du curseur ; Entrée lance celle qui est en surbrillance.
+welcome-done-detail = Sélectionnez du texte n'importe où et appuyez sur { $hotkey }. Une liste d'actions s'ouvre au milieu de l'écran ; Entrée lance celle qui est en surbrillance.
+welcome-done-clipboard = Copiez du texte avec Ctrl+C et appuyez sur { $hotkey }. Une liste d'actions s'ouvre au milieu de l'écran ; Entrée lance celle qui est en surbrillance.
 welcome-done-tray = Demysto attend désormais dans la zone de notification, et son menu atteint tout ce qu'atteint le raccourci.
 
 ## What an update could not do

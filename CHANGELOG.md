@@ -2,6 +2,15 @@
 
 What each release brought, newest first.
 
+## Unreleased
+
+### Palette
+
+- The Palette opens in the same place every time: centred on the screen the
+  pointer is on, a quarter of the way down, clear of the Dock, the menu bar and
+  the taskbar. It no longer opens beside the pointer, which was often nowhere
+  near the text being read.
+
 ## 0.3.2 — 2026-09-15
 
 ### Actions

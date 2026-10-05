@@ -56,8 +56,8 @@ asked about.
 - **Private by design.** No account and no telemetry. Chats are kept in memory
   and are gone when you quit, and the log records what happened, never what you
   read. With a local Model, your text never leaves your computer.
-- **Out of your way.** Demysto waits in the tray and opens at your cursor. It
-  works from the keyboard alone, and with the mouse just as well.
+- **Out of your way.** Demysto waits in the tray and opens in the middle of the
+  screen. It works from the keyboard alone, and with the mouse just as well.
 - **At home on every desktop.** macOS, Windows, and Linux on both X11 and
   Wayland.
 - **Free and open source,** under the MIT License.

@@ -277,8 +277,8 @@ welcome-autostart-title = Demysto beim Anmelden starten
 welcome-autostart-detail = Demysto wartet im Infobereich und antwortet nur, solange es läuft.
 welcome-autostart-choice = Beim Anmelden starten
 welcome-done-title = Das war alles
-welcome-done-detail = Markieren Sie irgendwo Text und drücken Sie { $hotkey }. Am Cursor öffnet sich eine Liste der Aktionen; Enter startet die hervorgehobene.
-welcome-done-clipboard = Kopieren Sie Text mit Ctrl+C und drücken Sie { $hotkey }. Am Cursor öffnet sich eine Liste der Aktionen; Enter startet die hervorgehobene.
+welcome-done-detail = Markieren Sie irgendwo Text und drücken Sie { $hotkey }. In der Bildschirmmitte öffnet sich eine Liste der Aktionen; Enter startet die hervorgehobene.
+welcome-done-clipboard = Kopieren Sie Text mit Ctrl+C und drücken Sie { $hotkey }. In der Bildschirmmitte öffnet sich eine Liste der Aktionen; Enter startet die hervorgehobene.
 welcome-done-tray = Demysto wartet von nun an im Infobereich, und sein Menü erreicht alles, was das Tastenkürzel erreicht.
 
 ## What an update could not do

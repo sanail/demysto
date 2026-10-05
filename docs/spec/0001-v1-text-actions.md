@@ -21,9 +21,10 @@ follow-up question means pasting the context again.
 ## Solution
 
 Demysto sits resident in the tray. You select text anywhere, press a Hotkey, and
-a Palette appears at the cursor listing the Actions that fit what you selected.
-One keypress runs one; the answer streams into a Conversation window where the
-Selection is already the context, so follow-up Turns cost nothing but typing.
+a Palette appears in the middle of the screen listing the Actions that fit what
+you selected. One keypress runs one; the answer streams into a Conversation
+window where the Selection is already the context, so follow-up Turns cost
+nothing but typing.
 
 Actions you use constantly get their own Hotkey and skip the Palette entirely —
 select, press, read. Actions are not a fixed menu: explain, translate and
@@ -37,8 +38,9 @@ same shape and the same standing.
 1. As a reader, I want to press one Hotkey over selected text and see what I can
    do with it, so that asking a question costs one keystroke instead of an
    application switch.
-2. As a reader, I want the Palette to appear at my cursor, so that my eyes do not
-   have to travel to find it.
+2. As a reader, I want the Palette to appear in the same place every time,
+   centred on the screen I am working on, so that my eyes learn where to look
+   instead of searching for it.
 3. As a reader, I want the Palette to list only the Actions that accept what I
    selected, so that I am not choosing from options that cannot run.
 4. As a reader, I want to run the highlighted Action with Enter and dismiss the
