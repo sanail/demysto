@@ -8,8 +8,7 @@
 ## The application itself
 
 app-name = Demysto
-tray-open = Открыть Demysto
-tray-actions = Действия
+tray-open = Действия…
 tray-update = Обновить до { $version }…
 tray-settings = Настройки…
 tray-quit = Завершить Demysto

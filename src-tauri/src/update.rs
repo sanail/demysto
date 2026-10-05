@@ -93,10 +93,7 @@ pub async fn look<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, Stri
     // On the main thread, because a menu belongs to the operating system and
     // every caller here is on a background task.
     let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let actions = handle.state::<Demysto>().catalogue().actions;
-        crate::tray::follows_the_catalogue(&handle, &actions);
-    });
+    let _ = app.run_on_main_thread(move || crate::tray::rebuild(&handle));
 
     Ok(version)
 }

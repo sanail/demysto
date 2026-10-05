@@ -29,8 +29,8 @@ pub struct Catalogue {
     unclaimed: Vec<String>,
 }
 
-/// Claims the Hotkeys a catalogue states, puts its Actions in the tray menu,
-/// and hands the catalogue and what could not be claimed to the window.
+/// Claims the Hotkeys a catalogue states, and hands the catalogue and what
+/// could not be claimed to the window.
 ///
 /// The three commands that produce a catalogue all go through here, so that the
 /// Hotkeys follow the directory rather than the last save: an Action that
@@ -47,11 +47,6 @@ pub struct Catalogue {
 fn catalogued<R: Runtime>(app: &AppHandle<R>, defined: demysto_core::Catalogue) -> Catalogue {
     let palette = app.state::<Demysto>().palette_hotkey();
     let unclaimed = crate::hotkey::claim(app, palette.as_deref(), &defined.actions);
-
-    // The tray menu lists the Actions too, and for the same reason it is
-    // brought up to date here: it is the path for somebody who has not learned
-    // the Hotkey, and an Action missing from it is an Action they cannot reach.
-    crate::tray::follows_the_catalogue(app, &defined.actions);
 
     Catalogue { defined, unclaimed }
 }
@@ -342,9 +337,7 @@ pub async fn save_settings<R: Runtime>(
     // Told to every window, not only the one that saved: the language is the
     // one setting that changes what a window says rather than what it does, and
     // a Conversation left open behind Settings would otherwise go on speaking
-    // the language nobody chose any more. The tray menu is not a window and
-    // redraws nowhere, so it is rebuilt where the catalogue is read — see
-    // `catalogued`, which the window asks for straight after a save.
+    // the language nobody chose any more.
     let _ = app.emit(LANGUAGE_EVENT, app.state::<Demysto>().language().tag());
 
     // And the settings themselves, to the window that shows them — which is not
@@ -353,11 +346,11 @@ pub async fn save_settings<R: Runtime>(
     // startup. `settings::saved` says the rest.
     crate::settings::saved(&app, &saved);
 
-    // The two native surfaces no webview redraws, put back beside the event
-    // that redraws the rest: the window's own title, and — on macOS — the menu
-    // bar. The tray menu is the third, and is rebuilt where the catalogue is
-    // read (see `catalogued`, which the window asks for straight after a save).
+    // The native surfaces no webview redraws, put back beside the event that
+    // redraws the rest: the window's own title, the tray menu, and — on macOS —
+    // the menu bar.
     crate::settings::names_itself(&app);
+    crate::tray::rebuild(&app);
 
     #[cfg(target_os = "macos")]
     let _ = crate::menu::build(&app);

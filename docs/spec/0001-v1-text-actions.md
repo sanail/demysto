@@ -165,8 +165,8 @@ same shape and the same standing.
 50. As a user, I want a dock or taskbar entry while a Conversation, Settings or
     the first-run window is open, so that I can switch back to one with the same
     keys I use for every other window.
-51. As a user, I want to reach Settings and run Actions from the tray menu, so
-    that the tool is usable when I don't remember the Hotkey.
+51. As a user, I want to reach Settings and the list of Actions from the tray
+    menu, so that the tool is usable when I don't remember the Hotkey.
 52. As a user, I want to be asked once whether to start Demysto at login and to
     turn that on or off in Settings afterwards, so that it neither installs
     itself silently nor stops working after a reboot.

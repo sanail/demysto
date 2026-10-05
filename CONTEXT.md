@@ -29,7 +29,7 @@ A user's change to a built-in Action — an edited prompt, a bound Model, a pers
 _Avoid_: customisation, patch, user config
 
 **Palette**:
-The window shown by the global hotkey, listing the Actions that accept the current Selection. Not named to the user, who has no word for it: the interface calls it the list of Actions, and says where it opens rather than what it is called.
+The window that lists the Actions accepting the current Selection, opened by the Palette's Hotkey or from the tray. Not named to the user, who has no word for it: the interface calls it the list of Actions, and says where it opens rather than what it is called.
 _Avoid_: launcher, menu, popup, command bar
 
 **Hotkey**:

@@ -11,6 +11,12 @@ What each release brought, newest first.
   the taskbar. It no longer opens beside the pointer, which was often nowhere
   near the text being read.
 
+### Tray
+
+- The tray menu no longer has an Actions submenu, which offered every Action
+  whatever was selected. Its first item, **Actions…**, opens the Palette, which
+  lists only the Actions that accept the Selection.
+
 ## 0.3.2 — 2026-09-15
 
 ### Actions

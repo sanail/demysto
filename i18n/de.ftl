@@ -12,8 +12,7 @@
 ## The application itself
 
 app-name = Demysto
-tray-open = Demysto öffnen
-tray-actions = Aktionen
+tray-open = Aktionen…
 tray-update = Auf { $version } aktualisieren…
 tray-settings = Einstellungen…
 tray-quit = Demysto beenden

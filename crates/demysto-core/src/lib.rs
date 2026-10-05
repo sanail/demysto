@@ -2594,8 +2594,8 @@ mod tests {
         assert_eq!(written.language.as_deref(), Some("ru"));
         assert_eq!(demysto.language(), Interface::Russian);
 
-        // Which is not a fact about the facade alone: the tray menu is rebuilt
-        // from the catalogue, and the Palette from the Actions.
+        // Which is not a fact about the facade alone: Settings lists the
+        // catalogue, and the Palette the Actions.
         assert!(
             demysto.catalogue().actions[0].name == "Объяснить",
             "{:?}",
