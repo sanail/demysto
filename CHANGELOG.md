@@ -2,7 +2,7 @@
 
 What each release brought, newest first.
 
-## Unreleased
+## 1.0.0 — 2026-10-06
 
 ### Palette
 
@@ -18,8 +18,34 @@ What each release brought, newest first.
   lists only the Actions that accept the Selection.
 - **Chats…** in the tray menu brings back the chat window after it was closed,
   on the chat that was on screen.
-- On Windows, **Actions…** no longer finds nothing selected when the tray
-  icon's tooltip is still on screen.
+- On Windows, the tray menu reaches the Selection of the application in front.
+  It used to capture nothing and fall back on the clipboard, and it still did
+  while the tray icon's tooltip was on screen.
+
+### Capture
+
+- On Windows, copying the Selection no longer types a "c" over it when Ctrl is
+  released at the wrong moment, and no longer opens Notepad's menu keys instead
+  of copying.
+
+### Hotkeys
+
+- A Hotkey pressed in the first seconds after Demysto starts runs its Action.
+  It sometimes did nothing, or opened the Palette instead.
+
+### Notifications
+
+- On Linux, a failed Run nobody could see is notified, as on the other
+  systems.
+
+### Startup
+
+- On Windows, Demysto's hidden windows no longer take the keyboard while it
+  starts.
+
+### Documentation
+
+- A README and a getting-started guide, and the MIT license.
 
 ## 0.3.2 — 2026-09-15
 

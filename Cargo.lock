@@ -913,7 +913,7 @@ dependencies = [
 
 [[package]]
 name = "demysto"
-version = "0.3.2"
+version = "1.0.0"
 dependencies = [
  "ashpd",
  "demysto-core",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "demysto-core"
-version = "0.3.2"
+version = "1.0.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
