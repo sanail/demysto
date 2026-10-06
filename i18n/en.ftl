@@ -14,6 +14,7 @@
 
 app-name = Demysto
 tray-open = Actions…
+tray-chats = Chats…
 tray-update = Update to { $version }…
 tray-settings = Settings…
 tray-quit = Quit Demysto
@@ -65,6 +66,7 @@ palette-keys-closing = Esc to close
 result-conversations = Chats
 result-conversation-unnamed = Chat
 result-nothing-asked-yet = Nothing asked yet.
+result-no-chats = No chats in this session yet. Chats are kept only until Demysto quits.
 result-quotation-label = The text this chat is about
 result-picture-label = The picture this chat is about
 result-show-more = Show more

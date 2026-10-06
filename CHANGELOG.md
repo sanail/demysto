@@ -16,6 +16,10 @@ What each release brought, newest first.
 - The tray menu no longer has an Actions submenu, which offered every Action
   whatever was selected. Its first item, **Actions…**, opens the Palette, which
   lists only the Actions that accept the Selection.
+- **Chats…** in the tray menu brings back the chat window after it was closed,
+  on the chat that was on screen.
+- On Windows, **Actions…** no longer finds nothing selected when the tray
+  icon's tooltip is still on screen.
 
 ## 0.3.2 — 2026-09-15
 

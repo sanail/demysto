@@ -1,19 +1,33 @@
-from _demysto import APP, configured_launch, language, nonce, say, tray
+from _demysto import APP, configured_launch, language, mock, nonce, prompts, say, tray
 
 LAUNCH = False
 
 
+ITEMS = ["tray-open", "tray-chats", "tray-settings", "tray-quit"]
+
+
 def scenario(g):
+    answer = "Mock answer " + nonce()
+    provider = mock(g, answer)
     configured_launch(g)
     window = g.wait_for(role="window", app=APP, timeout=5)
     g.check("a launch past the first run opens no window", not window["met"], detail=window)
 
     items = g.tray(tray(g))["items"]
     names = [item["name"] for item in items]
-    for key in ["tray-open", "tray-settings", "tray-quit"]:
+    for key in ITEMS:
         g.check(f"the tray menu has {say(g, key)}", say(g, key) in names, detail=names)
-    g.check("the tray menu's first item is the list of Actions", names[:1] == [say(g, "tray-open")], detail=names)
+    g.check("the tray menu starts with the list of Actions, then the chats",
+            names[:2] == [say(g, "tray-open"), say(g, "tray-chats")], detail=names)
     g.check("the tray menu has no submenu", not any(item["children"] for item in items), detail=items)
+
+    g.tray(tray(g), choose=say(g, "tray-chats"))
+    empty = g.wait_for(text=say(g, "result-no-chats"), app=APP, timeout=15)
+    g.check("Chats… before any chat says there have been none", empty["met"], detail=empty)
+    g.screenshot("no chats yet")
+    g.press("escape")
+    gone = g.wait_for(text=say(g, "result-no-chats"), app=APP, gone=True, timeout=10)
+    g.check("Escape closes the empty chat window", gone["met"], detail=gone)
 
     text = "Ohm's law relates voltage and current " + nonce()
     staged = g.stage_text(text)
@@ -22,10 +36,30 @@ def scenario(g):
     g.check("the first item opens the Palette on the foreground app's selection", palette["met"],
             detail=[palette, staged])
     g.screenshot("palette from the tray")
+
+    # Named in the filter rather than taken from the highlight, which is not
+    # the same Action on every OS.
+    g.type(say(g, "action-explain-name"))
+    g.press("enter")
+    answered = g.wait_for(text=answer, app=APP, timeout=30)
+    g.check("the Palette opened from the tray runs Explain", answered["met"], detail=[answered, provider.output()[-500:]])
     g.press("escape")
-    closed = g.wait_for(text=text, app=APP, gone=True, timeout=10)
-    g.check("Escape closes the Palette opened from the tray", closed["met"], detail=closed)
+    closed = g.wait_for(text=answer, app=APP, gone=True, timeout=10)
+    g.check("Escape closes the chat window", closed["met"], detail=closed)
     g.close_staged(staged)
+
+    g.tray(tray(g), choose=say(g, "tray-chats"))
+    back = g.wait_for(text=answer, app=APP, timeout=15)
+    g.check("Chats… brings the chat window back on the chat it closed on", back["met"], detail=back)
+    g.screenshot("chat reopened from the tray")
+    # Typed without a click: the reopened window has to hold the focus.
+    question = "And resistance? " + nonce()
+    g.type(question)
+    g.press("enter")
+    asked = g.wait_for(text=question, app=APP, timeout=15)
+    g.check("the reopened chat takes a follow-up", asked["met"] and question in prompts(provider),
+            detail=[asked, prompts(provider)])
+    g.press("escape")
 
     g.tray(tray(g), choose=say(g, "tray-settings"))
     settings = g.wait_for(text=say(g, "settings-add-provider"), app=APP, timeout=15)
@@ -47,7 +81,7 @@ def scenario(g):
     g.screenshot("settings in the other language")
     renamed = [item["name"] for item in g.tray(tray(g), timeout=15)["items"]]
     g.check("saving another language renames the tray items without a restart",
-            renamed == [say(g, key, other) for key in ["tray-open", "tray-settings", "tray-quit"]], detail=renamed)
+            renamed == [say(g, key, other) for key in ITEMS], detail=renamed)
 
     g.tray(tray(g), choose=say(g, "tray-quit", other))
     gone = g.wait_for(process=APP, gone=True, timeout=15)

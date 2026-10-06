@@ -1,4 +1,4 @@
-from _demysto import APP, configured_launch, copy_picture, mock, nonce, palette_hotkey, pictures, say
+from _demysto import APP, configured_launch, copy_picture, mock, nonce, palette_hotkey, pictures, say, tray
 
 LAUNCH = False
 # What this measures is the same in every Lab language.
@@ -38,3 +38,12 @@ def scenario(g):
     g.screenshot("answer about the picture")
     g.press("escape")
     g.close_staged(staged)
+
+    # Closing the window let go of the picture, so the chat comes back Sealed.
+    g.tray(tray(g), choose=say(g, "tray-chats"))
+    sealed = g.wait_for(text=say(g, "result-sealed"), app=APP, timeout=15)
+    g.check("a picture chat reopened from the tray says why it cannot go on", sealed["met"], detail=sealed)
+    kept = g.find(text=answer, app=APP)["matches"]
+    g.check("the Sealed chat still reads as it did", kept != [], detail=kept)
+    g.screenshot("sealed chat reopened")
+    g.press("escape")

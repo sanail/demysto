@@ -7,6 +7,9 @@
 //! cannot be relied on for any of it, because Demysto is not in the dock while
 //! it is only waiting; see `dock`.
 //!
+//! It also reaches what the Hotkey does not: this session's Conversations, which
+//! nothing else brings back once their window is closed (user story 88).
+//!
 //! There is no list of Actions here: a menu built before any Capture cannot
 //! leave out the ones the Selection would be refused by, and the Palette can.
 
@@ -18,6 +21,7 @@ use tauri::{App, AppHandle, Manager, Runtime};
 
 /// Menu item ids. Matched in the event handler below.
 const SHOW: &str = "show";
+const CHATS: &str = "chats";
 const SETTINGS: &str = "settings";
 const UPDATE: &str = "update";
 const QUIT: &str = "quit";
@@ -61,6 +65,9 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
                 give_back_the_foreground();
                 crate::palette::reveal(app)
             }
+            // No Capture and no foreground handed back: the Conversations are
+            // about Selections already taken, and nothing here takes another.
+            CHATS => crate::result::reopen(app),
             // Settings rather than the installation itself: taking an update
             // ends this process and starts another, and that is not something
             // to set off from a menu with nothing said first. What is said is
@@ -106,6 +113,10 @@ fn menu<R: Runtime, M: Manager<R>>(manager: &M, demysto: &Demysto) -> tauri::Res
     let words = demysto.words();
 
     let show = MenuItem::with_id(manager, SHOW, words.text("tray-open"), true, None::<&str>)?;
+    // Always enabled: with no Conversation yet the window says why it is empty, which
+    // a greyed-out item cannot, and an item that changes state would be one
+    // more reason to rebuild the menu.
+    let chats = MenuItem::with_id(manager, CHATS, words.text("tray-chats"), true, None::<&str>)?;
     let settings = MenuItem::with_id(
         manager,
         SETTINGS,
@@ -132,7 +143,7 @@ fn menu<R: Runtime, M: Manager<R>>(manager: &M, demysto: &Demysto) -> tauri::Res
         .transpose()?;
 
     let separator = PredefinedMenuItem::separator(manager)?;
-    let mut top: Vec<&dyn tauri::menu::IsMenuItem<R>> = vec![&show, &separator];
+    let mut top: Vec<&dyn tauri::menu::IsMenuItem<R>> = vec![&show, &chats, &separator];
 
     if let Some(update) = &update {
         top.push(update);

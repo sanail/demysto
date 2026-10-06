@@ -167,6 +167,8 @@ same shape and the same standing.
     keys I use for every other window.
 51. As a user, I want to reach Settings and the list of Actions from the tray
     menu, so that the tool is usable when I don't remember the Hotkey.
+88. As a user, I want to reopen this session's chats from the tray menu after
+    closing their window, so that I can read them again or carry one on.
 52. As a user, I want to be asked once whether to start Demysto at login and to
     turn that on or off in Settings afterwards, so that it neither installs
     itself silently nor stops working after a reboot.

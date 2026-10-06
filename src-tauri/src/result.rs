@@ -29,6 +29,11 @@ const RUNNING_EVENT: &str = "result://running";
 /// or not the window was loaded for the events before it.
 const ANSWERED_EVENT: &str = "result://answered";
 
+/// Emitted when the window is brought back from the tray, so that it reads the
+/// Conversation again: closing it let go of the pictures, and a Conversation
+/// about one is Sealed by the time it comes back.
+const REOPENED_EVENT: &str = "result://reopened";
+
 /// Whether a Turn is under way. Held through [`Underway`]; see that module.
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -93,6 +98,21 @@ pub fn continue_answer<R: Runtime>(app: &AppHandle<R>) {
 /// is about (user story 77).
 pub fn ask_at_original_resolution<R: Runtime>(app: &AppHandle<R>) {
     again(app, |demysto| demysto.ask_at_original_resolution(streaming));
+}
+
+/// Brings the window back on the Conversation it was showing when it was
+/// closed, or on none at all — which it says is because there have been none
+/// (user story 88).
+///
+/// Nothing is run and nothing captured: the Conversations it shows are about
+/// Selections taken before.
+pub fn reopen<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = app.get_webview_window(LABEL) else {
+        return;
+    };
+
+    let _ = window.emit(REOPENED_EVENT, ());
+    reveal(&window);
 }
 
 /// Tells the core that this window has gone, so that it can let go of the

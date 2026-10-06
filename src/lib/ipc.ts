@@ -554,6 +554,11 @@ export function onAnswered(handle: () => void): Promise<UnlistenFn> {
   return listen<null>("result://answered", () => handle());
 }
 
+/** The window being brought back from the tray after it was closed. */
+export function onReopened(handle: () => void): Promise<UnlistenFn> {
+  return listen<null>("result://reopened", () => handle());
+}
+
 /** Mirrors `demysto_core::ConfigError`. */
 export type ConfigError = {
   kind: "unreadable" | "refused" | "unwritable" | "malformed" | "no_provider";

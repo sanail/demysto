@@ -10,6 +10,7 @@
     followUp,
     models as configuredModels,
     onAnswered,
+    onReopened,
     onRunning,
     onStreaming,
     openAccessibility,
@@ -94,6 +95,14 @@
         reasoning = false;
         refresh();
       }),
+      // Closing the window let go of the pictures, so a Conversation about one
+      // is Sealed now, whatever is still drawn from before. The box is focused
+      // again because it was not necessarily what held the focus when the
+      // window was closed.
+      onReopened(async () => {
+        await refresh();
+        composer?.focus();
+      }),
       onStreaming((arriving) => {
         if (arriving.arriving === "reasoning") {
           reasoning = true;
@@ -106,7 +115,6 @@
     ];
 
     refresh();
-    tick().then(() => composer?.focus());
 
     return () => listening.forEach((listener) => listener.then((off) => off()));
   });
@@ -182,6 +190,20 @@
   let reading = $state<HTMLElement>();
   let composer = $state<HTMLTextAreaElement>();
   let pinned = $state(true);
+
+  /** Whether the box has been given the focus it starts with. */
+  let focusedOnce = false;
+
+  // Focused the first time it comes into being rather than as the window
+  // mounts: the window is loaded at startup with no Conversation and so no
+  // box, and the first Run is what puts one there. Once only, as it was on
+  // mount: after that the focus is wherever the user put it.
+  $effect(() => {
+    if (!composer || focusedOnce) return;
+
+    focusedOnce = true;
+    composer.focus();
+  });
 
   /** Which Turn's copy button is saying it copied something. */
   let copied = $state<number | null>(null);
@@ -764,6 +786,12 @@
       </p>
     {/if}
 
+    {#if showing === null}
+      <!-- Only reachable from the tray: every other way into this window is a
+           Run, which puts a Conversation here before the window is shown. -->
+      <p class="text-sm opacity-50">{t("result-no-chats")}</p>
+    {/if}
+
     {#each turns as turn, at (at)}
       {@const last = at === turns.length - 1}
       {@const text = said(turn, last)}
@@ -903,7 +931,10 @@
   </div>
 
   <footer class="flex flex-col gap-1.5">
-    {#if sealed}
+    {#if showing === null}
+      <!-- Nothing to follow up: a chat is always a Run of an Action on a
+           Selection, and none has been run yet. -->
+    {:else if sealed}
       <!-- Where the input box was, and not beside it: a box that cannot be
            used is worse than none, because it reads as a window that has
            stopped working. -->
