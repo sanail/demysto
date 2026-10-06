@@ -2,8 +2,8 @@
 # Runs vmlab VERSION: ./vmlab.pyz beside this file if there is one, else that release
 # from GitHub, downloaded once into ~/.vmlab/dist/ (ADR 0004). SHA256, when set, is the
 # digest the downloaded file must have. VMLAB_PYZ=PATH runs that zipapp instead: a local build.
-VERSION=1.1.0
-SHA256=271f00d4afc9024d02b17e5b5c6015e3db0502fca13706fb7ee3a201538b2dec
+VERSION=1.1.1
+SHA256=9d63723565b5fe33f490d1315be30515e880b3be48d645daf3a480a5120a109e
 
 die() { echo "vmlab: $*" >&2; exit 1; }
 digest() { { shasum -a 256 2>/dev/null || sha256sum; } < "$1" | cut -d' ' -f1; }
