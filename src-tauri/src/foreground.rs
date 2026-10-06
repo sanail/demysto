@@ -17,12 +17,15 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 /// The shell's own windows, which are never what the user is reading: the
-/// taskbars, the hidden icons' flyout, and the desktop behind everything.
-const SHELL: [&str; 6] = [
+/// taskbars, the hidden icons' flyout, the tooltips and popups the taskbar puts
+/// up — the tray icon's own name among them, still standing after the click
+/// that opened the menu — and the desktop behind everything.
+const SHELL: [&str; 7] = [
     "Shell_TrayWnd",
     "Shell_SecondaryTrayWnd",
     "NotifyIconOverflowWindow",
     "TopLevelWindowForOverflowXamlIsland",
+    "Xaml_WindowedPopupClass",
     "Progman",
     "WorkerW",
 ];
