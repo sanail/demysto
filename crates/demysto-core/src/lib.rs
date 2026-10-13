@@ -56,8 +56,11 @@ pub struct Demysto {
     config_dir: PathBuf,
     version: String,
     capture: Box<dyn Capture>,
+    /// Where an area of the screen is chosen, apart from `capture`: pressing
+    /// the screen-area Hotkey is an explicit request for the screen.
+    screen: Box<dyn capture::Screen>,
     /// What a Capture on this desktop can read, so that the interface can say
-    /// so where the answer is not the whole Selection (user story 56). Held
+    /// so where the answer is not the whole Selection. Held
     /// from startup for the reason the environment is: it is the session
     /// Demysto was launched into, and a session does not change under it.
     capturing: Capturing,
@@ -290,6 +293,7 @@ impl Demysto {
             config_dir,
             version,
             capture,
+            screen: desktop::screen(),
             capturing,
             last_capture: Mutex::new(None),
             store: Mutex::new(Store::new()),
@@ -370,6 +374,19 @@ impl Demysto {
         *self.last_capture.lock().unwrap() = Some(outcome.clone());
 
         outcome
+    }
+
+    /// Lets the user choose an area of the screen and remembers the picture,
+    /// or answers `None` and remembers nothing where they cancelled.
+    pub fn capture_area(&self) -> Option<CaptureOutcome> {
+        let outcome = match capture::from_the_screen(&*self.screen) {
+            Ok(None) => return None,
+            Ok(Some(captured)) => CaptureOutcome::Captured(captured),
+            Err(error) => CaptureOutcome::Failed(error),
+        };
+        *self.last_capture.lock().unwrap() = Some(outcome.clone());
+
+        Some(outcome)
     }
 
     /// What the last Capture produced, or `None` before there has been one.
@@ -931,13 +948,24 @@ impl Demysto {
     /// what Demysto is running on is an error until a Provider is configured,
     /// which would lose a Hotkey stated by somebody who has not got that far.
     pub fn palette_hotkey(&self) -> Option<String> {
+        self.stated_hotkey(|file| file.palette_hotkey)
+    }
+
+    /// The Hotkey that chooses an area of the screen, `None` until somebody
+    /// sets one: it has no default, so an update claims nothing new. Read like
+    /// [`Self::palette_hotkey`].
+    pub fn screen_area_hotkey(&self) -> Option<String> {
+        self.stated_hotkey(|file| file.screen_area_hotkey)
+    }
+
+    fn stated_hotkey(&self, which: impl FnOnce(config::File) -> Option<String>) -> Option<String> {
         // One guard rather than two: a second `read` taken while the first is
         // still held deadlocks against a `write` that queued between them, and
         // saving the settings is exactly that write.
         let words = self.words();
         let (path, text) = config::read(&self.config_dir, &words).ok()?;
 
-        config::stated(config::parse(&path, &text, &words).ok()?.palette_hotkey)
+        config::stated(which(config::parse(&path, &text, &words).ok()?))
     }
 
     /// The keys a Hotkey may be on its own, for the window that records one.
@@ -3502,6 +3530,7 @@ mod tests {
             default_model: default.map(ToOwned::to_owned),
             default_vision_model: None,
             palette_hotkey: None,
+            screen_area_hotkey: None,
             large_selection: None,
             language: None,
         }
@@ -3615,6 +3644,7 @@ mod tests {
             default_model: Some("openai/gpt-4o-mini".to_owned()),
             default_vision_model: Some("openai/gpt-4o".to_owned()),
             palette_hotkey: Some("Ctrl+Alt+Space".to_owned()),
+            screen_area_hotkey: Some("Ctrl+Alt+A".to_owned()),
             large_selection: Some(1_000),
             language: Some("ru".to_owned()),
         };
@@ -5202,6 +5232,7 @@ mod tests {
                 default_model: Some(String::new()),
                 default_vision_model: Some("   ".to_owned()),
                 palette_hotkey: Some("   ".to_owned()),
+                screen_area_hotkey: Some("   ".to_owned()),
                 large_selection: None,
                 language: Some(String::new()),
             },
@@ -6641,5 +6672,202 @@ mod tests {
                 .sealed,
             "the oldest picture is the one that goes"
         );
+    }
+
+    /// The area of the screen as `screencapture` writes it: a PNG file.
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        use image::ImageEncoder;
+
+        let pixels = fake::pixels(width, height, 1);
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(
+                &pixels.bytes,
+                width,
+                height,
+                image::ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+
+        bytes
+    }
+
+    /// A Demysto whose screen yields `area`, with the clipboard and the
+    /// foreground application of `desktop` beside it.
+    fn choosing(
+        desktop: &Arc<FakeDesktop>,
+        settings: Option<&str>,
+        area: Result<Option<Vec<u8>>, CaptureError>,
+    ) -> Rooted {
+        let mut rooted = rooted(fake::over(desktop), settings);
+        rooted.demysto.screen = Box::new(fake::FakeScreen(area));
+
+        rooted
+    }
+
+    #[test]
+    fn an_area_of_the_screen_reaches_the_palette_as_a_picture_from_the_screen() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = choosing(&desktop, None, Ok(Some(png(40, 30))));
+
+        let outcome = demysto.capture_area().expect("an area was chosen");
+
+        assert!(
+            matches!(
+                &outcome,
+                CaptureOutcome::Captured(Captured::Screen(Selection::Image { .. }))
+            ),
+            "{outcome:?}"
+        );
+        assert_eq!(demysto.last_capture(), Some(outcome));
+        assert_eq!(
+            offered(&demysto),
+            ["Describe image", "Translate", "Custom…"]
+        );
+    }
+
+    #[test]
+    fn an_area_of_the_screen_runs_as_a_copied_picture_does() {
+        let mut server = Server::new();
+        let (fitted, _) = fitted_and_original(2000, 100);
+        let endpoint = asked_for(&mut server, vec![carrying(&fitted)]);
+
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = choosing(
+            &desktop,
+            Some(&format!(
+                "version = 1\n\n{}",
+                one_seeing_provider(&format!("{}/v1", server.url()))
+            )),
+            Ok(Some(png(2000, 100))),
+        );
+        demysto.capture_area();
+        running(&demysto, "describe-image", &[]);
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn an_area_of_the_screen_can_be_asked_about_at_its_original_resolution() {
+        let mut server = Server::new();
+        let (_, original) = fitted_and_original(2000, 100);
+        let endpoint = asked_for(&mut server, vec![carrying(&original)]);
+
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = choosing(
+            &desktop,
+            Some(&format!(
+                "version = 1\n\n{}",
+                one_seeing_provider(&format!("{}/v1", server.url()))
+            )),
+            Ok(Some(png(2000, 100))),
+        );
+        demysto.capture_area();
+        running(&demysto, "describe-image", &[]);
+        demysto.ask_at_original_resolution(|_| {});
+
+        endpoint.assert();
+    }
+
+    #[test]
+    fn a_cancelled_area_opens_nothing_and_forgets_nothing() {
+        // Esc, a click without a drag: the tool writes no file, or an empty
+        // one, and its exit status is not what says so.
+        for area in [None, Some(Vec::new())] {
+            let desktop = Arc::new(FakeDesktop::new(None, Some("a paragraph")));
+            let demysto = choosing(&desktop, None, Ok(area));
+            let before = demysto.capture();
+
+            assert_eq!(demysto.capture_area(), None);
+            assert_eq!(demysto.last_capture(), Some(before));
+        }
+    }
+
+    #[test]
+    fn an_area_of_a_couple_of_pixels_is_a_cancelled_one() {
+        for (width, height) in [(2, 300), (300, 2), (1, 1)] {
+            let desktop = Arc::new(FakeDesktop::new(None, None));
+            let demysto = choosing(&desktop, None, Ok(Some(png(width, height))));
+
+            assert_eq!(demysto.capture_area(), None, "{width}×{height}");
+        }
+    }
+
+    #[test]
+    fn choosing_an_area_leaves_the_clipboard_and_the_selection_alone() {
+        let desktop = Arc::new(
+            FakeDesktop::new(Some("copied a moment ago"), Some("a paragraph"))
+                .holding_picture(fake::pixels(8, 6, 2)),
+        );
+        let demysto = choosing(&desktop, None, Ok(Some(png(40, 30))));
+
+        demysto.capture_area();
+
+        assert_eq!(
+            desktop.clipboard_now().as_deref(),
+            Some("copied a moment ago")
+        );
+        assert_eq!(desktop.picture_now(), Some(fake::pixels(8, 6, 2)));
+        assert_eq!(desktop.picture_reads(), 0);
+        assert!(!desktop.sent_a_copy());
+    }
+
+    #[test]
+    fn an_area_the_tool_wrote_badly_is_reported() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = choosing(&desktop, None, Ok(Some(b"not a picture".to_vec())));
+
+        assert!(matches!(
+            demysto.capture_area(),
+            Some(CaptureOutcome::Failed(CaptureError::Screen(_)))
+        ));
+    }
+
+    #[test]
+    fn a_tool_that_would_not_start_is_reported() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = choosing(
+            &desktop,
+            None,
+            Err(CaptureError::Screen("no such file".to_owned())),
+        );
+
+        assert_eq!(
+            demysto.capture_area(),
+            Some(CaptureOutcome::Failed(CaptureError::Screen(
+                "no such file".to_owned()
+            )))
+        );
+    }
+
+    #[test]
+    fn the_screen_area_hotkey_is_unset_until_somebody_sets_it() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = rooted(fake::over(&desktop), Some("version = 1\n"));
+
+        assert_eq!(demysto.screen_area_hotkey(), None);
+        assert_eq!(demysto.settings().unwrap().screen_area_hotkey, None);
+    }
+
+    #[test]
+    fn the_screen_area_hotkey_is_written_beside_the_palettes() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = rooted(fake::over(&desktop), Some("version = 1\n"));
+
+        let written = demysto
+            .save_settings(&Edit {
+                providers: Vec::new(),
+                default_model: None,
+                default_vision_model: None,
+                palette_hotkey: Some("Ctrl+Alt+P".to_owned()),
+                screen_area_hotkey: Some("  Ctrl+Alt+A ".to_owned()),
+                large_selection: None,
+                language: None,
+            })
+            .unwrap();
+
+        assert_eq!(written.screen_area_hotkey.as_deref(), Some("Ctrl+Alt+A"));
+        assert_eq!(demysto.screen_area_hotkey().as_deref(), Some("Ctrl+Alt+A"));
+        assert_eq!(demysto.palette_hotkey().as_deref(), Some("Ctrl+Alt+P"));
     }
 }

@@ -30,7 +30,8 @@ asked about.
 - **Explain, Translate, Summarize.** Built in and one keypress away, in any
   application.
 - **Works on pictures too.** Copy a screenshot, a diagram or a photo of a sign
-  and ask about it the same way.
+  and ask about it the same way, or drag out an area of the screen with a
+  Hotkey of its own.
 
   <p align="center">
     <img src="docs/images/translate-picture.png" width="440" alt="A German station notice translated into English in a Demysto chat">

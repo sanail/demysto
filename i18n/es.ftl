@@ -44,6 +44,7 @@ palette-reading-selection = Leyendo la selección…
 palette-reading-clipboard = Leyendo el portapapeles…
 palette-origin-selection = Selección
 palette-origin-clipboard = Del portapapeles
+palette-origin-screen = De la pantalla
 palette-picture = Una imagen, { $dimensions }
 palette-nothing-captured = No hay nada seleccionado y el portapapeles está vacío. Selecciona un texto y pulsa el atajo otra vez.
 palette-filter = Filtrar acciones…
@@ -174,12 +175,14 @@ settings-language-from-environment = { $variable } vale { $value }, así que ese
 
 settings-hotkeys = Atajos de teclado
 settings-palette-hotkey = Abre la lista de acciones
+settings-screen-area-hotkey = Abre la lista de acciones sobre un área de la pantalla
 settings-hotkey-record = Grabar
 settings-hotkey-clear = Borrar
 settings-hotkey-cancel = Cancelar
 settings-hotkey-recording = Pulsa las teclas… Esc para cancelar
 settings-hotkey-default = { $hotkey } — por defecto
 settings-hotkey-none = Ninguno — esta acción se lanza desde la lista
+settings-screen-area-hotkey-none = Ninguno — asigna uno para elegir un área de la pantalla
 settings-palette-hotkey-rule = Mantén Ctrl, Alt o Shift y pulsa una tecla. Una tecla que escribe algo no se puede reservar sola: dejaría de escribirse en todas partes.
 settings-action-hotkey-rule = Mantén Ctrl, Alt o Shift y pulsa una tecla. Una tecla que escribe algo no se puede reservar sola: dejaría de escribirse en todas partes. Por esta vía no se piden los parámetros: cada uno toma su valor por defecto.
 settings-wayland-hotkeys = En Wayland los atajos los reparte el escritorio, no Demysto. Cámbialos en los ajustes de teclado del propio escritorio, donde aparecen bajo Demysto.
@@ -298,6 +301,7 @@ capture-clipboard-unavailable = El portapapeles no está disponible: { $detail }
 capture-keystroke-refused = No se ha podido enviar la pulsación de copiar: { $detail }
 capture-no-accessibility = macOS no deja que Demysto lea lo que seleccionaste sin el permiso de Accesibilidad. Abre Privacidad y seguridad → Accesibilidad y activa Demysto.
 capture-picture-unreadable = Demysto no pudo leer la imagen del portapapeles. Cópiala otra vez, o copia otra.
+capture-screen-unavailable = Demysto no pudo capturar el área de la pantalla: { $detail }
 accessibility-pane-unreachable = Demysto no ha podido abrir Ajustes del Sistema: { $detail }. El permiso está en Privacidad y seguridad → Accesibilidad.
 accessibility-only-macos = Solo macOS pide un permiso antes de que Demysto pueda leer lo que seleccionaste.
 
@@ -398,12 +402,15 @@ hotkey-palette-refused = Demysto no pudo reservar el atajo «{ $hotkey }» que i
 hotkey-action-not-a-combination = { $action } indica el atajo «{ $hotkey }», que Demysto no entiende. Un atajo son sus modificadores y luego una tecla, escrito como «Ctrl+Shift+E».
 hotkey-action-types-something = { $action } indica el atajo «{ $hotkey }», que es una sola tecla que escribe. Añade Ctrl, Alt o Shift: sola dejaría de escribirse en todas partes.
 hotkey-action-already-held = { $action } indica el atajo «{ $hotkey }», y { $holder } ya lo tiene. Solo { $holder } responde a él; dale otro a { $action }.
+hotkey-screen-area-already-held = Los ajustes indican el atajo «{ $hotkey }» para un área de la pantalla, y { $holder } ya lo tiene. Dale otro al área.
 hotkey-action-refused = { $action } indica el atajo «{ $hotkey }», y Demysto no pudo reservarlo: { $detail }. Puede que ya lo tenga otra aplicación.
 hotkey-palette-holder = la lista de acciones
+hotkey-screen-area-holder = el área de la pantalla
 
 ## What a Wayland desktop made of the Hotkeys it was asked for
 
 portal-palette-description = Demysto — abrir la lista de acciones
+portal-screen-area-description = Demysto — elegir un área de la pantalla
 portal-action-description = Demysto — { $action }
 portal-not-taken-yet = El escritorio todavía no ha tomado un atajo para { $wanted }, así que aún no responde nada. Demysto lo está pidiendo otra vez.
 portal-not-taken = El escritorio no ha tomado un atajo para { $wanted }, así que no responde nada. Los atajos de Demysto se asignan en los ajustes de atajos de teclado del escritorio.
@@ -470,6 +477,10 @@ settings-file-preamble =
     # y después una tecla — "Ctrl+Alt+Space". Una tecla que no escribe nada —de
     # volumen o de reproducción, o F13 y superiores— puede ir sola. La ventana de
     # ajustes graba una por ti si prefieres pulsarla a deletrearla.
+    #
+    # `screen_area_hotkey` es la combinación de teclas con la que eliges un área de
+    # la pantalla y abres la lista de acciones sobre ella. No hay ninguna hasta que
+    # la indicas.
     #
     # `language` es el idioma en el que habla Demysto: "en", "de", "es", "fr" o "ru".
     # Déjalo fuera y Demysto sigue al sistema operativo, recurriendo al inglés.

@@ -31,12 +31,15 @@ use demysto_core::{say, Words};
 /// place.
 pub const OPENS_THE_PALETTE: &str = "palette";
 
+/// The identifier the portal knows the screen-area Hotkey by.
+pub const SELECTS_AN_AREA: &str = "screen-area";
+
 /// The identifier the portal knows one Action's Hotkey by.
 pub fn for_action(action: &str) -> String {
     format!("action:{action}")
 }
 
-/// The Action a portal identifier names, or `None` where it names the Palette.
+/// The Action a portal identifier names, or `None` where it names no Action.
 pub fn action_of(id: &str) -> Option<&str> {
     id.strip_prefix("action:")
 }

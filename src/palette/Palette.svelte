@@ -69,7 +69,9 @@
       ? t("palette-origin-selection")
       : captured?.origin === "clipboard"
         ? t("palette-origin-clipboard")
-        : null,
+        : captured?.origin === "screen"
+          ? t("palette-origin-screen")
+          : null,
   );
 
   /**
@@ -103,7 +105,7 @@
   /**
    * What a Capture that failed is owed, in a whole sentence.
    *
-   * The backend reports which of the three it was and quotes whatever the
+   * The backend reports which kind it was and quotes whatever the
    * platform said; the sentence around that is the catalogue's, like every
    * other sentence in this window.
    */
@@ -117,6 +119,8 @@
         return t("capture-picture-unreadable");
       case "permission":
         return t("capture-no-accessibility");
+      case "screen":
+        return t("capture-screen-unavailable", { detail: failure.message });
     }
   }
 

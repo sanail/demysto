@@ -35,7 +35,7 @@
     bindableModels: string[];
     editing: Editing | null;
     /** Which Hotkey field is being recorded into, `null` for neither. */
-    recording: "palette" | "action" | null;
+    recording: "palette" | "screen_area" | "action" | null;
     /** Takes a catalogue that has just been read as the state of the window. */
     held: (catalogue: Catalogue) => void;
     /** Leaves the Action being edited, whatever was being done to it. */

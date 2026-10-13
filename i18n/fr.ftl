@@ -48,6 +48,7 @@ palette-reading-selection = Lecture de la sélection…
 palette-reading-clipboard = Lecture du presse-papiers…
 palette-origin-selection = Sélection
 palette-origin-clipboard = Depuis le presse-papiers
+palette-origin-screen = Depuis l'écran
 palette-picture = Une image, { $dimensions }
 palette-nothing-captured = Rien n'est sélectionné et le presse-papiers est vide. Sélectionnez du texte et appuyez de nouveau sur le raccourci.
 palette-filter = Filtrer les actions…
@@ -178,12 +179,14 @@ settings-language-from-environment = { $variable } vaut { $value } : c'est donc 
 
 settings-hotkeys = Raccourcis
 settings-palette-hotkey = Ouvre la liste des actions
+settings-screen-area-hotkey = Ouvre la liste des actions sur une zone de l'écran
 settings-hotkey-record = Saisir
 settings-hotkey-clear = Effacer
 settings-hotkey-cancel = Annuler
 settings-hotkey-recording = Appuyez sur les touches… Échap pour annuler
 settings-hotkey-default = { $hotkey } — par défaut
 settings-hotkey-none = Aucun — cette action se lance depuis la liste
+settings-screen-area-hotkey-none = Aucun — définissez-en un pour choisir une zone de l'écran
 settings-palette-hotkey-rule = Maintenez Ctrl, Alt ou Shift et appuyez sur une touche. Une touche qui écrit quelque chose ne peut pas être prise seule : elle cesserait de s'écrire partout.
 settings-action-hotkey-rule = Maintenez Ctrl, Alt ou Shift et appuyez sur une touche. Une touche qui écrit quelque chose ne peut pas être prise seule : elle cesserait de s'écrire partout. Les paramètres ne sont pas demandés par cette voie : chacun prend sa valeur par défaut.
 settings-wayland-hotkeys = Sous Wayland, c'est le bureau qui distribue les raccourcis, pas Demysto. Changez-les dans ses propres réglages de clavier, où ils figurent sous Demysto.
@@ -302,6 +305,7 @@ capture-clipboard-unavailable = Le presse-papiers est indisponible : { $detail }
 capture-keystroke-refused = La frappe de copie n'a pas pu être envoyée : { $detail }
 capture-no-accessibility = macOS ne laisse pas Demysto lire votre sélection sans l'autorisation Accessibilité. Ouvrez Confidentialité et sécurité → Accessibilité et activez Demysto.
 capture-picture-unreadable = Demysto n'a pas pu lire l'image du presse-papiers. Copiez-la de nouveau, ou copiez-en une autre.
+capture-screen-unavailable = Demysto n'a pas pu capturer la zone de l'écran : { $detail }
 accessibility-pane-unreachable = Demysto n'a pas pu ouvrir les Réglages Système : { $detail }. L'autorisation se trouve dans Confidentialité et sécurité → Accessibilité.
 accessibility-only-macos = Seul macOS demande une autorisation avant que Demysto puisse lire votre sélection.
 
@@ -402,12 +406,15 @@ hotkey-palette-refused = Demysto n'a pas pu réserver le raccourci « { $hotkey 
 hotkey-action-not-a-combination = { $action } indique le raccourci « { $hotkey } », que Demysto ne comprend pas. Un raccourci, ce sont ses modificateurs puis une touche, écrit comme « Ctrl+Shift+E ».
 hotkey-action-types-something = { $action } indique le raccourci « { $hotkey } », une touche seule qui écrit. Ajoutez Ctrl, Alt ou Shift : seule, elle cesserait de s'écrire partout.
 hotkey-action-already-held = { $action } indique le raccourci « { $hotkey } », et { $holder } le tient déjà. Seul { $holder } y répond ; donnez-en un autre à { $action }.
+hotkey-screen-area-already-held = Les réglages indiquent le raccourci « { $hotkey } » pour une zone de l'écran, et { $holder } le tient déjà. Donnez-en un autre à la zone.
 hotkey-action-refused = { $action } indique le raccourci « { $hotkey } », et Demysto n'a pas pu le réserver : { $detail }. Une autre application le détient peut-être déjà.
 hotkey-palette-holder = la liste des actions
+hotkey-screen-area-holder = la zone de l'écran
 
 ## What a Wayland desktop made of the Hotkeys it was asked for
 
 portal-palette-description = Demysto — ouvrir la liste des actions
+portal-screen-area-description = Demysto — choisir une zone de l'écran
 portal-action-description = Demysto — { $action }
 portal-not-taken-yet = Le bureau n'a pas encore pris de raccourci pour { $wanted }, rien n'y répond donc encore. Demysto le redemande.
 portal-not-taken = Le bureau n'a pas pris de raccourci pour { $wanted }, rien n'y répond donc. Les raccourcis de Demysto s'attribuent dans les réglages de raccourcis clavier du bureau.
@@ -475,6 +482,10 @@ settings-file-preamble =
     # rien — de volume ou de lecture, ou F13 et au-delà — peut tenir seule. La
     # fenêtre des réglages en enregistre une pour vous si vous préférez l'appuyer
     # que l'épeler.
+    #
+    # `screen_area_hotkey` est la combinaison de touches qui vous fait choisir une
+    # zone de l'écran et ouvre la liste des actions sur elle. Il n'y en a aucune tant
+    # que vous n'en indiquez pas.
     #
     # `language` est la langue que parle Demysto : "en", "de", "es", "fr" ou "ru".
     # Laissez-la de côté et Demysto suit le système d'exploitation, en se rabattant

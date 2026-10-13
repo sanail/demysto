@@ -247,6 +247,7 @@
           : (saved?.default_model ?? null),
       default_vision_model: saved?.default_vision_model ?? null,
       palette_hotkey: saved?.palette_hotkey ?? null,
+      screen_area_hotkey: saved?.screen_area_hotkey ?? null,
       large_selection: saved?.large_selection ?? null,
       // Only a language the user actually chose. Leaving the one they were
       // shown alone leaves the file saying nothing about it, which is Demysto

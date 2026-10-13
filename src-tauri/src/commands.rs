@@ -45,8 +45,13 @@ pub struct Catalogue {
 /// is reached only from the window that writes Actions, so the settings file it
 /// reads is not read on any path a keypress takes.
 fn catalogued<R: Runtime>(app: &AppHandle<R>, defined: demysto_core::Catalogue) -> Catalogue {
-    let palette = app.state::<Demysto>().palette_hotkey();
-    let unclaimed = crate::hotkey::claim(app, palette.as_deref(), &defined.actions);
+    let demysto = app.state::<Demysto>();
+    let unclaimed = crate::hotkey::claim(
+        app,
+        demysto.palette_hotkey().as_deref(),
+        demysto.screen_area_hotkey().as_deref(),
+        &defined.actions,
+    );
 
     Catalogue { defined, unclaimed }
 }

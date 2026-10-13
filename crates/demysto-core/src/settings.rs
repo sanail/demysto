@@ -42,6 +42,9 @@ pub struct Settings {
     /// for the reason `DefinedAction::hotkey` is: whether a combination can be
     /// claimed is a question only the desktop can answer.
     pub palette_hotkey: Option<String>,
+    /// The Hotkey that chooses an area of the screen, `None` for none: unlike
+    /// the Palette's it has no default.
+    pub screen_area_hotkey: Option<String>,
     /// How many characters a Selection may hold before Demysto says so, `None`
     /// where the file states nothing and Demysto's own figure decides — which
     /// [`crate::Status`] reports, so that the window can name it.
@@ -110,6 +113,7 @@ pub struct Edit {
     pub default_model: Option<String>,
     pub default_vision_model: Option<String>,
     pub palette_hotkey: Option<String>,
+    pub screen_area_hotkey: Option<String>,
     /// `None` takes the setting out of the file and leaves Demysto's own figure
     /// deciding; zero is the user asking to be told nothing, which is a
     /// different thing and is written.
@@ -289,6 +293,7 @@ pub(crate) fn read(
         // Hotkey stated by hand as " F13" would read back looking right and
         // then refuse to be claimed, for a reason nothing on screen could show.
         palette_hotkey: config::stated(file.palette_hotkey),
+        screen_area_hotkey: config::stated(file.screen_area_hotkey),
         large_selection: file.large_selection,
         // Only a language Demysto speaks reaches the window: it has no field
         // that could show a third, and `i18n::chosen` is already passing the
@@ -517,6 +522,11 @@ fn rewritten(text: &str, edit: &Edit, path: &Path, words: &Words) -> Result<Stri
         root,
         config::PALETTE_SETTING,
         edit.palette_hotkey.as_deref(),
+    );
+    stating(
+        root,
+        config::SCREEN_AREA_SETTING,
+        edit.screen_area_hotkey.as_deref(),
     );
     counting(root, config::LARGE_SELECTION_SETTING, edit.large_selection);
     // Only a language Demysto speaks is written. The window offers a list, so

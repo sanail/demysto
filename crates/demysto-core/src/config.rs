@@ -40,6 +40,8 @@ pub(crate) const MODEL_SETTING: &str = "default_model";
 pub(crate) const VISION_SETTING: &str = "default_vision_model";
 /// What the settings call the Hotkey that opens the Palette.
 pub(crate) const PALETTE_SETTING: &str = "palette_hotkey";
+/// And the one that chooses an area of the screen.
+pub(crate) const SCREEN_AREA_SETTING: &str = "screen_area_hotkey";
 /// And the length past which a Selection is worth a word before it is paid for.
 pub(crate) const LARGE_SELECTION_SETTING: &str = "large_selection";
 /// And the language the interface is asked to speak.
@@ -506,6 +508,8 @@ pub(crate) struct File {
     /// give. It is a field only because the file denies unknown ones, and a
     /// file stating a Hotkey has to stay a file Demysto can read.
     pub(crate) palette_hotkey: Option<String>,
+    /// The Hotkey that chooses an area of the screen, `None` for none at all.
+    pub(crate) screen_area_hotkey: Option<String>,
     /// How many characters a Selection may hold before Demysto says so, `None`
     /// where the file states nothing and [`DEFAULT_LARGE_SELECTION`] decides.
     pub(crate) large_selection: Option<u64>,

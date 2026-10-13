@@ -48,6 +48,7 @@ palette-reading-selection = Lese die Auswahl…
 palette-reading-clipboard = Lese die Zwischenablage…
 palette-origin-selection = Auswahl
 palette-origin-clipboard = Aus der Zwischenablage
+palette-origin-screen = Vom Bildschirm
 palette-picture = Ein Bild, { $dimensions }
 palette-nothing-captured = Es ist nichts ausgewählt, und die Zwischenablage ist leer. Wählen Sie Text aus und drücken Sie das Tastenkürzel noch einmal.
 palette-filter = Aktionen filtern…
@@ -178,12 +179,14 @@ settings-language-from-environment = { $variable } steht auf { $value }; das ist
 
 settings-hotkeys = Tastenkürzel
 settings-palette-hotkey = Öffnet die Liste der Aktionen
+settings-screen-area-hotkey = Öffnet die Liste der Aktionen für einen Bildschirmbereich
 settings-hotkey-record = Aufnehmen
 settings-hotkey-clear = Leeren
 settings-hotkey-cancel = Abbrechen
 settings-hotkey-recording = Tasten drücken… Esc zum Abbrechen
 settings-hotkey-default = { $hotkey } — Standard
 settings-hotkey-none = Keines — diese Aktion wird aus der Liste gestartet
+settings-screen-area-hotkey-none = Keines — legen Sie eines fest, um einen Bildschirmbereich zu wählen
 settings-palette-hotkey-rule = Halten Sie Ctrl, Alt oder Shift und drücken Sie eine Taste. Eine Taste, die etwas schreibt, lässt sich nicht allein belegen: sie würde überall aufhören zu schreiben.
 settings-action-hotkey-rule = Halten Sie Ctrl, Alt oder Shift und drücken Sie eine Taste. Eine Taste, die etwas schreibt, lässt sich nicht allein belegen: sie würde überall aufhören zu schreiben. Parameter werden dabei nicht abgefragt — jeder nimmt seinen Standardwert.
 settings-wayland-hotkeys = Unter Wayland vergibt die Arbeitsumgebung die Tastenkürzel, nicht Demysto. Ändern Sie sie in deren eigenen Tastatureinstellungen, wo sie unter Demysto aufgeführt sind.
@@ -302,6 +305,7 @@ capture-clipboard-unavailable = Die Zwischenablage ist nicht verfügbar: { $deta
 capture-keystroke-refused = Der Tastendruck zum Kopieren konnte nicht gesendet werden: { $detail }
 capture-no-accessibility = macOS lässt Demysto Ihre Markierung ohne die Bedienungshilfen-Berechtigung nicht lesen. Öffnen Sie Datenschutz & Sicherheit → Bedienungshilfen und schalten Sie Demysto ein.
 capture-picture-unreadable = Demysto konnte das Bild in der Zwischenablage nicht lesen. Kopieren Sie es erneut oder ein anderes.
+capture-screen-unavailable = Demysto konnte den Bildschirmbereich nicht aufnehmen: { $detail }
 accessibility-pane-unreachable = Demysto konnte die Systemeinstellungen nicht öffnen: { $detail }. Die Berechtigung liegt unter „Datenschutz & Sicherheit“ → „Bedienungshilfen“.
 accessibility-only-macos = Nur macOS verlangt eine Berechtigung, bevor Demysto Ihre Markierung lesen kann.
 
@@ -402,12 +406,15 @@ hotkey-palette-refused = Demysto konnte das in den Einstellungen genannte Tasten
 hotkey-action-not-a-combination = { $action } nennt das Tastenkürzel „{ $hotkey }“, das Demysto nicht versteht. Ein Tastenkürzel sind seine Modifikatoren und dann eine Taste, geschrieben wie „Ctrl+Shift+E“.
 hotkey-action-types-something = { $action } nennt das Tastenkürzel „{ $hotkey }“ — eine einzelne Taste, die schreibt. Fügen Sie Ctrl, Alt oder Shift hinzu: allein würde sie überall aufhören zu schreiben.
 hotkey-action-already-held = { $action } nennt das Tastenkürzel „{ $hotkey }“, und { $holder } hat es bereits. Nur { $holder } antwortet darauf; geben Sie { $action } ein anderes.
+hotkey-screen-area-already-held = Die Einstellungen nennen das Tastenkürzel „{ $hotkey }“ für einen Bildschirmbereich, und { $holder } hat es bereits. Geben Sie dem Bereich ein anderes.
 hotkey-action-refused = { $action } nennt das Tastenkürzel „{ $hotkey }“, und Demysto konnte es nicht beanspruchen: { $detail }. Vielleicht hat eine andere Anwendung es bereits.
 hotkey-palette-holder = die Liste der Aktionen
+hotkey-screen-area-holder = der Bildschirmbereich
 
 ## What a Wayland desktop made of the Hotkeys it was asked for
 
 portal-palette-description = Demysto — die Liste der Aktionen öffnen
+portal-screen-area-description = Demysto — einen Bildschirmbereich wählen
 portal-action-description = Demysto — { $action }
 portal-not-taken-yet = Die Arbeitsumgebung hat für { $wanted } noch kein Tastenkürzel übernommen, deshalb antwortet darauf noch nichts. Demysto fragt erneut.
 portal-not-taken = Die Arbeitsumgebung hat für { $wanted } kein Tastenkürzel übernommen, deshalb antwortet darauf nichts. Demystos Tastenkürzel werden in ihren eigenen Tastenkürzel-Einstellungen vergeben.
@@ -478,6 +485,10 @@ settings-file-preamble =
     # Taste, die nichts schreibt — eine Lautstärke- oder Medientaste, oder F13 und
     # aufwärts —, darf für sich stehen. Das Einstellungsfenster nimmt eine für Sie
     # auf, wenn Sie sie lieber drücken als buchstabieren.
+    #
+    # `screen_area_hotkey` ist die Tastenkombination, mit der Sie einen
+    # Bildschirmbereich aufziehen und die Liste der Aktionen dafür öffnen. Es gibt
+    # keine, bis Sie eine angeben.
     #
     # `language` ist die Sprache, die Demysto spricht: "en", "de", "es", "fr" oder
     # "ru". Lassen Sie sie weg, und Demysto folgt dem Betriebssystem und fällt auf

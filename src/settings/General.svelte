@@ -13,6 +13,7 @@
     languageFixed,
     throughThePortal,
     paletteHotkey = $bindable(),
+    screenAreaHotkey = $bindable(),
     paletteDefault,
     recording = $bindable(),
     unclaimedHotkeys,
@@ -30,10 +31,12 @@
         are set. */
     throughThePortal: boolean;
     paletteHotkey: string;
+    /** Empty for none: this one has no default. */
+    screenAreaHotkey: string;
     /** What opens the Palette when nothing states otherwise, as it is read. */
     paletteDefault: string;
     /** Which Hotkey field is being recorded into, `null` for neither. */
-    recording: "palette" | "action" | null;
+    recording: "palette" | "screen_area" | "action" | null;
     /** The Hotkeys stated by an Action and not answered to, in the backend's
         own sentences. */
     unclaimedHotkeys: string[];
@@ -72,13 +75,61 @@
   onDestroy(() => {
     if (acknowledging) clearTimeout(acknowledging);
   });
-
-  /** Takes the Palette back to the Hotkey Demysto comes with. */
-  function unbindPalette() {
-    paletteHotkey = "";
-    recording = null;
-  }
 </script>
+
+{#snippet row(
+  which: "palette" | "screen_area",
+  caption: string,
+  bound: string,
+  unbound: string,
+  clear: () => void,
+)}
+  <div class="flex flex-col gap-1">
+    <span id="{which}-hotkey" class="text-xs opacity-60">{caption}</span>
+    <div class="flex items-center gap-2">
+      <span
+        role="status"
+        aria-labelledby="{which}-hotkey"
+        class="{FIELD} flex-1 truncate {bound || recording === which
+          ? ''
+          : 'opacity-40'}"
+      >
+        {#if recording === which}
+          {t("settings-hotkey-recording")}
+        {:else if bound}
+          {reading(bound)}
+        {:else}
+          {unbound}
+        {/if}
+      </span>
+
+      <button
+        type="button"
+        class={BUTTON}
+        aria-describedby="{which}-hotkey hotkey-rule"
+        disabled={recording !== null && recording !== which}
+        onclick={() => (recording = recording === which ? null : which)}
+      >
+        {recording === which
+          ? t("settings-hotkey-cancel")
+          : t("settings-hotkey-record")}
+      </button>
+
+      <button
+        type="button"
+        class={BUTTON}
+        aria-describedby="{which}-hotkey"
+        disabled={!bound}
+        onclick={() => {
+          clear();
+          recording = null;
+        }}
+      >
+        {t("settings-hotkey-clear")}
+      </button>
+    </div>
+  </div>
+{/snippet}
 
 {#if unreadable}
   <Unreadable said={unreadable} />
@@ -126,86 +177,26 @@
   {/if}
 
   {#if !unreadable}
-    <!-- A row of four sentences, and until ticket 26 a screen reader was
-         given two buttons and none of them: what the row is for, what is
-         bound now, that a recording is under way and what may be pressed
-         were bare runs of text, which WebKitGTK keeps in no tree — the
-         same gap ticket 18 found in the Palette's header, in a second
-         place.
-
-         So the combination is the *value* of this row rather than a
-         sentence beside it: the caption names it, and reaching it reads
-         both, in the order somebody would ask. `status` is what keeps it
-         in the tree at all, and here it speaks as well — unlike the
-         Palette's caption, what changes these words is the user pressing
-         Record, so there is somebody listening when they change. The one
-         change nobody asks for — the settings arriving and putting the
-         user's own combination where the built-in one was — happens at
-         startup, while this window is loaded and hidden, which is where
-         18's caption changes too and where an announcement reaches
-         nobody.
-
-         The rule is what may be pressed, so it is on the button that asks
-         for a combination, and the caption is on both buttons: the value
-         is not focusable, and a Tab that arrives at "Record" would
-         otherwise arrive at a word with nothing saying which of the two
-         rows it belongs to. The rule needed no role of its own — it is a
-         paragraph now rather than a run of text inside a row, and a
-         paragraph is kept.
-
-         Nothing here draws anything: the same words stay in the same
-         places at the same size. -->
-    <div class="flex flex-col gap-1">
-      <span id="palette-hotkey" class="text-xs opacity-60">
-        {t("settings-palette-hotkey")}
-      </span>
-      <div class="flex items-center gap-2">
-        <span
-          role="status"
-          aria-labelledby="palette-hotkey"
-          class="{FIELD} flex-1 truncate {paletteHotkey ||
-          recording === 'palette'
-            ? ''
-            : 'opacity-40'}"
-        >
-          {#if recording === "palette"}
-            {t("settings-hotkey-recording")}
-          {:else if paletteHotkey}
-            {reading(paletteHotkey)}
-          {:else}
-            {t("settings-hotkey-default", {
-              hotkey: reading(paletteDefault),
-            })}
-          {/if}
-        </span>
-
-        <button
-          type="button"
-          class={BUTTON}
-          aria-describedby="palette-hotkey palette-hotkey-rule"
-          disabled={recording !== null && recording !== "palette"}
-          onclick={() =>
-            (recording = recording === "palette" ? null : "palette")}
-        >
-          {recording === "palette"
-            ? t("settings-hotkey-cancel")
-            : t("settings-hotkey-record")}
-        </button>
-
-        <button
-          type="button"
-          class={BUTTON}
-          aria-describedby="palette-hotkey"
-          disabled={!paletteHotkey}
-          onclick={unbindPalette}
-        >
-          {t("settings-hotkey-clear")}
-        </button>
-      </div>
-      <p id="palette-hotkey-rule" class="text-xs opacity-50">
-        {t("settings-palette-hotkey-rule")}
-      </p>
-    </div>
+    <!-- The combination is the row's value rather than a sentence beside it,
+         so a screen reader reads caption and value together; `status` keeps
+         it in WebKitGTK's tree. The rule is on the Record buttons. -->
+    {@render row(
+      "palette",
+      t("settings-palette-hotkey"),
+      paletteHotkey,
+      t("settings-hotkey-default", { hotkey: reading(paletteDefault) }),
+      () => (paletteHotkey = ""),
+    )}
+    {@render row(
+      "screen_area",
+      t("settings-screen-area-hotkey"),
+      screenAreaHotkey,
+      t("settings-screen-area-hotkey-none"),
+      () => (screenAreaHotkey = ""),
+    )}
+    <p id="hotkey-rule" class="text-xs opacity-50">
+      {t("settings-palette-hotkey-rule")}
+    </p>
   {/if}
 
   {#each unclaimedHotkeys as said (said)}

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
 use crate::capture::{
-    Capture, CaptureError, Capturing, ClipboardCapture, Desktop, DesktopCapture, Pixels,
+    Capture, CaptureError, Capturing, ClipboardCapture, Desktop, DesktopCapture, Pixels, Screen,
 };
 
 /// The environment variable Linux session managers use to say which display
@@ -62,6 +62,56 @@ pub(crate) fn for_platform() -> (Box<dyn Capture>, Capturing) {
             Box::new(ClipboardCapture::new(SystemDesktop::new())),
             degraded,
         ),
+    }
+}
+
+/// Where an area of the screen is chosen on this platform.
+pub(crate) fn screen() -> Box<dyn Screen> {
+    Box::new(SystemScreen)
+}
+
+/// The system's own tool for choosing an area, where there is one.
+struct SystemScreen;
+
+impl Screen for SystemScreen {
+    /// `screencapture -i` draws the selection itself and writes nothing when
+    /// it is cancelled. Its exit status says nothing either way.
+    #[cfg(target_os = "macos")]
+    fn area(&self) -> Result<Option<Vec<u8>>, CaptureError> {
+        let file =
+            Removed(std::env::temp_dir().join(format!("demysto-area-{}.png", std::process::id())));
+        // A file left behind by a run that was killed would pass for this area.
+        let _ = std::fs::remove_file(&file.0);
+
+        std::process::Command::new("/usr/sbin/screencapture")
+            .arg("-i")
+            .arg(&file.0)
+            .status()
+            .map_err(|error| CaptureError::Screen(error.to_string()))?;
+
+        match std::fs::read(&file.0) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(CaptureError::Screen(error.to_string())),
+        }
+    }
+
+    // ponytail: no area anywhere but macOS; Linux needs the Screenshot portal
+    // and Windows an overlay of Demysto's own.
+    #[cfg(not(target_os = "macos"))]
+    fn area(&self) -> Result<Option<Vec<u8>>, CaptureError> {
+        Ok(None)
+    }
+}
+
+/// A file removed when this goes, whichever way the Capture ended.
+#[cfg(target_os = "macos")]
+struct Removed(std::path::PathBuf);
+
+#[cfg(target_os = "macos")]
+impl Drop for Removed {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -383,6 +433,18 @@ fn keystroke(message: &str) -> CaptureError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_area_file_is_gone_once_the_capture_is_over() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("area.png");
+        std::fs::write(&path, b"png").unwrap();
+
+        drop(Removed(path.clone()));
+
+        assert!(!path.exists());
+    }
 
     fn on(session_type: Option<&str>) -> Capturing {
         reading(session_type.map(OsStr::new))

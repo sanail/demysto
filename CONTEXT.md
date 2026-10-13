@@ -11,7 +11,7 @@ The input a Run operates on, captured at invocation time. Its kind is one of tex
 _Avoid_: input, content, context, payload
 
 **Capture**:
-The act of obtaining a Selection from the foreground application or the clipboard.
+The act of obtaining a Selection from the foreground application, the clipboard or the screen.
 _Avoid_: grab, read, fetch
 
 ### What the user invokes

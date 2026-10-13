@@ -50,6 +50,7 @@ export type Selection =
 export type Captured =
   | { origin: "selection"; selection: Selection }
   | { origin: "clipboard"; selection: Selection }
+  | { origin: "screen"; selection: Selection }
   | { origin: "nothing" };
 
 /**
@@ -66,7 +67,8 @@ export type CaptureError =
   | { kind: "clipboard"; message: string }
   | { kind: "keystroke"; message: string }
   | { kind: "picture" }
-  | { kind: "permission" };
+  | { kind: "permission" }
+  | { kind: "screen"; message: string };
 
 /** Mirrors `demysto_core::CaptureOutcome`. */
 export type CaptureOutcome =
@@ -599,6 +601,8 @@ export type Settings = {
   default_vision_model: string | null;
   /** The Hotkey that opens the Palette, `null` for the one Demysto comes with. */
   palette_hotkey: string | null;
+  /** The Hotkey that chooses an area of the screen, `null` for none. */
+  screen_area_hotkey: string | null;
   /**
    * How many characters a Selection may hold before Demysto says so, `null`
    * where the file states nothing and `Status.large_selection_default` decides.
@@ -636,6 +640,7 @@ export type Edit = {
   default_model: string | null;
   default_vision_model: string | null;
   palette_hotkey: string | null;
+  screen_area_hotkey: string | null;
   /** `null` takes the setting out of the file; zero is being told nothing. */
   large_selection: number | null;
   /** The language to speak, empty for following the operating system. */

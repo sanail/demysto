@@ -44,6 +44,7 @@ palette-reading-selection = Читаю выделенное…
 palette-reading-clipboard = Читаю буфер обмена…
 palette-origin-selection = Выделение
 palette-origin-clipboard = Из буфера обмена
+palette-origin-screen = С экрана
 palette-picture = Изображение, { $dimensions }
 palette-nothing-captured = Ничего не выделено, и буфер обмена пуст. Выделите текст и нажмите горячую клавишу ещё раз.
 palette-filter = Фильтр действий…
@@ -174,12 +175,14 @@ settings-language-from-environment = { $variable } имеет значение {
 
 settings-hotkeys = Горячие клавиши
 settings-palette-hotkey = Открывает список действий
+settings-screen-area-hotkey = Открывает список действий для области экрана
 settings-hotkey-record = Записать
 settings-hotkey-clear = Очистить
 settings-hotkey-cancel = Отмена
 settings-hotkey-recording = Нажмите клавиши… Esc — отмена
 settings-hotkey-default = { $hotkey } — по умолчанию
 settings-hotkey-none = Нет — действие запускается из списка
+settings-screen-area-hotkey-none = Нет — задайте сочетание, чтобы выделять область экрана
 settings-palette-hotkey-rule = Удерживайте Ctrl, Alt или Shift и нажмите клавишу. Печатающую клавишу занять в одиночку нельзя: она перестанет печататься во всех программах.
 settings-action-hotkey-rule = Удерживайте Ctrl, Alt или Shift и нажмите клавишу. Печатающую клавишу занять в одиночку нельзя: она перестанет печататься во всех программах. Параметры при этом не спрашиваются — каждый берёт значение по умолчанию.
 settings-wayland-hotkeys = В Wayland горячие клавиши раздаёт окружение, а не Demysto. Меняйте их в настройках клавиатуры самого окружения — там они перечислены под именем Demysto.
@@ -298,6 +301,7 @@ capture-clipboard-unavailable = Буфер обмена недоступен: { 
 capture-keystroke-refused = Не удалось отправить сочетание копирования: { $detail }
 capture-no-accessibility = macOS не даёт Demysto прочитать выделенное без разрешения «Универсальный доступ». Откройте «Конфиденциальность и безопасность» → «Универсальный доступ» и включите Demysto.
 capture-picture-unreadable = Demysto не смог прочитать изображение из буфера обмена. Скопируйте его ещё раз или скопируйте другое.
+capture-screen-unavailable = Demysto не смог снять область экрана: { $detail }
 accessibility-pane-unreachable = Demysto не смог открыть Системные настройки: { $detail }. Разрешение находится в «Конфиденциальность и безопасность» → «Универсальный доступ».
 accessibility-only-macos = Разрешение на чтение выделенного спрашивает только macOS.
 
@@ -400,12 +404,15 @@ hotkey-palette-refused = Demysto не смог занять указанное �
 hotkey-action-not-a-combination = { $action } указывает сочетание «{ $hotkey }», которого Demysto не понимает. Сочетание — это модификаторы и одна клавиша, например «Ctrl+Shift+E».
 hotkey-action-types-something = { $action } указывает сочетание «{ $hotkey }» — это одна печатающая клавиша. Добавьте Ctrl, Alt или Shift: сама по себе она перестанет печататься во всех программах.
 hotkey-action-already-held = { $action } указывает горячую клавишу «{ $hotkey }», и её уже занимает { $holder }. Отвечает на неё только { $holder }; дайте { $action } другую.
+hotkey-screen-area-already-held = В настройках указано сочетание «{ $hotkey }» для области экрана, но его уже занимает { $holder }. Дайте области другое.
 hotkey-action-refused = { $action } указывает сочетание «{ $hotkey }», и Demysto не смог его занять: { $detail }. Возможно, оно уже занято другим приложением.
 hotkey-palette-holder = список действий
+hotkey-screen-area-holder = область экрана
 
 ## What a Wayland desktop made of the Hotkeys it was asked for
 
 portal-palette-description = Demysto — открыть список действий
+portal-screen-area-description = Demysto — выделить область экрана
 portal-action-description = Demysto — { $action }
 portal-not-taken-yet = Окружение пока не приняло горячую клавишу для «{ $wanted }», поэтому на неё ничего не отвечает. Demysto спрашивает снова.
 portal-not-taken = Окружение не приняло горячую клавишу для «{ $wanted }», поэтому на неё ничего не отвечает. Клавиатурные сокращения Demysto назначаются в настройках самого окружения.
@@ -473,6 +480,9 @@ settings-file-preamble =
     # печатает, — громкости, воспроизведения или F13 и выше — может стоять сама по
     # себе. Окно настроек запишет сочетание за вас, если нажать его проще, чем
     # выписать.
+    #
+    # `screen_area_hotkey` — сочетание, по которому выделяется область экрана и
+    # для неё открывается список действий. Пока вы его не укажете, сочетания нет.
     #
     # `language` — язык, на котором говорит Demysto: "en", "de", "es", "fr" или
     # "ru". Не пишите его, и Demysto пойдёт за операционной системой, откатываясь

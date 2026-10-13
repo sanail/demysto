@@ -319,10 +319,8 @@ extension.
 Everything v1.2 already owns: files, chunking, map-reduce summarisation, file
 type detection.
 
-Capturing a region of the screen. It is a different capability with different
-permissions — Screen Recording on macOS, another pane in the first-run flow —
-and it does not fit the definition of Capture, which is about the foreground
-application and the clipboard.
+Capturing an area of the screen, which has a Hotkey of its own and is
+`docs/spec/0003`'s.
 
 Multiple pictures in one Selection. Pictures in a follow-up Turn: the picture of
 a Conversation is the one it opened with.

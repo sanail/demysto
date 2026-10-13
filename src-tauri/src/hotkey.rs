@@ -1,7 +1,7 @@
-//! The global Hotkeys: the one that opens the Palette, and the one an Action
-//! may own.
+//! The global Hotkeys: the one that opens the Palette, the one that chooses an
+//! area of the screen for it, and the one an Action may own.
 //!
-//! An Action's Hotkey is the path with no Palette in it at all (user story 6):
+//! An Action's Hotkey is the path with no Palette in it at all:
 //! select, press, read. Which is why the whole set is claimed here rather than
 //! the Palette's alone — the Hotkeys Demysto answers to are one set, and
 //! whether a combination is free is a question only the set can answer.
@@ -55,6 +55,8 @@ fn claimable_alone<R: Runtime>(app: &AppHandle<R>, hotkey: &Shortcut) -> bool {
 enum Bound {
     /// Opens the Palette, or closes it when it is already open.
     Palette,
+    /// Lets the user choose an area of the screen and opens the Palette on it.
+    ScreenArea,
     /// Runs one Action straight away, by the identifier it is asked for by.
     ///
     /// The identifier rather than the Action: the catalogue is read off the
@@ -102,6 +104,7 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
             // application needs and what this handler cannot do for them.
             match bound(shortcut) {
                 Some(Bound::Palette) => crate::palette::toggle(app),
+                Some(Bound::ScreenArea) => crate::palette::area(app),
                 Some(Bound::Action(id)) => crate::result::straight_to(app, id),
                 None => {}
             }
@@ -138,10 +141,12 @@ fn bound(pressed: &Shortcut) -> Option<Bound> {
 /// one Demysto comes with. It is claimed first, which means changing it can take
 /// a Hotkey away from an Action stating the same combination — the Action is
 /// told so in the report, and the window shows the report the moment the
-/// settings are saved.
+/// settings are saved. `screen_area` comes second and has no default: `None`
+/// claims nothing.
 pub fn claim<R: Runtime>(
     app: &AppHandle<R>,
     palette: Option<&str>,
+    screen_area: Option<&str>,
     actions: &[DefinedAction],
 ) -> Vec<String> {
     // Wayland lets no application claim a Hotkey from the display server, so
@@ -150,7 +155,7 @@ pub fn claim<R: Runtime>(
     // combination each one answers to (ADR-0003).
     #[cfg(target_os = "linux")]
     if demysto_core::wayland_session() {
-        return through_the_portal(app, palette, actions);
+        return through_the_portal(app, palette, screen_area, actions);
     }
 
     // One at a time: two of these interleaving would each give up what the
@@ -195,6 +200,12 @@ pub fn claim<R: Runtime>(
         palette,
         &words,
     ));
+
+    if let Some(stated) = screen_area {
+        if let Err(said) = screen_areas(app, hotkeys, &held, &mut claimed, stated, &words) {
+            unclaimed.push(said);
+        }
+    }
 
     for action in actions {
         let Some(stated) = action.hotkey.as_deref() else {
@@ -301,7 +312,7 @@ fn palettes<R: Runtime>(
     said
 }
 
-/// Claims the Hotkey the settings state for the Palette, or says why not.
+/// Claims a Hotkey the settings state, or says why not.
 fn wanted<R: Runtime>(
     app: &AppHandle<R>,
     hotkeys: &GlobalShortcut<R>,
@@ -335,6 +346,38 @@ fn wanted<R: Runtime>(
                 "detail" = error.to_string()
             )
         })
+}
+
+/// Claims the screen-area Hotkey, or says why not. Unlike the Palette's there
+/// is nothing to fall back to.
+fn screen_areas<R: Runtime>(
+    app: &AppHandle<R>,
+    hotkeys: &GlobalShortcut<R>,
+    held: &[Shortcut],
+    claimed: &mut Vec<Claim>,
+    stated: &str,
+    words: &Words,
+) -> Result<(), String> {
+    if let Ok(hotkey) = stated.parse::<Shortcut>() {
+        if let Some(holder) = claimed.iter().find(|claim| claim.hotkey == hotkey) {
+            return Err(say!(
+                words,
+                "hotkey-screen-area-already-held",
+                "hotkey" = stated.to_owned(),
+                "holder" = holder.holder.clone()
+            ));
+        }
+    }
+
+    let hotkey = wanted(app, hotkeys, held, stated, words)?;
+
+    claimed.push(Claim {
+        hotkey,
+        bound: Bound::ScreenArea,
+        holder: words.text("hotkey-screen-area-holder"),
+    });
+
+    Ok(())
 }
 
 /// Claims one Action's Hotkey, or says in a whole sentence why it could not be.
@@ -412,6 +455,7 @@ fn claiming<R: Runtime>(
 fn through_the_portal<R: Runtime>(
     app: &AppHandle<R>,
     palette: Option<&str>,
+    screen_area: Option<&str>,
     actions: &[DefinedAction],
 ) -> Vec<String> {
     use crate::portal::Wanted;
@@ -424,6 +468,12 @@ fn through_the_portal<R: Runtime>(
         description: words.text("portal-palette-description"),
         trigger: crate::portal::trigger(palette.unwrap_or(PALETTE)),
     }];
+
+    wanted.extend(screen_area.map(|stated| Wanted {
+        id: crate::portal::SELECTS_AN_AREA.to_owned(),
+        description: words.text("portal-screen-area-description"),
+        trigger: crate::portal::trigger(stated),
+    }));
 
     wanted.extend(actions.iter().filter_map(|action| {
         Some(Wanted {
@@ -459,6 +509,10 @@ fn through_the_portal<R: Runtime>(
             // draws every window for the same reason — except that this one
             // arrives on a task of the portal's rather than on a keypress, and
             // taking a Capture off it matters just as much.
+            if pressed == crate::portal::SELECTS_AN_AREA {
+                return crate::palette::area(&answering);
+            }
+
             match crate::portal::action_of(pressed) {
                 None => crate::palette::toggle(&answering),
                 Some(action) => crate::result::straight_to(&answering, action.to_owned()),

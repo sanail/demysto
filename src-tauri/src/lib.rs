@@ -106,11 +106,10 @@ pub fn run() {
             // window shows these same sentences whenever it is opened, because
             // it claims the set again as it reads the catalogue.
             let demysto = app.state::<Demysto>();
-            let palette = demysto.palette_hotkey();
-
             for said in hotkey::claim(
                 app.handle(),
-                palette.as_deref(),
+                demysto.palette_hotkey().as_deref(),
+                demysto.screen_area_hotkey().as_deref(),
                 &demysto.catalogue().actions,
             ) {
                 demysto.note(&said);

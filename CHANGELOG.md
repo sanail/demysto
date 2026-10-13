@@ -2,6 +2,14 @@
 
 What each release brought, newest first.
 
+## Unreleased
+
+### Capture
+
+- A second Hotkey, set in Settings → General, lets you drag out an area of the
+  screen and opens the list of Actions on that picture. It has none until you
+  set one.
+
 ## 1.0.0 — 2026-10-06
 
 ### Palette

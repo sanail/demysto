@@ -1,4 +1,5 @@
-//! Obtaining a Selection from the foreground application or the clipboard.
+//! Obtaining a Selection from the foreground application, the clipboard or the
+//! screen.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -47,6 +48,8 @@ pub enum Captured {
     Selection(Selection),
     /// Nothing was selected, so this is what the clipboard already held.
     Clipboard(Selection),
+    /// A picture of an area the user chose on the screen.
+    Screen(Selection),
     /// Nothing was selected and the clipboard was empty.
     Nothing,
 }
@@ -79,7 +82,9 @@ impl Captured {
     /// Palette shows; what a Run operates on is the same either way.
     pub fn selection(&self) -> Option<&Selection> {
         match self {
-            Self::Selection(selection) | Self::Clipboard(selection) => Some(selection),
+            Self::Selection(selection) | Self::Clipboard(selection) | Self::Screen(selection) => {
+                Some(selection)
+            }
             Self::Nothing => None,
         }
     }
@@ -124,6 +129,9 @@ pub enum CaptureError {
     /// granted in — is one message in the catalogue rather than a string this
     /// carries.
     Permission,
+    /// The area of the screen could not be taken: the system's tool would not
+    /// start, or wrote something that is not a picture.
+    Screen(String),
 }
 
 impl CaptureError {
@@ -150,6 +158,13 @@ impl CaptureError {
             }
             Self::Picture => say!(words, "capture-picture-unreadable"),
             Self::Permission => say!(words, "capture-no-accessibility"),
+            Self::Screen(detail) => {
+                say!(
+                    words,
+                    "capture-screen-unavailable",
+                    "detail" = detail.clone()
+                )
+            }
         }
     }
 }
@@ -186,6 +201,44 @@ pub(crate) trait Desktop: Send + Sync {
     /// is an answer that goes stale under a running Demysto (the spec's *Shell
     /// and platform*).
     fn permitted(&self) -> Result<(), CaptureError>;
+}
+
+/// Whatever lets the user drag out an area of the screen.
+pub(crate) trait Screen: Send + Sync {
+    /// The image file the area was written to, `None` where none was written.
+    fn area(&self) -> Result<Option<Vec<u8>>, CaptureError>;
+}
+
+/// The shortest side an area may have before it counts as a click rather than
+/// a drag, in the pixels of the file: two points on a Retina screen.
+const SMALLEST_AREA: u32 = 4;
+
+/// The area the user chose, or `None` where they chose none.
+///
+/// The file is the only signal trusted: a missing or empty one, or a sliver a
+/// few pixels across, is a cancelled area whatever the tool's exit status said.
+pub(crate) fn from_the_screen(screen: &dyn Screen) -> Result<Option<Captured>, CaptureError> {
+    let Some(file) = screen.area()?.filter(|file| !file.is_empty()) else {
+        return Ok(None);
+    };
+
+    let image = image::load_from_memory(&file)
+        .map_err(|error| CaptureError::Screen(error.to_string()))?
+        .into_rgba8();
+
+    if image.width().min(image.height()) < SMALLEST_AREA {
+        return Ok(None);
+    }
+
+    let pixels = Pixels {
+        width: image.width(),
+        height: image.height(),
+        bytes: image.into_raw(),
+    };
+
+    taken(&pixels)
+        .map(|selection| Some(Captured::Screen(selection)))
+        .map_err(|_| CaptureError::Screen("the picture could not be encoded".to_owned()))
 }
 
 /// A picture as a clipboard hands one over: raw RGBA8, with the size to read
@@ -528,7 +581,8 @@ pub(crate) mod fake {
     use std::time::Duration;
 
     use super::{
-        Capture, CaptureError, Capturing, ClipboardCapture, Desktop, DesktopCapture, Pixels, Settle,
+        Capture, CaptureError, Capturing, ClipboardCapture, Desktop, DesktopCapture, Pixels,
+        Screen, Settle,
     };
 
     /// A desktop as the facade is handed one: the Capture it performs, and what
@@ -646,6 +700,19 @@ pub(crate) mod fake {
 
         pub(crate) fn clipboard_now(&self) -> Option<String> {
             self.clipboard.lock().unwrap().clone()
+        }
+
+        pub(crate) fn sent_a_copy(&self) -> bool {
+            self.reads_since_copy.lock().unwrap().is_some()
+        }
+    }
+
+    /// A screen whose tool hands over this, however often it is asked.
+    pub(crate) struct FakeScreen(pub(crate) Result<Option<Vec<u8>>, CaptureError>);
+
+    impl Screen for FakeScreen {
+        fn area(&self) -> Result<Option<Vec<u8>>, CaptureError> {
+            self.0.clone()
         }
     }
 

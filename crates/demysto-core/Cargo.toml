@@ -14,8 +14,8 @@ enigo = "0.6"
 toml = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls", "system-proxy"] }
 whatlang = "0.18.0"
-# Fitting and encoding a picture, and nothing else: the clipboard hands over
-# pixels rather than a file, so nothing here has to decode one.
+# Fitting and encoding a picture, and decoding the PNG file the system's own
+# screen-area tool writes.
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 toml_edit = "0.25"

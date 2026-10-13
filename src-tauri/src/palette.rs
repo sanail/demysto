@@ -45,6 +45,30 @@ pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
     off_thread(app, open);
 }
 
+/// Lets the user choose an area of the screen and opens the Palette on it.
+///
+/// Nothing is shown and nothing is said when they cancel. The clipboard and
+/// the foreground application are never touched.
+pub fn area<R: Runtime>(app: &AppHandle<R>) {
+    off_thread(app, |app, window| {
+        let Some(_opening) = Underway::claim(&OPENING) else {
+            return;
+        };
+
+        // Out of the picture the user is about to take.
+        let _ = window.hide();
+
+        let Some(outcome) = app.state::<Demysto>().capture_area() else {
+            return;
+        };
+
+        let _ = position_on_screen(app, window);
+        let _ = window.emit(CAPTURED_EVENT, &outcome);
+
+        show(app, window);
+    });
+}
+
 /// Runs something against the Palette away from the thread that draws it.
 ///
 /// Everything here begins with a Capture, and a Capture waits on another

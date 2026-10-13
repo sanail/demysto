@@ -160,15 +160,16 @@ def copy_picture(g, width, height):
         g.wait_for(exec=["sh", "-c", "xclip -selection clipboard -t TARGETS -o | grep -q image/png"], timeout=10)
 
 
-def configure(g, actions=None):
-    """Writes a Settings File past the first run, pointed at the mock, and any
-    Action files ({"explain": 'hotkey = "..."'}). The app must not be running."""
+def configure(g, actions=None, settings=""):
+    """Writes a Settings File past the first run, pointed at the mock, with any
+    extra top-level settings lines, and any Action files
+    ({"explain": 'hotkey = "..."'}). The app must not be running."""
     g.put(config_file(g, "settings.toml"), f'''version = 1
 
 default_model = "mock/mock-small"
 default_vision_model = "mock/mock-small"
 welcomed = true
-
+{settings}
 [[providers]]
 name = "mock"
 base_url = "{base_url(g)}"
@@ -179,7 +180,7 @@ models = [{{ id = "mock-small", vision = true }}]
         g.put(config_file(g, "actions", name + ".toml"), text)
 
 
-def configured_launch(g, actions=None):
+def configured_launch(g, actions=None, settings=""):
     """For Scenarios with LAUNCH = False: the app, started past its first run."""
-    configure(g, actions)
+    configure(g, actions, settings)
     g.launch()

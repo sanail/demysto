@@ -49,6 +49,7 @@ palette-reading-selection = Reading the selection…
 palette-reading-clipboard = Reading the clipboard…
 palette-origin-selection = Selection
 palette-origin-clipboard = From the clipboard
+palette-origin-screen = From the screen
 palette-picture = A picture, { $dimensions }
 palette-nothing-captured = Nothing is selected and the clipboard is empty. Select some text and press the Hotkey again.
 palette-filter = Filter Actions…
@@ -179,12 +180,14 @@ settings-language-from-environment = { $variable } is set to { $value }, so that
 
 settings-hotkeys = Hotkeys
 settings-palette-hotkey = Opens the list of Actions
+settings-screen-area-hotkey = Opens the list of Actions on an area of the screen
 settings-hotkey-record = Record
 settings-hotkey-clear = Clear
 settings-hotkey-cancel = Cancel
 settings-hotkey-recording = Press the keys… Esc to cancel
 settings-hotkey-default = { $hotkey } — default
 settings-hotkey-none = None — run this Action from the list
+settings-screen-area-hotkey-none = None — set one to choose an area of the screen
 settings-palette-hotkey-rule = Hold Ctrl, Alt or Shift and press a key. A key that types something cannot be claimed on its own: it would stop typing everywhere.
 settings-action-hotkey-rule = Hold Ctrl, Alt or Shift and press a key. A key that types something cannot be claimed on its own: it would stop typing everywhere. Parameters are not asked for on this path — each takes its default.
 settings-wayland-hotkeys = On Wayland the desktop hands out Hotkeys, not Demysto. Change them in the desktop's own keyboard settings, where they are listed under Demysto.
@@ -303,6 +306,7 @@ capture-clipboard-unavailable = The clipboard is unavailable: { $detail }
 capture-keystroke-refused = The copy keystroke could not be sent: { $detail }
 capture-no-accessibility = macOS will not let Demysto read your selection without the Accessibility permission. Open Privacy & Security → Accessibility and turn Demysto on.
 capture-picture-unreadable = Demysto could not read the picture in the clipboard. Copy it again, or copy a different one.
+capture-screen-unavailable = Demysto could not take the area of the screen: { $detail }
 accessibility-pane-unreachable = Demysto could not open System Settings: { $detail }. The permission is in Privacy & Security → Accessibility.
 accessibility-only-macos = Only macOS asks for a permission before Demysto can read your selection.
 
@@ -402,12 +406,15 @@ hotkey-palette-refused = Demysto could not claim the Hotkey "{ $hotkey }" the se
 hotkey-action-not-a-combination = { $action } states the Hotkey "{ $hotkey }", which Demysto does not understand. A Hotkey is its modifiers and then one key, written like "Ctrl+Shift+E".
 hotkey-action-types-something = { $action } states the Hotkey "{ $hotkey }", which is a single key that types. Add Ctrl, Alt or Shift: on its own it would stop typing everywhere.
 hotkey-action-already-held = { $action } states the Hotkey "{ $hotkey }", and { $holder } already has it. Only { $holder } answers to it; give { $action } another.
+hotkey-screen-area-already-held = The settings state the Hotkey "{ $hotkey }" for an area of the screen, and { $holder } already has it. Give the area another.
 hotkey-action-refused = { $action } states the Hotkey "{ $hotkey }", and Demysto could not claim it: { $detail }. Another application may already have it.
 hotkey-palette-holder = the list of Actions
+hotkey-screen-area-holder = the area of the screen
 
 ## What a Wayland desktop made of the Hotkeys it was asked for
 
 portal-palette-description = Demysto — open the list of Actions
+portal-screen-area-description = Demysto — choose an area of the screen
 portal-action-description = Demysto — { $action }
 portal-not-taken-yet = The desktop has not taken a Hotkey for { $wanted }, so nothing answers to it yet. Demysto is asking again.
 portal-not-taken = The desktop did not take a Hotkey for { $wanted }, so nothing answers to it. Its keyboard shortcut settings are where Demysto's Hotkeys are assigned.
@@ -473,6 +480,10 @@ settings-file-preamble =
     # then one key — "Ctrl+Alt+Space". A key that types nothing — a volume or media
     # key, or F13 and above — may stand on its own. Settings records one for you if
     # you would rather press it than spell it.
+    #
+    # `screen_area_hotkey` is the key combination that lets you drag out an area
+    # of the screen and opens the list of Actions on it. There is none until you
+    # state one.
     #
     # `language` is the language Demysto speaks: "en", "de", "es", "fr" or "ru".
     # Leave it out and Demysto follows the operating system, falling back to

@@ -130,6 +130,13 @@ For this you need a Model that can see images, set as the **Default Model for
 pictures** in **Settings → Models**. If none is set, the chat tells you and
 links straight to the setting.
 
+A picture you have not copied can be taken straight from the screen. Set a
+Hotkey for it in **Settings → General**, under the one that opens the list of
+Actions; it has none until you do. Press it, drag a rectangle over what you want
+to ask about, and the list of Actions opens on that picture. Esc cancels. On
+macOS this is the system's own area selection, the one
+<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>4</kbd> shows.
+
 Large pictures are scaled down before they are sent, which is faster and
 cheaper. When a picture was scaled down, the chat offers to ask again at full
 resolution in case the answer missed a detail.

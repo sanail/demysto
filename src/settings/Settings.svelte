@@ -91,9 +91,13 @@
    * every keypress belongs to it rather than to the window: the combination
    * somebody wants is quite likely one that already means something here.
    */
-  let recording = $state<"palette" | "action" | null>(null);
+  let recording = $state<"palette" | "screen_area" | "action" | null>(
+    null,
+  );
   /** The Hotkey that opens the Palette, empty for the one Demysto comes with. */
   let paletteHotkey = $state("");
+  /** The Hotkey that chooses an area of the screen, empty for none. */
+  let screenAreaHotkey = $state("");
   /**
    * How many characters a Selection may hold before Demysto says so.
    *
@@ -422,6 +426,7 @@
     defaultModel = settings.default_model ?? "";
     defaultVisionModel = settings.default_vision_model ?? "";
     paletteHotkey = settings.palette_hotkey ?? "";
+    screenAreaHotkey = settings.screen_area_hotkey ?? "";
     largeSelection = settings.large_selection;
     language = settings.language ?? "";
 
@@ -462,7 +467,7 @@
 
   /** And what the General panel holds of the file. */
   function ofGeneral(): string {
-    return JSON.stringify({ paletteHotkey, language });
+    return JSON.stringify({ paletteHotkey, screenAreaHotkey, language });
   }
 
   // Nothing is unsaved until there is something saved to compare with: a
@@ -526,6 +531,7 @@
         default_model: defaultModel,
         default_vision_model: defaultVisionModel,
         palette_hotkey: paletteHotkey,
+        screen_area_hotkey: screenAreaHotkey,
         // A blank field is the setting taken out of the file, which is not the
         // same as a zero somebody typed: one leaves Demysto's own figure
         // deciding, the other asks to be told nothing.
@@ -627,6 +633,8 @@
 
     if (recording === "palette") {
       paletteHotkey = pressed;
+    } else if (recording === "screen_area") {
+      screenAreaHotkey = pressed;
     } else if (editing) {
       editing.draft.hotkey = pressed;
     }
@@ -742,6 +750,7 @@
       <General
         bind:language
         bind:paletteHotkey
+        bind:screenAreaHotkey
         bind:recording
         {unreadable}
         {languageFixed}
