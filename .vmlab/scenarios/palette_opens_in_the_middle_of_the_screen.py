@@ -41,7 +41,7 @@ def work_area(g, scale):
 def opened_with_pointer_at(g, at, corner):
     """Opens the Palette over a selection with the pointer parked at `at`, and
     returns where its window came up."""
-    g.click(at=at)
+    g.pointer("move", *at)
     text = f"pointer {corner} {nonce()}"
     staged = g.stage_text(text, then=palette_hotkey(g))
     shown = g.wait_for(text=text, app=APP, timeout=15)
@@ -61,8 +61,8 @@ def scenario(g):
     x, y, width, height = work_area(g, scale)
     slack = SLACK * scale
 
-    # The two opposite corners, inset past the Dock's ends, the menu bar and
-    # the panels, so that the clicks that park the pointer land on nothing.
+    # The two opposite corners, inset past the Dock, the menu bar and the panels. The pointer
+    # moves there without a click, which could open what the desktop shows in a corner.
     for at, corner in [((x + width - 40 * scale, y + 40 * scale), "top-right"),
                        ((x + 40 * scale, y + height - 120 * scale), "bottom-left")]:
         bounds = opened_with_pointer_at(g, at, corner) or {"x": None, "y": None, "w": 0}
