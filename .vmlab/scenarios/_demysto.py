@@ -221,8 +221,18 @@ def copy_picture(g, width, height):
         g.wait_for(exec=["sh", "-c", "xclip -selection clipboard -t TARGETS -o | grep -q image/png"], timeout=10)
 
 
-def on_wayland(g):
-    return g.os == "linux" and g.exec(["sh", "-c", "echo $XDG_SESSION_TYPE"]).stdout.strip() == "wayland"
+GNOME_SHORTCUTS = "gnome-control-center-global-shortcuts-provider"
+
+
+def approve_shortcuts(g):
+    """On Wayland GNOME asks whether Demysto may have its Hotkeys at every
+    launch until it is allowed, and again when what they are called changes;
+    this allows them. Elsewhere it does nothing."""
+    if g.session != "wayland":
+        return
+    if g.wait_for(text="Add", role="button", app=GNOME_SHORTCUTS, timeout=10)["met"]:
+        g.click(text="Add", role="button", app=GNOME_SHORTCUTS)
+        g.wait_for(text="Add", role="button", app=GNOME_SHORTCUTS, gone=True, timeout=10)
 
 
 def foreground(g):
@@ -288,3 +298,4 @@ def configured_launch(g, actions=None, settings=""):
     """For Scenarios with LAUNCH = False: the app, started past its first run."""
     configure(g, actions, settings)
     g.launch()
+    approve_shortcuts(g)

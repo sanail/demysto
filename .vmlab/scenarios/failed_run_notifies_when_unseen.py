@@ -1,6 +1,8 @@
 from _demysto import APP, configured_launch, explain_hotkey, mock, nonce, say
 
 LAUNCH = False
+# The selection is read with a synthetic copy, which Wayland refuses.
+SESSIONS = ["x11"]
 
 
 def scenario(g):

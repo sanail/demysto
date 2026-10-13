@@ -1,6 +1,8 @@
 from _demysto import APP, configured_launch, copy_picture, mock, nonce, palette_hotkey, pictures, say, tray
 
 LAUNCH = False
+# The picture is put on the clipboard with xclip, an X11 client.
+SESSIONS = ["x11"]
 # What this measures is the same in every Lab language.
 LANGUAGES = ["en-US"]
 

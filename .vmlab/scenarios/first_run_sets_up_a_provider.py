@@ -1,6 +1,6 @@
 import re
 
-from _demysto import APP, LANGUAGE_NAMES, base_url, config_file, language, mock, say, tray
+from _demysto import APP, LANGUAGE_NAMES, approve_shortcuts, base_url, config_file, language, mock, say, tray
 
 
 def fill(g, label, text):
@@ -10,6 +10,7 @@ def fill(g, label, text):
 
 def scenario(g):
     mock(g, "Hi")
+    approve_shortcuts(g)
 
     welcome = g.wait_for(text=say(g, "welcome-title"), app=APP, timeout=20)
     g.check("a first run opens the welcome window", welcome["met"], detail=welcome)
@@ -60,6 +61,7 @@ def scenario(g):
 
     g.quit()
     g.launch()
+    approve_shortcuts(g)
     again = g.wait_for(text=say(g, "welcome-title"), app=APP, timeout=5)
     g.check("a second launch does not open the welcome window", not again["met"], detail=again)
     g.tray(tray(g), choose=say(g, "tray-settings"), timeout=10)

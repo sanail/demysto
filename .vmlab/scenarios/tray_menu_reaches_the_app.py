@@ -1,6 +1,8 @@
 from _demysto import APP, configured_launch, language, mock, nonce, prompts, say, tray
 
 LAUNCH = False
+# The selection is read with a synthetic copy, which Wayland refuses.
+SESSIONS = ["x11"]
 
 
 ITEMS = ["tray-open", "tray-chats", "tray-settings", "tray-quit"]

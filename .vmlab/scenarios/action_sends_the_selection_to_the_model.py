@@ -1,6 +1,8 @@
 from _demysto import APP, configured_launch, mock, nonce, palette_hotkey, prompts, say
 
 LAUNCH = False
+# The selection is read with a synthetic copy, which Wayland refuses.
+SESSIONS = ["x11"]
 # What this measures is the same in every Lab language.
 LANGUAGES = ["en-US"]
 

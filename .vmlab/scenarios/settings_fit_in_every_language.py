@@ -1,6 +1,6 @@
 import pathlib
 
-from _demysto import APP, CATALOGUES, configure, say, tray
+from _demysto import APP, CATALOGUES, approve_shortcuts, configure, say, tray
 
 LAUNCH = False
 TIMEOUT = 1200
@@ -57,6 +57,7 @@ def scenario(g):
     for lang in CATALOGUE_LANGUAGES:
         g.quit()
         g.launch(env={"DEMYSTO_LANGUAGE": lang})
+        approve_shortcuts(g)
         g.tray(tray(g), choose=say(g, "tray-settings", lang), timeout=15)
         opened = g.wait_for(text=say(g, "settings-tab-models", lang), role=tab_role, app=APP, timeout=15)
         if not g.check(f"{lang}: Settings opens in that language", opened["met"], detail=opened):

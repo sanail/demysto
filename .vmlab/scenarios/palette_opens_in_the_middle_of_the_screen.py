@@ -3,6 +3,8 @@ from _demysto import APP, configured_launch, nonce, palette_hotkey
 LAUNCH = False
 # Where a window goes does not depend on the Lab language.
 LANGUAGES = ["en-US"]
+# Wayland does not let an application place its own window.
+SESSIONS = ["x11"]
 
 # How far the Palette may stray from where it belongs, in logical pixels:
 # rounding, and nothing a user would see.

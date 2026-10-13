@@ -57,6 +57,9 @@
 [labs.mac]
 provider = "tart"
 os = "macos"
+# Capture copies the selection with a synthetic keystroke, which needs
+# Accessibility; the screen area runs screencapture, which needs Screen Recording.
+grant = { accessibility = ["/Applications/Demysto.app"], screen_capture = ["/Applications/Demysto.app"] }
 
 [labs.mac.tart]
 base = "macos-tahoe"
@@ -66,15 +69,7 @@ artifact = "target/release/bundle/macos/Demysto.app"
 build = """npm run tauri build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'"""
 inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "overlay.html", "palette.html", "result.html", "settings.html", "welcome.html"]
 build_timeout = 1800
-# Capture copies the selection with a synthetic keystroke, which needs
-# Accessibility. Granted by bundle id, after removing any denial macOS wrote.
-install = '''
-set -e
-rm -rf /Applications/Demysto.app && cp -R "$VMLAB_ARTIFACT" /Applications/
-db="/Library/Application Support/com.apple.TCC/TCC.db"
-sudo sqlite3 -cmd ".timeout 15000" "$db" "DELETE FROM access WHERE client='app.demysto';"
-sudo sqlite3 -cmd ".timeout 15000" "$db" "INSERT INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified) VALUES ('kTCCServiceAccessibility', 'app.demysto', 0, 2, 4, 1, 0, CAST(strftime('%s','now') AS INTEGER));"
-'''
+install = 'rm -rf /Applications/Demysto.app && cp -R "$VMLAB_ARTIFACT" /Applications/'
 quit = "pkill -x demysto; defaults delete app.demysto 2>/dev/null; true"
 process = "demysto"
 launch = "open -a /Applications/Demysto.app"
@@ -183,6 +178,9 @@ notification_id = "demysto"
 language = "ru-RU"
 provider = "tart"
 os = "macos"
+# Capture copies the selection with a synthetic keystroke, which needs
+# Accessibility; the screen area runs screencapture, which needs Screen Recording.
+grant = { accessibility = ["/Applications/Demysto.app"], screen_capture = ["/Applications/Demysto.app"] }
 
 [labs.mac-ru.tart]
 base = "macos-tahoe"
@@ -192,15 +190,7 @@ artifact = "target/release/bundle/macos/Demysto.app"
 build = """npm run tauri build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'"""
 inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "overlay.html", "palette.html", "result.html", "settings.html", "welcome.html"]
 build_timeout = 1800
-# Capture copies the selection with a synthetic keystroke, which needs
-# Accessibility. Granted by bundle id, after removing any denial macOS wrote.
-install = '''
-set -e
-rm -rf /Applications/Demysto.app && cp -R "$VMLAB_ARTIFACT" /Applications/
-db="/Library/Application Support/com.apple.TCC/TCC.db"
-sudo sqlite3 -cmd ".timeout 15000" "$db" "DELETE FROM access WHERE client='app.demysto';"
-sudo sqlite3 -cmd ".timeout 15000" "$db" "INSERT INTO access (service, client, client_type, auth_value, auth_reason, auth_version, flags, last_modified) VALUES ('kTCCServiceAccessibility', 'app.demysto', 0, 2, 4, 1, 0, CAST(strftime('%s','now') AS INTEGER));"
-'''
+install = 'rm -rf /Applications/Demysto.app && cp -R "$VMLAB_ARTIFACT" /Applications/'
 quit = "pkill -x demysto; defaults delete app.demysto 2>/dev/null; true"
 process = "demysto"
 launch = "open -a /Applications/Demysto.app"

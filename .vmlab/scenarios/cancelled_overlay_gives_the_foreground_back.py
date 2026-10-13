@@ -1,9 +1,10 @@
 from _demysto import APP, configured_launch, foreground, nonce, palette_hotkey, say
 
 LAUNCH = False
-# What is driven here is Demysto's own overlay, which the X11 Labs get for
-# want of a portal offering Screenshot.
+# What is driven here is Demysto's own overlay, which X11 gets for want of a
+# portal offering Screenshot; Wayland takes the desktop's own tool instead.
 OS = ["windows", "linux"]
+SESSIONS = ["x11"]
 
 STATED = "Ctrl+Alt+Shift+A"
 

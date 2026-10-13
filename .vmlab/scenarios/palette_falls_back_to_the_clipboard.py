@@ -3,6 +3,8 @@ from _demysto import APP, configured_launch, nonce, palette_hotkey, say
 LAUNCH = False
 # What this measures is the same in every Lab language.
 LANGUAGES = ["en-US"]
+# The selection is read with a synthetic copy, which Wayland refuses.
+SESSIONS = ["x11"]
 
 
 def scenario(g):
