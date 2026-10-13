@@ -10,7 +10,6 @@ def fill(g, label, text):
 
 def scenario(g):
     mock(g, "Hi")
-    approve_shortcuts(g)
 
     welcome = g.wait_for(text=say(g, "welcome-title"), app=APP, timeout=20)
     g.check("a first run opens the welcome window", welcome["met"], detail=welcome)
@@ -45,6 +44,8 @@ def scenario(g):
     g.click(role="button", text=say(g, "welcome-finish"), app=APP, timeout=10)
     ended = g.wait_for(text=say(g, "welcome-title"), app=APP, gone=True, timeout=10)
     g.check("the welcome flow ends", ended["met"], detail=ended)
+    # GNOME's question about the Hotkeys came up under the welcome window.
+    approve_shortcuts(g)
 
     settings = g.get(config_file(g, "settings.toml"))
     g.check("the Settings File holds the Provider and its Model",

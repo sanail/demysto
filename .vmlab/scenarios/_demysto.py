@@ -5,6 +5,7 @@ import json
 import pathlib
 import re
 import struct
+import time
 import uuid
 import zlib
 
@@ -230,9 +231,20 @@ def approve_shortcuts(g):
     this allows them. Elsewhere it does nothing."""
     if g.session != "wayland":
         return
-    if g.wait_for(text="Add", role="button", app=GNOME_SHORTCUTS, timeout=10)["met"]:
-        g.click(text="Add", role="button", app=GNOME_SHORTCUTS)
-        g.wait_for(text="Add", role="button", app=GNOME_SHORTCUTS, gone=True, timeout=10)
+
+    def shown():
+        # A dialog already answered stays in the tree, with no bounds.
+        return [m for m in g.find(text="Add", role="button", app=GNOME_SHORTCUTS)["matches"] if m["bounds"]]
+
+    deadline = time.monotonic() + 10
+    while not shown():
+        if time.monotonic() > deadline:
+            return
+        time.sleep(0.5)
+    g.click(text="Add", role="button", app=GNOME_SHORTCUTS)
+    deadline = time.monotonic() + 10
+    while shown() and time.monotonic() < deadline:
+        time.sleep(0.5)
 
 
 def foreground(g):

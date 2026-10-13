@@ -3,6 +3,9 @@ from _demysto import APP, config_file, configured_launch, copy_picture, nonce, p
 LAUNCH = False
 # What this measures is the same in every Lab language.
 LANGUAGES = ["en-US"]
+# The Palette half reads a selection with a synthetic copy, which Wayland
+# refuses, and copies a picture with xclip, an X11 client.
+SESSIONS = ["x11"]
 
 
 def tab_to(g, label, role=None, presses=15):
