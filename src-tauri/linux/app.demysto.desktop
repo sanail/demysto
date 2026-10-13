@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Demysto
+Comment=Explain, translate and summarise whatever you are looking at.
+Exec=demysto
+Icon=demysto
+StartupWMClass=demysto
+Terminal=false
+Categories=Utility;

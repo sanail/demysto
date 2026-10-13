@@ -302,6 +302,7 @@ capture-clipboard-only = Wayland no deja que una aplicación escriba en otra, as
 capture-clipboard-unavailable = El portapapeles no está disponible: { $detail }
 capture-keystroke-refused = No se ha podido enviar la pulsación de copiar: { $detail }
 capture-no-accessibility = macOS no deja que Demysto lea lo que seleccionaste sin el permiso de Accesibilidad. Abre Privacidad y seguridad → Accesibilidad y activa Demysto.
+capture-no-screen-recording = macOS no deja que Demysto tome un área de la pantalla sin el permiso de Grabación de pantalla. Abre Privacidad y seguridad → Grabación de pantalla y audio del sistema, activa Demysto y vuelve a abrirlo.
 capture-picture-unreadable = Demysto no pudo leer la imagen del portapapeles. Cópiala otra vez, o copia otra.
 capture-screen-unavailable = Demysto no pudo capturar el área de la pantalla: { $detail }
 accessibility-pane-unreachable = Demysto no ha podido abrir Ajustes del Sistema: { $detail }. El permiso está en Privacidad y seguridad → Accesibilidad.

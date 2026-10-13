@@ -68,7 +68,8 @@ export type CaptureError =
   | { kind: "keystroke"; message: string }
   | { kind: "picture" }
   | { kind: "permission" }
-  | { kind: "screen"; message: string };
+  | { kind: "screen"; message: string }
+  | { kind: "screen_recording" };
 
 /** Mirrors `demysto_core::CaptureOutcome`. */
 export type CaptureOutcome =

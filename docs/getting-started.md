@@ -135,8 +135,11 @@ Hotkey for it in **Settings → General**, under the one that opens the list of
 Actions; it has none until you do. Press it, drag a rectangle over what you want
 to ask about, and the list of Actions opens on that picture. Esc cancels. On
 macOS this is the system's own area selection, the one
-<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>4</kbd> shows; on Linux it is your
-desktop's own screenshot tool, which GNOME and KDE Plasma both offer. On
+<kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>4</kbd> shows, and it needs the Screen
+Recording permission: the first press asks macOS for it, and until you turn
+Demysto on in **Privacy & Security → Screen & System Audio Recording** a press
+only says so. On Linux it is your desktop's own screenshot tool, which GNOME
+and KDE Plasma both offer; GNOME's also puts the picture on the clipboard. On
 Windows, and on an X11 desktop that offers none, such as Xfce, Demysto dims
 the monitor the pointer is on and you drag over a still picture of it, so a
 tooltip or an open menu stays in it; to take an area of another monitor, move

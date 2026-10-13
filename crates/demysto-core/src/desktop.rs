@@ -78,6 +78,8 @@ impl Screen for SystemScreen {
     /// it is cancelled. Its exit status says nothing either way.
     #[cfg(target_os = "macos")]
     fn area(&self) -> Result<Option<Vec<u8>>, CaptureError> {
+        screen_recording()?;
+
         let file =
             Removed(std::env::temp_dir().join(format!("demysto-area-{}.png", std::process::id())));
         // A file left behind by a run that was killed would pass for this area.
@@ -101,6 +103,28 @@ impl Screen for SystemScreen {
     fn area(&self) -> Result<Option<Vec<u8>>, CaptureError> {
         Ok(None)
     }
+}
+
+/// Whether macOS lets Demysto see the screen. Without it `screencapture -i`
+/// still lets the user drag, then writes nothing, which would pass for a
+/// cancel; so it is asked first, and the system's own prompt is raised once.
+#[cfg(target_os = "macos")]
+fn screen_recording() -> Result<(), CaptureError> {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+        fn CGRequestScreenCaptureAccess() -> bool;
+    }
+
+    // SAFETY: neither takes arguments, and both may be called from any thread.
+    if unsafe { CGPreflightScreenCaptureAccess() } {
+        return Ok(());
+    }
+    // Shows the system's prompt the first time, and adds Demysto to the list
+    // in Privacy & Security; afterwards it answers without asking.
+    unsafe { CGRequestScreenCaptureAccess() };
+
+    Err(CaptureError::ScreenRecording)
 }
 
 /// A file removed when this goes, whichever way the Capture ended.

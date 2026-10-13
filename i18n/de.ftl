@@ -306,6 +306,7 @@ capture-clipboard-only = Wayland lässt eine Anwendung nicht in eine andere schr
 capture-clipboard-unavailable = Die Zwischenablage ist nicht verfügbar: { $detail }
 capture-keystroke-refused = Der Tastendruck zum Kopieren konnte nicht gesendet werden: { $detail }
 capture-no-accessibility = macOS lässt Demysto Ihre Markierung ohne die Bedienungshilfen-Berechtigung nicht lesen. Öffnen Sie Datenschutz & Sicherheit → Bedienungshilfen und schalten Sie Demysto ein.
+capture-no-screen-recording = macOS lässt Demysto ohne die Berechtigung zur Bildschirmaufnahme keinen Bildschirmbereich aufnehmen. Öffnen Sie Datenschutz & Sicherheit → Bildschirm- & Systemaudioaufnahme, schalten Sie Demysto ein und starten Sie es neu.
 capture-picture-unreadable = Demysto konnte das Bild in der Zwischenablage nicht lesen. Kopieren Sie es erneut oder ein anderes.
 capture-screen-unavailable = Demysto konnte den Bildschirmbereich nicht aufnehmen: { $detail }
 accessibility-pane-unreachable = Demysto konnte die Systemeinstellungen nicht öffnen: { $detail }. Die Berechtigung liegt unter „Datenschutz & Sicherheit“ → „Bedienungshilfen“.

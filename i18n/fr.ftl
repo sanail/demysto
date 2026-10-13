@@ -306,6 +306,7 @@ capture-clipboard-only = Wayland ne laisse pas une application écrire dans une 
 capture-clipboard-unavailable = Le presse-papiers est indisponible : { $detail }
 capture-keystroke-refused = La frappe de copie n'a pas pu être envoyée : { $detail }
 capture-no-accessibility = macOS ne laisse pas Demysto lire votre sélection sans l'autorisation Accessibilité. Ouvrez Confidentialité et sécurité → Accessibilité et activez Demysto.
+capture-no-screen-recording = macOS ne laisse pas Demysto prendre une zone de l'écran sans l'autorisation Enregistrement de l'écran. Ouvrez Confidentialité et sécurité → Enregistrement de l'écran et de l'audio du système, activez Demysto, puis quittez-le et rouvrez-le.
 capture-picture-unreadable = Demysto n'a pas pu lire l'image du presse-papiers. Copiez-la de nouveau, ou copiez-en une autre.
 capture-screen-unavailable = Demysto n'a pas pu capturer la zone de l'écran : { $detail }
 accessibility-pane-unreachable = Demysto n'a pas pu ouvrir les Réglages Système : { $detail }. L'autorisation se trouve dans Confidentialité et sécurité → Accessibilité.

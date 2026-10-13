@@ -121,6 +121,8 @@
         return t("capture-no-accessibility");
       case "screen":
         return t("capture-screen-unavailable", { detail: failure.message });
+      case "screen_recording":
+        return t("capture-no-screen-recording");
     }
   }
 

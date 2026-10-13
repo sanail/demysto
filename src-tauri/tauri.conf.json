@@ -85,6 +85,20 @@
       "nsis": {
         "installerHooks": "installer-hooks.nsh"
       }
+    },
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/hidden.desktop",
+        "files": {
+          "/usr/share/applications/app.demysto.desktop": "linux/app.demysto.desktop"
+        }
+      },
+      "rpm": {
+        "desktopTemplate": "linux/hidden.desktop",
+        "files": {
+          "/usr/share/applications/app.demysto.desktop": "linux/app.demysto.desktop"
+        }
+      }
     }
   }
 }

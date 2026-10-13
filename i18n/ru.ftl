@@ -302,6 +302,7 @@ capture-clipboard-only = Wayland не позволяет одному прило
 capture-clipboard-unavailable = Буфер обмена недоступен: { $detail }
 capture-keystroke-refused = Не удалось отправить сочетание копирования: { $detail }
 capture-no-accessibility = macOS не даёт Demysto прочитать выделенное без разрешения «Универсальный доступ». Откройте «Конфиденциальность и безопасность» → «Универсальный доступ» и включите Demysto.
+capture-no-screen-recording = macOS не даёт Demysto снять область экрана без разрешения «Запись экрана». Откройте «Конфиденциальность и безопасность» → «Запись экрана и системного звука», включите Demysto и перезапустите его.
 capture-picture-unreadable = Demysto не смог прочитать изображение из буфера обмена. Скопируйте его ещё раз или скопируйте другое.
 capture-screen-unavailable = Demysto не смог снять область экрана: { $detail }
 accessibility-pane-unreachable = Demysto не смог открыть Системные настройки: { $detail }. Разрешение находится в «Конфиденциальность и безопасность» → «Универсальный доступ».

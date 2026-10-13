@@ -307,6 +307,7 @@ capture-clipboard-only = Wayland does not let one application type into another,
 capture-clipboard-unavailable = The clipboard is unavailable: { $detail }
 capture-keystroke-refused = The copy keystroke could not be sent: { $detail }
 capture-no-accessibility = macOS will not let Demysto read your selection without the Accessibility permission. Open Privacy & Security → Accessibility and turn Demysto on.
+capture-no-screen-recording = macOS will not let Demysto take an area of the screen without the Screen Recording permission. Open Privacy & Security → Screen & System Audio Recording and turn Demysto on, then quit and reopen it.
 capture-picture-unreadable = Demysto could not read the picture in the clipboard. Copy it again, or copy a different one.
 capture-screen-unavailable = Demysto could not take the area of the screen: { $detail }
 accessibility-pane-unreachable = Demysto could not open System Settings: { $detail }. The permission is in Privacy & Security → Accessibility.

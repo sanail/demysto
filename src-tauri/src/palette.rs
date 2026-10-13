@@ -70,6 +70,13 @@ pub fn area<R: Runtime>(app: &AppHandle<R>) {
             Some(CaptureOutcome::Failed(CaptureError::Screen(detail))) => {
                 return crate::notify::screen_not_taken(app, &detail);
             }
+            Some(CaptureOutcome::Failed(CaptureError::ScreenRecording)) => {
+                let why = app
+                    .state::<Demysto>()
+                    .words()
+                    .text("capture-no-screen-recording");
+                return crate::notify::screen_not_taken(app, &why);
+            }
             Some(outcome) => outcome,
         };
 

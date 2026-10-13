@@ -1,0 +1,8 @@
+# The bundler names its entry after the product; the portal looks Demysto up
+# by its identifier, so app.demysto.desktop is the one shown.
+[Desktop Entry]
+Type=Application
+Name={{name}}
+Exec={{exec}}
+Icon={{icon}}
+Hidden=true

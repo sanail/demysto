@@ -15,6 +15,11 @@ What each release brought, newest first.
 - On Windows, and on an X11 desktop without a screenshot portal such as Xfce,
   Demysto draws the selection itself, over a still picture of the monitor under
   the pointer taken when the Hotkey is pressed.
+- On macOS the area needs the Screen Recording permission. The first press asks
+  for it; without it a press says so in a notification instead of doing
+  nothing.
+- Hotkeys work on GNOME 48 and later on Wayland: the `.deb` and `.rpm` now
+  install the desktop entry the shortcuts portal looks Demysto up by.
 
 ## 1.0.0 — 2026-10-06
 

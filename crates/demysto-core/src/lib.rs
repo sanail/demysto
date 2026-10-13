@@ -6852,6 +6852,18 @@ mod tests {
     }
 
     #[test]
+    fn a_withheld_screen_recording_is_reported() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = choosing(&desktop, None, Err(CaptureError::ScreenRecording));
+
+        assert_eq!(
+            demysto.capture_area(),
+            Some(CaptureOutcome::Failed(CaptureError::ScreenRecording))
+        );
+        assert_eq!(demysto.last_capture(), None);
+    }
+
+    #[test]
     fn the_screen_area_hotkey_is_unset_until_somebody_sets_it() {
         let desktop = Arc::new(FakeDesktop::new(None, None));
         let demysto = rooted(fake::over(&desktop), Some("version = 1\n"));

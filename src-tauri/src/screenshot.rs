@@ -50,6 +50,9 @@ impl Screen for Portal {
         let uri = match answered {
             Ok(screenshot) => screenshot.uri().as_str().to_owned(),
             Err(ashpd::Error::Response(ResponseError::Cancelled)) => return Ok(None),
+            // GNOME answers Esc in its screenshot UI with "other" and nothing
+            // more; a portal failing that way is taken for a cancel too.
+            Err(ashpd::Error::Response(ResponseError::Other)) => return Ok(None),
             Err(error) => return Err(CaptureError::Screen(error.to_string())),
         };
 

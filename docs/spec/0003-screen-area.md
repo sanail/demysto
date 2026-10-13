@@ -65,11 +65,16 @@ ADR-0019 records why the system's own tool is used wherever there is one:
 
 - **macOS:** `screencapture -i`, writing to a temporary file that is read and
   removed at once, whether the area was chosen or not. Demysto draws nothing.
-  Whether the interactive mode needs Screen Recording for the application that
-  starts it is not yet verified on a Lab; the research so far says it does not.
+  It needs Screen Recording for Demysto, which starts it: without it the user
+  can still drag, and then no picture is written. So macOS is asked first, at
+  every press; where it has not granted it, the press raises the system's own
+  prompt, notifies the user naming the pane where it is granted, and opens no
+  Palette. The first-run flow does not ask, since the Hotkey has no default.
 - **Linux, where the portal offers Screenshot:** an interactive request to
   `org.freedesktop.portal.Screenshot`, which shows GNOME's or KDE's own UI. The
-  file it returns is removed once read.
+  file it returns is removed once read. GNOME's UI also puts the picture on the
+  clipboard and shows a notification of its own, which Demysto cannot prevent:
+  there user story 91 holds for the selection only.
 - **Windows, and X11 where the portal offers no Screenshot:** Demysto's own
   overlay, below. On X11 the portal is asked at every press, since it may start
   or stop between them; one that does not answer in time counts as offering it.
@@ -109,7 +114,9 @@ ADR-0019 records why the system's own tool is used wherever there is one:
 Esc, a click without a drag and an area of a couple of pixels open nothing and
 say nothing: no Palette, no Run, no notification, no Model asked about an empty
 picture. The system tool's exit status is not trusted for this; a missing or
-empty file, or a cancelled portal request, is the signal.
+empty file, or a cancelled portal request, is the signal. GNOME answers Esc
+in its screenshot UI as a request that failed with no reason given, so that
+answer counts as a cancel from any portal.
 
 A tool that fails — `screencapture` that will not start, a portal that refuses
 or errors — is reported in a notification quoting what it said, on every

@@ -132,6 +132,10 @@ pub enum CaptureError {
     /// The area of the screen could not be taken: the system's tool would not
     /// start, or wrote something that is not a picture.
     Screen(String),
+    /// macOS is withholding Screen Recording, without which `screencapture`
+    /// writes no picture. Separate from [`Self::Permission`] because it names
+    /// a different pane.
+    ScreenRecording,
 }
 
 impl CaptureError {
@@ -158,6 +162,7 @@ impl CaptureError {
             }
             Self::Picture => say!(words, "capture-picture-unreadable"),
             Self::Permission => say!(words, "capture-no-accessibility"),
+            Self::ScreenRecording => say!(words, "capture-no-screen-recording"),
             Self::Screen(detail) => {
                 say!(
                     words,
