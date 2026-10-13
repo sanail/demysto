@@ -64,7 +64,7 @@ base = "macos-tahoe"
 [labs.mac.app]
 artifact = "target/release/bundle/macos/Demysto.app"
 build = """npm run tauri build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'"""
-inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html"]
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "overlay.html", "palette.html", "result.html", "settings.html", "welcome.html"]
 build_timeout = 1800
 # Capture copies the selection with a synthetic keystroke, which needs
 # Accessibility. Granted by bundle id, after removing any denial macOS wrote.
@@ -92,7 +92,7 @@ base = "windows-11"
 [labs.win.app]
 artifact = "target/aarch64-pc-windows-msvc/release/bundle/nsis/Demysto_*_arm64-setup.exe"
 build = """RC=/opt/homebrew/opt/llvm/bin/llvm-rc npm run tauri build -- --runner cargo-xwin --target aarch64-pc-windows-msvc --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'"""
-inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/tauri.windows.conf.json", "src-tauri/Cargo.toml", "src-tauri/installer-hooks.nsh", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html"]
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/tauri.windows.conf.json", "src-tauri/Cargo.toml", "src-tauri/installer-hooks.nsh", "crates", "i18n", "package.json", "overlay.html", "palette.html", "result.html", "settings.html", "welcome.html"]
 build_timeout = 2400
 # The installer, not the bare .exe: Windows records Notifications only under
 # the AppUserModelID the installer gives the Start menu shortcut.
@@ -117,7 +117,7 @@ session = "x11"
 [labs.linux.app]
 artifact = "target/linux-arm64/release/bundle/deb/Demysto_*_arm64.deb"
 build = "sh .vmlab/build-linux.sh"
-inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html", ".vmlab/build-linux.sh"]
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "overlay.html", "palette.html", "result.html", "settings.html", "welcome.html", ".vmlab/build-linux.sh"]
 build_timeout = 3600
 install = 'sudo apt-get install -y --reinstall -o DPkg::Lock::Timeout=300 "$VMLAB_ARTIFACT"'
 quit = "pkill -x demysto"
@@ -141,7 +141,7 @@ base = "macos-tahoe"
 [labs.mac-ru.app]
 artifact = "target/release/bundle/macos/Demysto.app"
 build = """npm run tauri build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'"""
-inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html"]
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "overlay.html", "palette.html", "result.html", "settings.html", "welcome.html"]
 build_timeout = 1800
 # Capture copies the selection with a synthetic keystroke, which needs
 # Accessibility. Granted by bundle id, after removing any denial macOS wrote.
@@ -170,7 +170,7 @@ base = "windows-11"
 [labs.win-ru.app]
 artifact = "target/aarch64-pc-windows-msvc/release/bundle/nsis/Demysto_*_arm64-setup.exe"
 build = """RC=/opt/homebrew/opt/llvm/bin/llvm-rc npm run tauri build -- --runner cargo-xwin --target aarch64-pc-windows-msvc --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'"""
-inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/tauri.windows.conf.json", "src-tauri/Cargo.toml", "src-tauri/installer-hooks.nsh", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html"]
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/tauri.windows.conf.json", "src-tauri/Cargo.toml", "src-tauri/installer-hooks.nsh", "crates", "i18n", "package.json", "overlay.html", "palette.html", "result.html", "settings.html", "welcome.html"]
 build_timeout = 2400
 # The installer, not the bare .exe: Windows records Notifications only under
 # the AppUserModelID the installer gives the Start menu shortcut.
@@ -196,7 +196,7 @@ session = "x11"
 [labs.linux-ru.app]
 artifact = "target/linux-arm64/release/bundle/deb/Demysto_*_arm64.deb"
 build = "sh .vmlab/build-linux.sh"
-inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "palette.html", "result.html", "settings.html", "welcome.html", ".vmlab/build-linux.sh"]
+inputs = ["src", "src-tauri/src", "src-tauri/tauri.conf.json", "src-tauri/Cargo.toml", "crates", "i18n", "package.json", "overlay.html", "palette.html", "result.html", "settings.html", "welcome.html", ".vmlab/build-linux.sh"]
 build_timeout = 3600
 install = 'sudo apt-get install -y --reinstall -o DPkg::Lock::Timeout=300 "$VMLAB_ARTIFACT"'
 quit = "pkill -x demysto"

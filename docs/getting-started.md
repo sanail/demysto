@@ -136,8 +136,11 @@ Actions; it has none until you do. Press it, drag a rectangle over what you want
 to ask about, and the list of Actions opens on that picture. Esc cancels. On
 macOS this is the system's own area selection, the one
 <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>4</kbd> shows; on Linux it is your
-desktop's own screenshot tool, which GNOME and KDE Plasma both offer. On a
-Wayland desktop that offers none, Settings says so and leaves the field off.
+desktop's own screenshot tool, which GNOME and KDE Plasma both offer. On
+Windows, Demysto dims the monitor the pointer is on and you drag over a still
+picture of it, so a tooltip or an open menu stays in it; to take an area of
+another monitor, move the pointer there first. On a Wayland desktop that offers
+none, Settings says so and leaves the field off.
 
 Large pictures are scaled down before they are sent, which is faster and
 cheaper. When a picture was scaled down, the chat offers to ask again at full

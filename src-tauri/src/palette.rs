@@ -52,6 +52,11 @@ pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
 /// clipboard instead. The clipboard and the foreground application are never
 /// touched.
 pub fn area<R: Runtime>(app: &AppHandle<R>) {
+    // Pressed again while the overlay is up, it cancels it.
+    if crate::overlay::dismiss() {
+        return;
+    }
+
     off_thread(app, |app, window| {
         let Some(_opening) = Underway::claim(&OPENING) else {
             return;
@@ -216,7 +221,7 @@ fn placement(
 ///
 /// The primary screen stands in when the pointer is on none, which is a gap
 /// between two of them.
-fn screen_holding<R: Runtime>(
+pub(crate) fn screen_holding<R: Runtime>(
     app: &AppHandle<R>,
     cursor: PhysicalPosition<f64>,
 ) -> tauri::Result<Option<Monitor>> {

@@ -432,3 +432,17 @@ pub fn dismiss<R: Runtime>(window: WebviewWindow<R>) {
     // button at the end: `welcome` says why, and answers to nothing else.
     crate::welcome::gone(window.app_handle(), window.label());
 }
+
+/// The frozen frame the overlay selects on, as a BMP file; empty once the
+/// overlay has closed.
+#[tauri::command]
+pub fn overlay_frame() -> tauri::ipc::Response {
+    tauri::ipc::Response::new(crate::overlay::frame_as_bmp().unwrap_or_default())
+}
+
+/// The area dragged on the overlay, in the frame's pixels, or `None` for a
+/// cancel.
+#[tauri::command]
+pub fn overlay_chosen(area: Option<crate::overlay::Area>) {
+    crate::overlay::choose(area);
+}

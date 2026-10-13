@@ -921,6 +921,7 @@ dependencies = [
  "futures-util",
  "gdkx11",
  "gtk",
+ "image",
  "notify-rust",
  "objc2",
  "objc2-app-kit",

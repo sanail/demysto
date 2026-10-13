@@ -16,6 +16,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
+        overlay: "overlay.html",
         palette: "palette.html",
         result: "result.html",
         settings: "settings.html",

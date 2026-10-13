@@ -810,3 +810,16 @@ export function verifyProvider(
 ): Promise<void> {
   return invoke<void>("verify_provider", { provider, model });
 }
+
+/** An area of the overlay's frame, in its pixels. */
+export type Area = { x: number; y: number; width: number; height: number };
+
+/** The overlay's frozen frame, as a BMP file. */
+export function overlayFrame(): Promise<ArrayBuffer> {
+  return invoke("overlay_frame");
+}
+
+/** The area dragged on the overlay, or `null` for a cancel. */
+export function overlayChosen(area: Area | null): Promise<void> {
+  return invoke("overlay_chosen", { area });
+}

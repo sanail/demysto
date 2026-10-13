@@ -96,8 +96,7 @@ impl Screen for SystemScreen {
         }
     }
 
-    // ponytail: no area on Windows until it has an overlay of Demysto's own.
-    // Linux has the Screenshot portal, which the shell hands over instead.
+    // The shell hands over its own: the portal on Linux, the overlay on Windows.
     #[cfg(not(target_os = "macos"))]
     fn area(&self) -> Result<Option<Vec<u8>>, CaptureError> {
         Ok(None)

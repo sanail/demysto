@@ -32,7 +32,9 @@ mod sse;
 mod stream;
 
 pub use action::{Action, Parameter};
-pub use capture::{Capture, CaptureError, CaptureOutcome, Captured, Capturing, Screen};
+pub use capture::{
+    Capture, CaptureError, CaptureOutcome, Captured, Capturing, Screen, SMALLEST_AREA,
+};
 pub use catalogue::{ActionEdit, ActionError, ActionStanding, Catalogue, DefinedAction};
 pub use config::{ConfigError, DEFAULT_LARGE_SELECTION};
 pub use conversation::{Conversation, PictureStanding, Summary, Turn};

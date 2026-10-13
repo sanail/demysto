@@ -12,6 +12,8 @@ What each release brought, newest first.
 - On Linux the area is chosen in the desktop's own screenshot tool, through its
   screenshot portal. Where a Wayland desktop offers none, Settings says so; a
   tool that fails says so in a notification.
+- On Windows Demysto draws the selection itself, over a still picture of the
+  monitor under the pointer taken when the Hotkey is pressed.
 
 ## 1.0.0 — 2026-10-06
 

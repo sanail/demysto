@@ -16,6 +16,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 demysto-core.workspace = true
+# The area cut out of the overlay's frame, as the PNG the core reads.
+image = { version = "0.25", default-features = false, features = ["png"] }
 serde.workspace = true
 serde_json = "1"
 tauri = { version = "2", features = ["tray-icon"] }
@@ -60,12 +62,14 @@ gtk = "0.18"
 # links none of the library, so it is asked for here by name.
 x11 = { version = "2", features = ["xlib"] }
 
-# The foreground window, given back before a Capture from the tray menu: see
-# `foreground`. The version Tauri already builds.
+# The foreground window, given back before a Capture from the tray menu (see
+# `foreground`) and after a cancelled overlay, and the screen the overlay
+# freezes. The version Tauri already builds.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
     "Win32_UI_WindowsAndMessaging",
 ] }
 

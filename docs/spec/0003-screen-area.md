@@ -81,18 +81,25 @@ ADR-0019 records why the system's own tool is used wherever there is one:
 
 - **A frozen frame.** The screen is captured the moment the Hotkey is pressed,
   and the user selects on that still picture, so that a tooltip or an open menu
-  stays in it.
+  stays in it. On Windows GDI copies it, layered windows included.
 - **One monitor:** the one under the pointer. Within it there is one scale, so
   the rectangle is cropped from the frame in that monitor's physical pixels,
-  correct at any scaling and on a monitor left of or above the primary one.
+  correct at any scaling and on a monitor left of or above the primary one. The
+  window covers that monitor exactly and the page measures the drag in the
+  frame's own pixels.
 - **What it looks like.** The frame is dimmed; the area being dragged shows
   undimmed, with its size in pixels beside it. The cursor is a crosshair.
-- **The window.** Created at the press and destroyed afterwards, never kept
-  hidden. It takes the foreground, because it needs the mouse and Esc — the one
-  exception to Demysto's windows leaving the foreground alone. After a cancel
-  the application that was in front is in front again.
+- **The window.** Created at the press, hidden until the frame is drawn, and
+  destroyed afterwards, never kept hidden. It takes the foreground, because it
+  needs the mouse and Esc — the one exception to Demysto's windows leaving the
+  foreground alone. After a cancel the application that was in front is in
+  front again.
 - The Palette's Hotkey does nothing while the overlay is up; the screen-area
-  Hotkey pressed again cancels it.
+  Hotkey pressed again cancels it, and so does the overlay losing the focus,
+  which leaves in front whatever the user clicked. An overlay that has not
+  appeared within a few seconds is a failed tool.
+- Only the frame and the foreground belong to the OS. The window and the
+  selection are shared, so that X11 without the portal takes the same overlay.
 
 ### Cancelling
 

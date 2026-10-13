@@ -211,7 +211,7 @@ pub trait Screen: Send + Sync {
 
 /// The shortest side an area may have before it counts as a click rather than
 /// a drag, in the pixels of the file: two points on a Retina screen.
-const SMALLEST_AREA: u32 = 4;
+pub const SMALLEST_AREA: u32 = 4;
 
 /// The area the user chose, or `None` where they chose none.
 ///

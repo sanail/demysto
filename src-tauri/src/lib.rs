@@ -18,6 +18,9 @@ mod hotkey;
 #[cfg(target_os = "macos")]
 mod menu;
 mod notify;
+/// Demysto's own area selection, where the system has none; wired on Windows.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod overlay;
 mod palette;
 /// The Hotkey on Wayland.
 ///
@@ -54,9 +57,11 @@ pub fn run() {
 
     let demysto = Demysto::new(config_dir, env!("CARGO_PKG_VERSION"));
     // ponytail: the portal on X11 as well; a desktop without one notifies at
-    // every press until Demysto has an overlay of its own there.
+    // every press until the overlay is wired there.
     #[cfg(target_os = "linux")]
     let demysto = demysto.with_screen(Box::new(screenshot::Portal));
+    #[cfg(target_os = "windows")]
+    let demysto = demysto.with_screen(Box::new(overlay::Overlay));
 
     let mut builder = tauri::Builder::default();
 
@@ -100,6 +105,7 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             tray::build(app)?;
+            overlay::reach(app.handle());
 
             // After the tray and before everything else: with no menu item
             // carrying `Cmd+C` there is nowhere to take a selection in the
@@ -131,6 +137,11 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| match event {
+            // Alt+F4 on the overlay is a cancel; hiding it would leave the
+            // Capture waiting on a window nobody can see.
+            WindowEvent::CloseRequested { .. } if window.label() == overlay::LABEL => {
+                overlay::dismiss();
+            }
             WindowEvent::CloseRequested { api, .. } => {
                 // Closing a window returns Demysto to the tray. Quitting is a
                 // deliberate act, and the tray menu is where it lives.
@@ -193,6 +204,8 @@ pub fn run() {
             commands::provider_models,
             commands::verify_provider,
             commands::dismiss,
+            commands::overlay_frame,
+            commands::overlay_chosen,
         ])
         .build(tauri::generate_context!())
         .expect("Demysto failed to start");
