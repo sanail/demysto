@@ -3,6 +3,7 @@ pointed at it, and the names the app goes by on each OS."""
 import base64
 import json
 import pathlib
+import re
 import struct
 import uuid
 import zlib
@@ -107,9 +108,8 @@ def prompts(handle):
     return found
 
 
-def pictures(handle):
-    """The (width, height) of every picture the mock was sent, oldest first,
-    read from the PNG itself rather than from the size of the request."""
+def received(handle):
+    """Every PNG the mock was sent, as bytes, oldest first."""
     found = []
     for line in handle.output().splitlines():
         method, path, _, body = (line.strip().split(" ") + ["", "", "", ""])[:4]
@@ -118,25 +118,86 @@ def pictures(handle):
         content = json.loads(base64.b64decode(body))["messages"][-1]["content"]
         for part in content if isinstance(content, list) else []:
             if part.get("type") == "image_url":
-                png = base64.b64decode(part["image_url"]["url"].split(",", 1)[1])
-                found.append(struct.unpack(">II", png[16:24]))
+                found.append(base64.b64decode(part["image_url"]["url"].split(",", 1)[1]))
     return found
 
 
-def png(width, height):
-    """A striped picture: a flat one would compress to nothing, and its fitted
-    and original encodings would weigh the same."""
+def pictures(handle):
+    """The (width, height) of every picture the mock was sent, oldest first,
+    read from the PNG itself rather than from the size of the request."""
+    return [struct.unpack(">II", png[16:24]) for png in received(handle)]
+
+
+def encode_png(width, height, pixel):
+    """An 8-bit RGB PNG whose pixel at (x, y) is pixel(x, y)."""
     rows = bytearray()
     for y in range(height):
         rows.append(0)
         for x in range(width):
-            rows += bytes(((x * 7 + y * 3) % 256, (x * 3) % 256, (y * 5) % 256))
+            rows += bytes(pixel(x, y))
 
     def chunk(kind, body):
         return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
 
     return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
             + chunk(b"IDAT", zlib.compress(bytes(rows), 6)) + chunk(b"IEND", b""))
+
+
+def png(width, height):
+    """A striped picture: a flat one would compress to nothing, and its fitted
+    and original encodings would weigh the same."""
+    return encode_png(width, height, lambda x, y: ((x * 7 + y * 3) % 256, (x * 3) % 256, (y * 5) % 256))
+
+
+def decode_png(data):
+    """(width, height, rows of (r, g, b)) of an 8-bit, non-interlaced RGB or
+    RGBA PNG: what Demysto sends. Anything else raises."""
+    width, height, depth, colour_type, _, _, interlace = struct.unpack(">IIBBBBB", data[16:29])
+    if depth != 8 or colour_type not in (2, 6) or interlace:
+        raise ValueError(f"an unexpected PNG: depth {depth}, colour type {colour_type}, interlace {interlace}")
+    channels = 3 if colour_type == 2 else 4
+    idat, at = b"", 8
+    while at < len(data):
+        length, name = struct.unpack(">I4s", data[at:at + 8])
+        if name == b"IDAT":
+            idat += data[at + 8:at + 8 + length]
+        at += 12 + length
+    raw, stride = zlib.decompress(idat), width * channels
+    rows, previous = [], bytearray(stride)
+    for y in range(height):
+        filter_type, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            left = line[i - channels] if i >= channels else 0
+            up = previous[i]
+            corner = previous[i - channels] if i >= channels else 0
+            if filter_type == 1:
+                line[i] = (line[i] + left) & 255
+            elif filter_type == 2:
+                line[i] = (line[i] + up) & 255
+            elif filter_type == 3:
+                line[i] = (line[i] + (left + up) // 2) & 255
+            elif filter_type == 4:
+                p = left + up - corner
+                pa, pb, pc = abs(p - left), abs(p - up), abs(p - corner)
+                line[i] = (line[i] + (left if pa <= pb and pa <= pc else up if pb <= pc else corner)) & 255
+        rows.append([tuple(line[x * channels:x * channels + 3]) for x in range(width)])
+        previous = line
+    return width, height, rows
+
+
+# Flat blocks, three across and two down, in colours far apart in every channel,
+# so that a colour profile shifting them still leaves each nearest its own.
+BLOCKS = [(220, 40, 40), (40, 180, 60), (40, 70, 220), (240, 200, 40), (200, 60, 200), (40, 200, 210)]
+
+
+def blocks_png(width, height):
+    """BLOCKS laid out over a width × height picture, three across and two down."""
+    return encode_png(width, height, lambda x, y: BLOCKS[(y * 2 // height) * 3 + x * 3 // width])
+
+
+def nearest_block(colour):
+    """The index of the block whose colour is nearest colour."""
+    return min(range(len(BLOCKS)), key=lambda i: sum((a - b) ** 2 for a, b in zip(BLOCKS[i], colour)))
 
 
 def copy_picture(g, width, height):
@@ -158,6 +219,49 @@ def copy_picture(g, width, height):
         path = g.put("/tmp/demysto-picture.png", png(width, height))
         g.spawn(["xclip", "-quiet", "-selection", "clipboard", "-t", "image/png", "-i", path])
         g.wait_for(exec=["sh", "-c", "xclip -selection clipboard -t TARGETS -o | grep -q image/png"], timeout=10)
+
+
+def on_wayland(g):
+    return g.os == "linux" and g.exec(["sh", "-c", "echo $XDG_SESSION_TYPE"]).stdout.strip() == "wayland"
+
+
+def foreground(g):
+    """in_front(process, timeout): a wait until that process's window is in
+    the foreground. Windows and X11 only."""
+    if g.os == "windows":
+        script = g.put(r"%TEMP%\demysto-front.ps1", (HERE / "mock" / "front.ps1").read_text())
+        argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
+    else:
+        argv = ["sh", g.put("/tmp/demysto-front.sh", (HERE / "mock" / "front.sh").read_text())]
+
+    def in_front(process, timeout):
+        return g.wait_for(exec=argv, pattern=rf"(?im)^{re.escape(process)}$", timeout=timeout)
+
+    return in_front
+
+
+BLOCKS_TITLE = "demysto-blocks"
+
+
+def show_blocks(g):
+    """Puts blocks_png over the whole primary display, in a window of another
+    application, and answers that display's bounds."""
+    picture = blocks_png(960, 540)
+    if g.os == "windows":
+        path = g.put(r"%TEMP%\demysto-blocks.png", picture)
+        script = g.put(r"%TEMP%\demysto-blocks.ps1", (HERE / "mock" / "blocks.ps1").read_text())
+        g.spawn(["powershell", "-STA", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, path, BLOCKS_TITLE])
+    elif g.os == "macos":
+        path = g.put("/tmp/demysto-blocks.png", picture)
+        script = g.put("/tmp/demysto-blocks.js", (HERE / "mock" / "blocks.js").read_text())
+        g.spawn(["osascript", "-l", "JavaScript", script, path, BLOCKS_TITLE])
+    else:
+        path = g.put("/tmp/demysto-blocks.png", picture)
+        g.spawn(["python3", g.put("/tmp/demysto-blocks.py", (HERE / "mock" / "blocks.py").read_text()), path, BLOCKS_TITLE])
+    shown = g.wait_for(text=BLOCKS_TITLE, role="window", timeout=30)
+    if not shown["met"]:
+        raise RuntimeError(f"the picture never came up: {shown}")
+    return next(d for d in g.displays()["displays"] if d["primary"])["bounds"]
 
 
 def configure(g, actions=None, settings=""):

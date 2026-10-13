@@ -1,6 +1,4 @@
-import re
-
-from _demysto import APP, HERE, configured_launch, nonce, palette_hotkey, say
+from _demysto import APP, configured_launch, foreground, nonce, palette_hotkey, say
 
 LAUNCH = False
 # What is driven here is Demysto's own overlay, which the X11 Labs get for
@@ -12,14 +10,7 @@ STATED = "Ctrl+Alt+Shift+A"
 
 def scenario(g):
     configured_launch(g, settings=f'screen_area_hotkey = "{STATED}"\n')
-    if g.os == "windows":
-        script = g.put(r"%TEMP%\demysto-front.ps1", (HERE / "mock" / "front.ps1").read_text())
-        argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
-    else:
-        argv = ["sh", g.put("/tmp/demysto-front.sh", (HERE / "mock" / "front.sh").read_text())]
-
-    def in_front(process, timeout):
-        return g.wait_for(exec=argv, pattern=rf"(?im)^{re.escape(process)}$", timeout=timeout)
+    in_front = foreground(g)
 
     clip = "copied before " + nonce()
     g.set_clipboard(clip)
