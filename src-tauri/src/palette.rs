@@ -2,7 +2,7 @@
 
 use std::sync::atomic::AtomicBool;
 
-use demysto_core::Demysto;
+use demysto_core::{CaptureError, CaptureOutcome, Demysto};
 use tauri::{
     AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalRect,
     PhysicalSize, Runtime, WebviewWindow, Window,
@@ -47,8 +47,10 @@ pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
 
 /// Lets the user choose an area of the screen and opens the Palette on it.
 ///
-/// Nothing is shown and nothing is said when they cancel. The clipboard and
-/// the foreground application are never touched.
+/// Nothing is shown and nothing is said when they cancel; a tool that failed is
+/// reported in a notification, since a Palette retrying would read the
+/// clipboard instead. The clipboard and the foreground application are never
+/// touched.
 pub fn area<R: Runtime>(app: &AppHandle<R>) {
     off_thread(app, |app, window| {
         let Some(_opening) = Underway::claim(&OPENING) else {
@@ -58,8 +60,12 @@ pub fn area<R: Runtime>(app: &AppHandle<R>) {
         // Out of the picture the user is about to take.
         let _ = window.hide();
 
-        let Some(outcome) = app.state::<Demysto>().capture_area() else {
-            return;
+        let outcome = match app.state::<Demysto>().capture_area() {
+            None => return,
+            Some(CaptureOutcome::Failed(CaptureError::Screen(detail))) => {
+                return crate::notify::screen_not_taken(app, &detail);
+            }
+            Some(outcome) => outcome,
         };
 
         let _ = position_on_screen(app, window);
@@ -120,7 +126,7 @@ fn open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
 ///
 /// Not beside the pointer: the pointer is often nowhere near what is being
 /// read — the text was selected with the keyboard, or the pointer was left
-/// parked — and a fixed place is one the eyes learn (ticket 36).
+/// parked — and a fixed place is one the eyes learn.
 fn position_on_screen<R: Runtime>(
     app: &AppHandle<R>,
     window: &WebviewWindow<R>,
@@ -255,8 +261,7 @@ fn show<R: Runtime>(_app: &AppHandle<R>, window: &WebviewWindow<R>) {
 /// application somebody has just been typing in. The Palette got away with it
 /// exactly once per run — a window the compositor has never managed is
 /// activated as it is mapped — and every Hotkey after that put the Palette on
-/// screen deaf, with the letters going on into the document underneath
-/// (ticket 20).
+/// screen deaf, with the letters going on into the document underneath.
 ///
 /// The moment is asked of the X server here rather than carried from the
 /// keypress, and that is the one surprise in this. A Hotkey has no timestamp
@@ -315,7 +320,7 @@ fn present_with_server_time<R: Runtime>(window: &WebviewWindow<R>) -> Option<()>
 /// moment before it arrives as a Hotkey: the Palette hides itself, and the
 /// press that follows finds nothing open and opens it again. The Hotkey stops
 /// closing the Palette — which nobody noticed while the Palette was not getting
-/// the keyboard in the first place (ticket 20).
+/// the keyboard in the first place.
 ///
 /// The display is asked rather than GTK, because a grab does not move the input
 /// focus; it only redirects what is typed. The window X names is still this
@@ -420,7 +425,7 @@ fn on_main_thread<R: Runtime>(
     }
 }
 
-/// Turns the Palette into an `NSPanel`, per the spec's *Shell and platform*.
+/// Turns the Palette into an `NSPanel`.
 ///
 /// Two things come with the class that an ordinary window cannot have: it may
 /// be shown alongside a full-screen application instead of on Demysto's own
@@ -428,8 +433,7 @@ fn on_main_thread<R: Runtime>(
 /// application the user is reading.
 #[cfg(target_os = "macos")]
 // `tauri-nspanel` takes the collection behaviour as `cocoa`'s type, and `cocoa`
-// is deprecated in favour of `objc2-app-kit`. The choice belongs to the crate
-// the spec names, not to us.
+// is deprecated in favour of `objc2-app-kit`; the choice is that crate's.
 #[allow(deprecated)]
 pub fn into_panel<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
     use tauri_nspanel::cocoa::appkit::NSWindowCollectionBehavior;

@@ -27,6 +27,7 @@ menu-quit = Quitter Demysto
 # Action's own Hotkey that failed with no window on screen to say so.
 notification-stopped-part-way = Demysto s'est arrêté en chemin
 notification-could-not-answer = Demysto n'a pas pu répondre
+notification-screen-not-taken = Demysto n'a pas pu capturer la zone de l'écran
 
 ## The Actions Demysto comes with
 #
@@ -187,6 +188,7 @@ settings-hotkey-recording = Appuyez sur les touches… Échap pour annuler
 settings-hotkey-default = { $hotkey } — par défaut
 settings-hotkey-none = Aucun — cette action se lance depuis la liste
 settings-screen-area-hotkey-none = Aucun — définissez-en un pour choisir une zone de l'écran
+settings-screen-area-unavailable = Sous Wayland, Demysto ne voit l'écran qu'à travers le portail de capture d'écran du bureau, et celui-ci n'en propose aucun ; GNOME et KDE Plasma en proposent un.
 settings-palette-hotkey-rule = Maintenez Ctrl, Alt ou Shift et appuyez sur une touche. Une touche qui écrit quelque chose ne peut pas être prise seule : elle cesserait de s'écrire partout.
 settings-action-hotkey-rule = Maintenez Ctrl, Alt ou Shift et appuyez sur une touche. Une touche qui écrit quelque chose ne peut pas être prise seule : elle cesserait de s'écrire partout. Les paramètres ne sont pas demandés par cette voie : chacun prend sa valeur par défaut.
 settings-wayland-hotkeys = Sous Wayland, c'est le bureau qui distribue les raccourcis, pas Demysto. Changez-les dans ses propres réglages de clavier, où ils figurent sous Demysto.

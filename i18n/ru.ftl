@@ -23,6 +23,7 @@ menu-quit = Завершить Demysto
 # Action's own Hotkey that failed with no window on screen to say so.
 notification-stopped-part-way = Demysto остановился на полуслове
 notification-could-not-answer = Demysto не смог ответить
+notification-screen-not-taken = Demysto не смог снять область экрана
 
 ## The Actions Demysto comes with
 #
@@ -183,6 +184,7 @@ settings-hotkey-recording = Нажмите клавиши… Esc — отмен�
 settings-hotkey-default = { $hotkey } — по умолчанию
 settings-hotkey-none = Нет — действие запускается из списка
 settings-screen-area-hotkey-none = Нет — задайте сочетание, чтобы выделять область экрана
+settings-screen-area-unavailable = В Wayland Demysto видит экран только через портал снимков экрана самого окружения, а это окружение его не предлагает; GNOME и KDE Plasma предлагают.
 settings-palette-hotkey-rule = Удерживайте Ctrl, Alt или Shift и нажмите клавишу. Печатающую клавишу занять в одиночку нельзя: она перестанет печататься во всех программах.
 settings-action-hotkey-rule = Удерживайте Ctrl, Alt или Shift и нажмите клавишу. Печатающую клавишу занять в одиночку нельзя: она перестанет печататься во всех программах. Параметры при этом не спрашиваются — каждый берёт значение по умолчанию.
 settings-wayland-hotkeys = В Wayland горячие клавиши раздаёт окружение, а не Demysto. Меняйте их в настройках клавиатуры самого окружения — там они перечислены под именем Demysto.

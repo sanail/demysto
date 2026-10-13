@@ -11,6 +11,7 @@
     onUpdateOffered,
     presets as offeredPresets,
     saveSettings,
+    screenAreaUnavailable,
     setAutostart,
     settings as configured,
     status,
@@ -98,6 +99,8 @@
   let paletteHotkey = $state("");
   /** The Hotkey that chooses an area of the screen, empty for none. */
   let screenAreaHotkey = $state("");
+  /** Wayland with no portal offering Screenshot, where that Hotkey does nothing. */
+  let screenAreaOff = $state(false);
   /**
    * How many characters a Selection may hold before Demysto says so.
    *
@@ -206,6 +209,8 @@
     where = reported.config_dir;
     largeSelectionDefault = reported.large_selection_default;
     clipboardOnly = said(reported.capturing);
+    // Not awaited: a slow portal must not hold up the rest of the window.
+    void screenAreaUnavailable().then((off) => (screenAreaOff = off));
     languageFixed = reported.language_env;
     // The first thing this window hears about the login items, and the only
     // one with nothing to fall back on: a system that will not say is drawn as
@@ -755,6 +760,7 @@
         {unreadable}
         {languageFixed}
         throughThePortal={clipboardOnly !== null}
+        {screenAreaOff}
         {paletteDefault}
         {unclaimedHotkeys}
         {autostartWanted}

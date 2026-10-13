@@ -4,7 +4,7 @@
 //! The clipboard and the keystroke are the outside world, so nothing that
 //! touches them is covered by the test suite. They are substituted at the
 //! [`Desktop`] trait, which is what leaves everything built on top of them
-//! testable — see the spec's *Testing Decisions*. What is tested here are the
+//! testable. What is tested here are the
 //! two decisions that are not I/O: which Capture this session can perform, and
 //! which key the copy chord is sent as. Whether macOS has granted the
 //! Accessibility permission is asked of macOS, so the suite exercises it
@@ -96,8 +96,8 @@ impl Screen for SystemScreen {
         }
     }
 
-    // ponytail: no area anywhere but macOS; Linux needs the Screenshot portal
-    // and Windows an overlay of Demysto's own.
+    // ponytail: no area on Windows until it has an overlay of Demysto's own.
+    // Linux has the Screenshot portal, which the shell hands over instead.
     #[cfg(not(target_os = "macos"))]
     fn area(&self) -> Result<Option<Vec<u8>>, CaptureError> {
         Ok(None)
@@ -348,7 +348,7 @@ fn is_down(_key: Key) -> bool {
 /// `AXIsProcessTrusted` rather than the variant that offers to ask for the
 /// permission: this is called at every Capture, and a system dialog on every
 /// Hotkey press would be its own kind of broken. Walking the user to the
-/// permission is the first-run flow's, and is ticket 15's.
+/// permission is the first-run flow's.
 #[cfg(target_os = "macos")]
 fn accessibility() -> Result<(), CaptureError> {
     // Declared here rather than taken from a crate: one function with no

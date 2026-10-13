@@ -32,7 +32,7 @@ mod sse;
 mod stream;
 
 pub use action::{Action, Parameter};
-pub use capture::{Capture, CaptureError, CaptureOutcome, Captured, Capturing};
+pub use capture::{Capture, CaptureError, CaptureOutcome, Captured, Capturing, Screen};
 pub use catalogue::{ActionEdit, ActionError, ActionStanding, Catalogue, DefinedAction};
 pub use config::{ConfigError, DEFAULT_LARGE_SELECTION};
 pub use conversation::{Conversation, PictureStanding, Summary, Turn};
@@ -58,7 +58,7 @@ pub struct Demysto {
     capture: Box<dyn Capture>,
     /// Where an area of the screen is chosen, apart from `capture`: pressing
     /// the screen-area Hotkey is an explicit request for the screen.
-    screen: Box<dyn capture::Screen>,
+    screen: Box<dyn Screen>,
     /// What a Capture on this desktop can read, so that the interface can say
     /// so where the answer is not the whole Selection. Held
     /// from startup for the reason the environment is: it is the session
@@ -376,13 +376,21 @@ impl Demysto {
         outcome
     }
 
+    /// The same facade choosing areas of the screen through `screen`, for a
+    /// platform whose tool the shell reaches and the core cannot.
+    pub fn with_screen(mut self, screen: Box<dyn Screen>) -> Self {
+        self.screen = screen;
+        self
+    }
+
     /// Lets the user choose an area of the screen and remembers the picture,
-    /// or answers `None` and remembers nothing where they cancelled.
+    /// or answers `None` and remembers nothing where they cancelled. A failure
+    /// is not remembered either: no Palette shows it.
     pub fn capture_area(&self) -> Option<CaptureOutcome> {
         let outcome = match capture::from_the_screen(&*self.screen) {
             Ok(None) => return None,
             Ok(Some(captured)) => CaptureOutcome::Captured(captured),
-            Err(error) => CaptureOutcome::Failed(error),
+            Err(error) => return Some(CaptureOutcome::Failed(error)),
         };
         *self.last_capture.lock().unwrap() = Some(outcome.clone());
 
@@ -6838,6 +6846,7 @@ mod tests {
                 "no such file".to_owned()
             )))
         );
+        assert_eq!(demysto.last_capture(), None);
     }
 
     #[test]

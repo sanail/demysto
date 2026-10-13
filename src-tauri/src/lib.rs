@@ -27,6 +27,8 @@ mod palette;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod portal;
 mod result;
+#[cfg(target_os = "linux")]
+mod screenshot;
 mod settings;
 mod tray;
 mod underway;
@@ -49,6 +51,12 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+
+    let demysto = Demysto::new(config_dir, env!("CARGO_PKG_VERSION"));
+    // ponytail: the portal on X11 as well; a desktop without one notifies at
+    // every press until Demysto has an overlay of its own there.
+    #[cfg(target_os = "linux")]
+    let demysto = demysto.with_screen(Box::new(screenshot::Portal));
 
     let mut builder = tauri::Builder::default();
 
@@ -83,7 +91,7 @@ pub fn run() {
     }
 
     let app = builder
-        .manage(Demysto::new(config_dir, env!("CARGO_PKG_VERSION")))
+        .manage(demysto)
         .manage(update::Offered::default())
         .setup(|app| {
             // Accessory to begin with, because at startup the Palette is all
@@ -95,7 +103,7 @@ pub fn run() {
 
             // After the tray and before everything else: with no menu item
             // carrying `Cmd+C` there is nowhere to take a selection in the
-            // Conversation window (user story 15).
+            // Conversation window.
             #[cfg(target_os = "macos")]
             menu::build(app.handle())?;
 
@@ -180,6 +188,7 @@ pub fn run() {
             commands::delete_action,
             commands::settings,
             commands::save_settings,
+            commands::screen_area_unavailable,
             commands::presets,
             commands::provider_models,
             commands::verify_provider,
@@ -190,7 +199,7 @@ pub fn run() {
 
     app.run(|app, event| match event {
         // A fresh installation is met by the flow rather than by a tray icon it
-        // has to work out for itself (user story 57).
+        // has to work out for itself.
         //
         // Here rather than in `setup`, where every other window is prepared,
         // because by this event the application is running: the Hotkey the last

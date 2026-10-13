@@ -73,8 +73,9 @@ ADR-0019 records why the system's own tool is used wherever there is one:
 - **Windows, and X11 where the portal offers no Screenshot:** Demysto's own
   overlay, below.
 - **Wayland where the portal offers no Screenshot:** unavailable. Settings shows
-  the field disabled with a sentence saying why; a portal that fails at the
-  press is reported in a notification.
+  the field disabled with a sentence saying why and naming GNOME and KDE Plasma,
+  which offer it. A portal that cannot be reached within a few seconds counts
+  as offering it, and is left to the press to report.
 
 ### The overlay
 
@@ -99,6 +100,11 @@ Esc, a click without a drag and an area of a couple of pixels open nothing and
 say nothing: no Palette, no Run, no notification, no Model asked about an empty
 picture. The system tool's exit status is not trusted for this; a missing or
 empty file, or a cancelled portal request, is the signal.
+
+A tool that fails — `screencapture` that will not start, a portal that refuses
+or errors — is reported in a notification quoting what it said, on every
+platform. The Palette is not opened on it: its retry reads the clipboard, which
+is not what was asked for.
 
 ## Testing Decisions
 

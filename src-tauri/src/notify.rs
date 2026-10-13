@@ -1,14 +1,5 @@
-//! System notifications, and the one thing Demysto uses them for.
-//!
-//! A Run launched from an Action's own Hotkey is the path with no window in it:
-//! select, press, read. When such a Run fails and the Conversation window is
-//! not in front of the user — because showing it did not take, or because they
-//! put it away while the Model was reasoning — the failure has nowhere to appear.
-//! A notification is what stands in, so that a Hotkey never silently does
-//! nothing (user story 47).
-//!
-//! Only there. Every other failure has a Conversation to appear in, and the
-//! spec is explicit that errors are entries rather than dialogs.
+//! System notifications, for a failure with no window to appear in: a Run
+//! started from an Action's Hotkey, and an area of the screen not taken.
 
 use demysto_core::{Demysto, RunOutcome};
 use tauri::{AppHandle, Manager, Runtime};
@@ -50,12 +41,23 @@ pub fn a_failure_nobody_can_see<R: Runtime>(app: &AppHandle<R>, outcome: &RunOut
     show(app, title, error.message());
 }
 
+/// Tells the user the area of the screen could not be taken, in the words the
+/// tool or the portal gave.
+pub fn screen_not_taken<R: Runtime>(app: &AppHandle<R>, detail: &str) {
+    let title = app
+        .state::<Demysto>()
+        .words()
+        .text("notification-screen-not-taken");
+
+    show(app, title, detail);
+}
+
 /// On Linux, not through the plugin. Its `show` hands notify-rust to a task on
 /// Tauri's tokio runtime, and notify-rust waits for D-Bus with zbus's
 /// `block_on` — which, with the `tokio` feature ashpd turns on for the portal,
 /// starts a runtime of its own and panics inside that task. The notification
 /// never left, and nothing said so. Called from a thread of its own
-/// (`result::straight_to`), where waiting on D-Bus is allowed.
+/// (`result::straight_to`, `palette::area`), where waiting on D-Bus is allowed.
 #[cfg(target_os = "linux")]
 fn show<R: Runtime>(_app: &AppHandle<R>, title: String, body: &str) {
     let _ = notify_rust::Notification::new()

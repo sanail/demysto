@@ -204,7 +204,7 @@ pub(crate) trait Desktop: Send + Sync {
 }
 
 /// Whatever lets the user drag out an area of the screen.
-pub(crate) trait Screen: Send + Sync {
+pub trait Screen: Send + Sync {
     /// The image file the area was written to, `None` where none was written.
     fn area(&self) -> Result<Option<Vec<u8>>, CaptureError>;
 }

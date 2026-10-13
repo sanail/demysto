@@ -12,6 +12,7 @@
     language = $bindable(),
     languageFixed,
     throughThePortal,
+    screenAreaOff,
     paletteHotkey = $bindable(),
     screenAreaHotkey = $bindable(),
     paletteDefault,
@@ -30,6 +31,9 @@
         letting an application claim them, which is a thing to say where they
         are set. */
     throughThePortal: boolean;
+    /** Whether no area of the screen can be had here, which disables its
+        field. */
+    screenAreaOff: boolean;
     paletteHotkey: string;
     /** Empty for none: this one has no default. */
     screenAreaHotkey: string;
@@ -83,6 +87,7 @@
   bound: string,
   unbound: string,
   clear: () => void,
+  off = false,
 )}
   <div class="flex flex-col gap-1">
     <span id="{which}-hotkey" class="text-xs opacity-60">{caption}</span>
@@ -106,8 +111,10 @@
       <button
         type="button"
         class={BUTTON}
-        aria-describedby="{which}-hotkey hotkey-rule"
-        disabled={recording !== null && recording !== which}
+        aria-describedby="{which}-hotkey {off
+          ? `${which}-unavailable`
+          : 'hotkey-rule'}"
+        disabled={off || (recording !== null && recording !== which)}
         onclick={() => (recording = recording === which ? null : which)}
       >
         {recording === which
@@ -119,7 +126,7 @@
         type="button"
         class={BUTTON}
         aria-describedby="{which}-hotkey"
-        disabled={!bound}
+        disabled={off || !bound}
         onclick={() => {
           clear();
           recording = null;
@@ -193,7 +200,13 @@
       screenAreaHotkey,
       t("settings-screen-area-hotkey-none"),
       () => (screenAreaHotkey = ""),
+      screenAreaOff,
     )}
+    {#if screenAreaOff}
+      <p id="screen_area-unavailable" class="text-xs opacity-50">
+        {t("settings-screen-area-unavailable")}
+      </p>
+    {/if}
     <p id="hotkey-rule" class="text-xs opacity-50">
       {t("settings-palette-hotkey-rule")}
     </p>

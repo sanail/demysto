@@ -81,7 +81,7 @@ pub fn status(demysto: State<'_, Demysto>) -> Status {
 
 /// Emitted with the tag of the language Demysto now speaks, so that every
 /// window already on screen redraws itself in it rather than waiting to be
-/// reopened (user story 59).
+/// reopened.
 const LANGUAGE_EVENT: &str = "language://spoken";
 
 /// The language the windows are to draw themselves in.
@@ -188,14 +188,14 @@ pub fn accessibility_asked_for() -> bool {
 }
 
 /// Whether Demysto is in the login items now, which is what the flow's question
-/// about them starts at — `null` where the system would not say (ticket 27).
+/// about them starts at — `null` where the system would not say.
 #[tauri::command]
 pub fn autostart<R: Runtime>(app: AppHandle<R>) -> Option<bool> {
     crate::autostart::enabled(&app)
 }
 
 /// Puts Demysto into the login items, or takes it out — the answer to the one
-/// question the first-run flow asks about them (user story 52).
+/// question the first-run flow asks about them.
 #[tauri::command]
 pub fn set_autostart<R: Runtime>(app: AppHandle<R>, wanted: bool) -> Result<(), String> {
     crate::autostart::set(&app, wanted, &app.state::<Demysto>().words())
@@ -367,6 +367,16 @@ pub async fn save_settings<R: Runtime>(
 #[tauri::command]
 pub fn presets(demysto: State<'_, Demysto>) -> Vec<Preset> {
     demysto.presets()
+}
+
+/// Whether the screen-area Hotkey can do nothing at all on this desktop.
+#[tauri::command]
+pub async fn screen_area_unavailable() -> bool {
+    #[cfg(target_os = "linux")]
+    return crate::screenshot::missing().await;
+
+    #[cfg(not(target_os = "linux"))]
+    false
 }
 
 /// The Models a Provider says it offers, asked of the Provider as the window

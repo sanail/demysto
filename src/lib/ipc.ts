@@ -97,6 +97,11 @@ export function status(): Promise<Status> {
   return invoke<Status>("status");
 }
 
+/** Whether no area of the screen can be had on this desktop at all. */
+export function screenAreaUnavailable(): Promise<boolean> {
+  return invoke<boolean>("screen_area_unavailable");
+}
+
 /** What the last Capture produced, for a Palette that mounted after it. */
 export function lastCapture(): Promise<CaptureOutcome | null> {
   return invoke<CaptureOutcome | null>("last_capture");
