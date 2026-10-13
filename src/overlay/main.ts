@@ -6,9 +6,9 @@ const dim = document.getElementById("dim")!;
 const area = document.getElementById("area")!;
 const size = document.getElementById("size")!;
 
-// The window covers the monitor exactly, so CSS pixels times this are the
-// frame's.
-const scale = devicePixelRatio;
+// The frame is stretched over the window, so CSS pixels times this are the
+// frame's whatever scaling the system applies.
+const scale = () => frame.naturalWidth / innerWidth;
 
 let from: { x: number; y: number } | null = null;
 let chosen = false;
@@ -25,13 +25,14 @@ function dragged(to: PointerEvent): Area {
   const top = Math.min(from!.y, to.clientY);
   const right = Math.max(from!.x, to.clientX);
   const bottom = Math.max(from!.y, to.clientY);
-  const x = Math.round(left * scale);
-  const y = Math.round(top * scale);
+  const ratio = scale();
+  const x = Math.round(left * ratio);
+  const y = Math.round(top * ratio);
   return {
     x,
     y,
-    width: Math.round(right * scale) - x,
-    height: Math.round(bottom * scale) - y,
+    width: Math.round(right * ratio) - x,
+    height: Math.round(bottom * ratio) - y,
   };
 }
 
@@ -44,18 +45,19 @@ document.addEventListener("pointerdown", (event) => {
 document.addEventListener("pointermove", (event) => {
   if (!from) return;
   const picked = dragged(event);
+  const ratio = scale();
   Object.assign(area.style, {
-    left: `${picked.x / scale}px`,
-    top: `${picked.y / scale}px`,
-    width: `${picked.width / scale}px`,
-    height: `${picked.height / scale}px`,
+    left: `${picked.x / ratio}px`,
+    top: `${picked.y / ratio}px`,
+    width: `${picked.width / ratio}px`,
+    height: `${picked.height / ratio}px`,
   });
   size.textContent = `${picked.width} × ${picked.height}`;
   // Below the area, or above it where the screen ends.
-  const below = (picked.y + picked.height) / scale + 6;
-  size.style.left = `${picked.x / scale}px`;
+  const below = (picked.y + picked.height) / ratio + 6;
+  size.style.left = `${picked.x / ratio}px`;
   size.style.top =
-    below + 24 < innerHeight ? `${below}px` : `${Math.max(0, picked.y / scale - 26)}px`;
+    below + 24 < innerHeight ? `${below}px` : `${Math.max(0, picked.y / ratio - 26)}px`;
   dim.hidden = true;
   area.hidden = size.hidden = false;
 });
@@ -68,8 +70,6 @@ document.addEventListener("pointerup", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") choose(null);
 });
-
-addEventListener("blur", () => choose(null));
 
 async function freeze() {
   const bmp = await overlayFrame();

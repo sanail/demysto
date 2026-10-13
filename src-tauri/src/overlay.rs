@@ -91,6 +91,9 @@ impl Screen for Overlay {
             .and_then(|window| {
                 window.set_position(at)?;
                 window.set_size(size)?;
+                // Otherwise the window manager keeps it clear of the panels.
+                #[cfg(target_os = "linux")]
+                window.set_fullscreen(true)?;
                 Ok(window)
             });
 
@@ -127,8 +130,8 @@ impl Screen for Overlay {
     }
 }
 
-/// Waits until the window is gone: only then has Windows finished handing the
-/// foreground on, and only then may the next press build one by the same label.
+/// Waits until the window is gone: only then has the system finished handing
+/// the foreground on, and only then may the next press build one by the same label.
 fn gone(app: &AppHandle) {
     use tauri::Manager;
 
@@ -319,8 +322,204 @@ mod system {
     }
 }
 
+/// X11 lets any client read the screen. Reached through a connection of its
+/// own, since GTK's belongs to the thread that draws the windows.
+#[cfg(target_os = "linux")]
+mod system {
+    use std::cell::Cell;
+    use std::os::raw::{c_int, c_uchar, c_ulong};
+    use std::ptr::{null, null_mut};
+    use std::sync::OnceLock;
+
+    use tauri::{PhysicalPosition, PhysicalSize};
+    use x11::xlib;
+
+    use super::Frame;
+
+    type Handler = unsafe extern "C" fn(*mut xlib::Display, *mut xlib::XErrorEvent) -> c_int;
+
+    static PREVIOUS: OnceLock<Option<Handler>> = OnceLock::new();
+
+    thread_local! {
+        static OURS: Cell<*mut xlib::Display> = const { Cell::new(null_mut()) };
+    }
+
+    /// An error on this connection, such as a window gone between two calls,
+    /// only fails the call; the handler installed before, GDK's or Xlib's own,
+    /// would end the process.
+    unsafe extern "C" fn on_error(
+        display: *mut xlib::Display,
+        error: *mut xlib::XErrorEvent,
+    ) -> c_int {
+        if OURS.get() == display {
+            return 0;
+        }
+        match PREVIOUS.get().copied().flatten() {
+            Some(previous) => previous(display, error),
+            None => 0,
+        }
+    }
+
+    struct Display(*mut xlib::Display);
+
+    impl Display {
+        fn open() -> Option<Self> {
+            PREVIOUS.get_or_init(|| unsafe { xlib::XSetErrorHandler(Some(on_error)) });
+            let display = unsafe { xlib::XOpenDisplay(null()) };
+            OURS.set(display);
+            (!display.is_null()).then_some(Self(display))
+        }
+
+        fn root(&self) -> xlib::Window {
+            unsafe { xlib::XDefaultRootWindow(self.0) }
+        }
+
+        fn atom(&self, name: &std::ffi::CStr) -> xlib::Atom {
+            unsafe { xlib::XInternAtom(self.0, name.as_ptr(), xlib::False) }
+        }
+
+        /// The first value of a 32-bit property, which Xlib hands over as a long.
+        fn property(&self, window: xlib::Window, name: &std::ffi::CStr) -> Option<c_ulong> {
+            let (mut kind, mut format, mut count, mut after) = (0, 0, 0, 0);
+            let mut data: *mut c_uchar = null_mut();
+            unsafe {
+                xlib::XGetWindowProperty(
+                    self.0,
+                    window,
+                    self.atom(name),
+                    0,
+                    1,
+                    xlib::False,
+                    xlib::AnyPropertyType as c_ulong,
+                    &mut kind,
+                    &mut format,
+                    &mut count,
+                    &mut after,
+                    &mut data,
+                );
+                if data.is_null() {
+                    return None;
+                }
+                let value = (format == 32 && count == 1).then(|| *data.cast::<c_ulong>());
+                xlib::XFree(data.cast());
+                value
+            }
+        }
+
+        fn active(&self) -> xlib::Window {
+            self.property(self.root(), c"_NET_ACTIVE_WINDOW")
+                .unwrap_or(0)
+        }
+    }
+
+    impl Drop for Display {
+        fn drop(&mut self) {
+            unsafe { xlib::XCloseDisplay(self.0) };
+            OURS.set(null_mut());
+        }
+    }
+
+    /// Copies the root window, whose pixels are the physical ones Tauri gives
+    /// monitors in, whatever GDK's scale.
+    pub fn freeze(at: PhysicalPosition<i32>, size: PhysicalSize<u32>) -> Result<Frame, String> {
+        let display = Display::open().ok_or("the X display could not be opened")?;
+
+        let bgra = unsafe {
+            let image = xlib::XGetImage(
+                display.0,
+                display.root(),
+                at.x,
+                at.y,
+                size.width,
+                size.height,
+                !0,
+                xlib::ZPixmap,
+            );
+            if image.is_null() {
+                return Err("the screen could not be copied".to_owned());
+            }
+            let copied = &*image;
+
+            // BGRX in memory, which is what a depth-24 screen has everywhere.
+            let bgrx = copied.bits_per_pixel == 32
+                && copied.byte_order == xlib::LSBFirst
+                && copied.red_mask == 0xff0000
+                && copied.blue_mask == 0xff;
+            let bgra = bgrx.then(|| {
+                let row = size.width as usize * 4;
+                (0..size.height as usize)
+                    .flat_map(|line| {
+                        let start = copied.data.add(line * copied.bytes_per_line as usize);
+                        std::slice::from_raw_parts(start.cast::<u8>(), row)
+                    })
+                    .copied()
+                    .collect::<Vec<u8>>()
+            });
+            xlib::XDestroyImage(image);
+            bgra
+        };
+
+        let mut bgra = bgra.ok_or("the screen's pixel format is not BGRX")?;
+        for pixel in bgra.chunks_exact_mut(4) {
+            pixel[3] = u8::MAX;
+        }
+
+        Ok(Frame {
+            width: size.width,
+            height: size.height,
+            bgra,
+        })
+    }
+
+    /// The window the window manager names active before the overlay.
+    pub struct Front(xlib::Window);
+
+    impl Front {
+        pub fn now() -> Self {
+            Self(Display::open().map_or(0, |display| display.active()))
+        }
+
+        /// Only while no other application has taken the focus: the window
+        /// manager is asked, as a pager would ask it, to activate the window
+        /// again.
+        pub fn give_back(self) {
+            let Some(display) = Display::open() else {
+                return;
+            };
+            let active = display.active();
+            let ours = active == 0
+                || display.property(active, c"_NET_WM_PID") == Some(std::process::id().into());
+            if self.0 == 0 || !ours {
+                return;
+            }
+
+            let mut message = xlib::XClientMessageEvent {
+                type_: xlib::ClientMessage,
+                serial: 0,
+                send_event: xlib::True,
+                display: display.0,
+                window: self.0,
+                message_type: display.atom(c"_NET_ACTIVE_WINDOW"),
+                format: 32,
+                data: xlib::ClientMessageData::new(),
+            };
+            message.data.set_long(0, 2);
+            unsafe {
+                xlib::XSendEvent(
+                    display.0,
+                    display.root(),
+                    xlib::False,
+                    xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask,
+                    &mut xlib::XEvent::from(message),
+                );
+                xlib::XFlush(display.0);
+            }
+        }
+    }
+}
+
 /// Lets the rest be compiled and tested where the overlay is not used.
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 mod system {
     use tauri::{PhysicalPosition, PhysicalSize};
 

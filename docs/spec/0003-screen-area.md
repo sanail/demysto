@@ -71,7 +71,8 @@ ADR-0019 records why the system's own tool is used wherever there is one:
   `org.freedesktop.portal.Screenshot`, which shows GNOME's or KDE's own UI. The
   file it returns is removed once read.
 - **Windows, and X11 where the portal offers no Screenshot:** Demysto's own
-  overlay, below.
+  overlay, below. On X11 the portal is asked at every press, since it may start
+  or stop between them; one that does not answer in time counts as offering it.
 - **Wayland where the portal offers no Screenshot:** unavailable. Settings shows
   the field disabled with a sentence saying why and naming GNOME and KDE Plasma,
   which offer it. A portal that cannot be reached within a few seconds counts
@@ -81,12 +82,14 @@ ADR-0019 records why the system's own tool is used wherever there is one:
 
 - **A frozen frame.** The screen is captured the moment the Hotkey is pressed,
   and the user selects on that still picture, so that a tooltip or an open menu
-  stays in it. On Windows GDI copies it, layered windows included.
+  stays in it. On Windows GDI copies it, layered windows included; on X11 it is
+  read from the root window, which any client may do without a permission.
 - **One monitor:** the one under the pointer. Within it there is one scale, so
   the rectangle is cropped from the frame in that monitor's physical pixels,
-  correct at any scaling and on a monitor left of or above the primary one. The
-  window covers that monitor exactly and the page measures the drag in the
-  frame's own pixels.
+  correct at any scaling — Windows' DPI, GDK's window scale on X11 — and on a
+  monitor left of or above the primary one. The window covers that monitor
+  exactly, full screen on X11 so that no panel keeps it out, and the page
+  measures the drag in the frame's own pixels.
 - **What it looks like.** The frame is dimmed; the area being dragged shows
   undimmed, with its size in pixels beside it. The cursor is a crosshair.
 - **The window.** Created at the press, hidden until the frame is drawn, and

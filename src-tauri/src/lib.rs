@@ -18,8 +18,9 @@ mod hotkey;
 #[cfg(target_os = "macos")]
 mod menu;
 mod notify;
-/// Demysto's own area selection, where the system has none; wired on Windows.
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+/// Demysto's own area selection, where the system has none: Windows, and X11
+/// without a portal.
+#[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
 mod overlay;
 mod palette;
 /// The Hotkey on Wayland.
@@ -56,10 +57,8 @@ pub fn run() {
     };
 
     let demysto = Demysto::new(config_dir, env!("CARGO_PKG_VERSION"));
-    // ponytail: the portal on X11 as well; a desktop without one notifies at
-    // every press until the overlay is wired there.
     #[cfg(target_os = "linux")]
-    let demysto = demysto.with_screen(Box::new(screenshot::Portal));
+    let demysto = demysto.with_screen(Box::new(screenshot::PortalOrOverlay));
     #[cfg(target_os = "windows")]
     let demysto = demysto.with_screen(Box::new(overlay::Overlay));
 
@@ -162,6 +161,15 @@ pub fn run() {
             // question — see `palette::lost_the_keyboard`.
             WindowEvent::Focused(false) if window.label() == palette::LABEL => {
                 palette::lost_the_keyboard(window);
+            }
+            // Clicking elsewhere cancels the overlay; the X11 Hotkey grab does
+            // not, nor Windows taking the focus from it while it is still hidden.
+            WindowEvent::Focused(false)
+                if window.label() == overlay::LABEL
+                    && window.is_visible().unwrap_or(false)
+                    && !palette::kept_the_keyboard(window) =>
+            {
+                overlay::dismiss();
             }
             _ => {}
         })

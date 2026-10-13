@@ -1,5 +1,6 @@
 //! An area of the screen on Linux, chosen in the desktop's own screenshot UI
-//! through `org.freedesktop.portal.Screenshot`. Demysto draws nothing.
+//! through `org.freedesktop.portal.Screenshot`, or on X11 without one in
+//! Demysto's overlay.
 //!
 //! Asked on Tauri's runtime rather than on one of the core's own: ashpd keeps
 //! one D-Bus connection for the whole process, and the GlobalShortcuts portal
@@ -15,7 +16,24 @@ use demysto_core::{CaptureError, Screen};
 /// answer is taken to be yes: a slow portal is not a missing one.
 const ASKING: Duration = Duration::from_secs(5);
 
-pub struct Portal;
+/// The portal where it offers Screenshot or this is Wayland, the overlay
+/// otherwise. Asked at every press: the portal may start or stop between them.
+pub struct PortalOrOverlay;
+
+impl Screen for PortalOrOverlay {
+    fn area(&self) -> Result<Option<Vec<u8>>, CaptureError> {
+        let overlay = !demysto_core::wayland_session()
+            && tauri::async_runtime::block_on(offers()) == Some(false);
+
+        if overlay {
+            crate::overlay::Overlay.area()
+        } else {
+            Portal.area()
+        }
+    }
+}
+
+struct Portal;
 
 impl Screen for Portal {
     /// A cancelled request is the cancel; the file the portal wrote is removed
@@ -53,8 +71,12 @@ impl Screen for Portal {
 /// Whether this is Wayland and no portal there offers Screenshot, so that no
 /// area of the screen can be had at all.
 pub async fn missing() -> bool {
-    demysto_core::wayland_session()
-        && matches!(tokio::time::timeout(ASKING, offered()).await, Ok(false))
+    demysto_core::wayland_session() && offers().await == Some(false)
+}
+
+/// Whether a portal offers Screenshot, `None` where it did not say in time.
+async fn offers() -> Option<bool> {
+    tokio::time::timeout(ASKING, offered()).await.ok()
 }
 
 /// Asked of the property itself: ashpd takes a portal service that is not

@@ -332,20 +332,30 @@ fn present_with_server_time<R: Runtime>(window: &WebviewWindow<R>) -> Option<()>
 /// one, and that is the whole difference between a Hotkey and somebody clicking
 /// away.
 pub fn lost_the_keyboard<R: Runtime>(window: &Window<R>) {
-    #[cfg(target_os = "linux")]
-    if still_has_the_keyboard(window) {
-        return;
+    if !kept_the_keyboard(window) {
+        let _ = window.hide();
     }
-
-    let _ = window.hide();
 }
 
-/// Whether X still names the Palette's window as the one with the keyboard.
+/// Whether a focus-out was only a Hotkey's grab, which leaves the window the
+/// keyboard.
+pub fn kept_the_keyboard<R: Runtime>(window: &Window<R>) -> bool {
+    #[cfg(target_os = "linux")]
+    return still_has_the_keyboard(window);
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = window;
+        false
+    }
+}
+
+/// Whether X still names the window as the one with the keyboard.
 ///
 /// `false` for anything that is not an X11 session, and for anything that
-/// cannot be asked: nowhere else does a focus-out arrive that the Palette
-/// should sit through, and treating silence as "still focused" would leave a
-/// Palette on screen that the user has walked away from.
+/// cannot be asked: nowhere else does a focus-out arrive that a window should
+/// sit through, and treating silence as "still focused" would leave a window
+/// on screen that the user has walked away from.
 #[cfg(target_os = "linux")]
 fn still_has_the_keyboard<R: Runtime>(window: &Window<R>) -> bool {
     use gtk::glib::prelude::Cast;
@@ -384,7 +394,7 @@ fn still_has_the_keyboard<R: Runtime>(window: &Window<R>) -> bool {
     named.upcast_ref::<gtk::gdk::Window>().toplevel() == *drawn.upcast_ref::<gtk::gdk::Window>()
 }
 
-/// The Palette's window as X11 knows it, or `None` in a session that is not
+/// A window as X11 knows it, or `None` in a session that is not
 /// X11 — on Wayland this is a `GdkWaylandWindow` and none of it applies.
 #[cfg(target_os = "linux")]
 fn on_the_display(frame: &gtk::ApplicationWindow) -> Option<gdkx11::X11Window> {
