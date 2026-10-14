@@ -1,6 +1,6 @@
 import time
 
-from _demysto import (APP, BLOCKS, configured_launch, decode_png, foreground, mock, nearest_block, nonce,
+from _demysto import (APP, BLOCKS, area_hotkey, configured_launch, decode_png, foreground, mock, nearest_block, nonce,
                       received, say, show_blocks, shows_answer)
 
 LAUNCH = False
@@ -13,11 +13,10 @@ def scenario(g):
     answer = "Mock description " + nonce()
     provider = mock(g, answer)
     wayland = g.session == "wayland"
-    # GNOME takes no preferred combination with Ctrl+Alt+Shift, and macOS does
-    # not answer to Ctrl+Shift+A.
-    stated = "Ctrl+Shift+KeyA" if wayland else "Ctrl+Alt+Shift+KeyA"
-    chord = stated.replace("Key", "").lower()
-    configured_launch(g, settings=f'screen_area_hotkey = "{stated}"\n')
+    # The default rather than a stated combination, so that the drag also proves
+    # nothing on a stock desktop holds it.
+    chord = area_hotkey(g)
+    configured_launch(g)
 
     screen = show_blocks(g)
     x, y, w, h = screen["x"], screen["y"], screen["w"], screen["h"]

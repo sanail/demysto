@@ -95,10 +95,11 @@
   let recording = $state<"palette" | "screen_area" | "action" | null>(
     null,
   );
-  /** The Hotkey that opens the Palette, empty for the one Demysto comes with. */
-  let paletteHotkey = $state("");
-  /** The Hotkey that chooses an area of the screen, empty for none. */
-  let screenAreaHotkey = $state("");
+  /** The Hotkey that opens the Palette, `null` for the one Demysto comes with
+      and empty for none. */
+  let paletteHotkey = $state<string | null>(null);
+  /** The Hotkey that chooses an area of the screen, read the same way. */
+  let screenAreaHotkey = $state<string | null>(null);
   /** Wayland with no portal offering Screenshot, where that Hotkey does nothing. */
   let screenAreaOff = $state(false);
   /**
@@ -164,6 +165,8 @@
   let closing: Promise<UnlistenFn> | null = null;
   /** What opens the Palette when nothing states otherwise, as it is read. */
   let paletteDefault = $state("");
+  /** The same for the screen area. */
+  let screenAreaDefault = $state("");
   /** The keys a Hotkey may be on its own — the backend decides which. */
   let bareKeys = $state<ReadonlySet<string>>(new Set());
   /**
@@ -261,6 +264,7 @@
 
     const may = await allowed();
     paletteDefault = may.palette_default;
+    screenAreaDefault = may.screen_area_default;
     bareKeys = new Set(may.no_modifier_needed);
 
     held(await catalogued());
@@ -430,8 +434,8 @@
     drafts = settings.providers.map(drafted);
     defaultModel = settings.default_model ?? "";
     defaultVisionModel = settings.default_vision_model ?? "";
-    paletteHotkey = settings.palette_hotkey ?? "";
-    screenAreaHotkey = settings.screen_area_hotkey ?? "";
+    paletteHotkey = settings.palette_hotkey;
+    screenAreaHotkey = settings.screen_area_hotkey;
     largeSelection = settings.large_selection;
     language = settings.language ?? "";
 
@@ -762,6 +766,7 @@
         throughThePortal={clipboardOnly !== null}
         {screenAreaOff}
         {paletteDefault}
+        {screenAreaDefault}
         {unclaimedHotkeys}
         {autostartWanted}
         {autostartProblem}

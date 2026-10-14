@@ -45,7 +45,8 @@ pub use picture::Picture;
 pub use run::{Arriving, RunError, RunOutcome};
 pub use selection::{Kind, Selection};
 pub use settings::{
-    ConfiguredModel, ConfiguredProvider, Edit, KeyEdit, KeyStanding, Preset, ProviderEdit, Settings,
+    ConfiguredModel, ConfiguredProvider, Edit, KeyEdit, KeyStanding, Preset, ProviderEdit,
+    Settings, StatedHotkey,
 };
 
 use config::{Config, Environment};
@@ -945,10 +946,10 @@ impl Demysto {
         }
     }
 
-    /// The Hotkey the settings state for the Palette, `None` where they state
-    /// none or could not be read at all.
+    /// The Hotkey the settings state for the Palette, the default where they
+    /// state none or could not be read at all.
     ///
-    /// Every way of failing answers `None`, which is the whole point of asking
+    /// Every way of failing answers the default, which is the whole point of asking
     /// here rather than through [`Self::settings`]: a settings file nobody can
     /// parse must not cost somebody the Hotkey the tool opens with. What it
     /// costs them is the Hotkey they chose, and the shell says so.
@@ -957,25 +958,26 @@ impl Demysto {
     /// for the reason the Actions are read from disk every time — and because
     /// what Demysto is running on is an error until a Provider is configured,
     /// which would lose a Hotkey stated by somebody who has not got that far.
-    pub fn palette_hotkey(&self) -> Option<String> {
+    pub fn palette_hotkey(&self) -> StatedHotkey {
         self.stated_hotkey(|file| file.palette_hotkey)
     }
 
-    /// The Hotkey that chooses an area of the screen, `None` until somebody
-    /// sets one: it has no default, so an update claims nothing new. Read like
-    /// [`Self::palette_hotkey`].
-    pub fn screen_area_hotkey(&self) -> Option<String> {
+    /// The Hotkey that chooses an area of the screen, read like the Palette's.
+    pub fn screen_area_hotkey(&self) -> StatedHotkey {
         self.stated_hotkey(|file| file.screen_area_hotkey)
     }
 
-    fn stated_hotkey(&self, which: impl FnOnce(config::File) -> Option<String>) -> Option<String> {
+    fn stated_hotkey(&self, which: impl FnOnce(config::File) -> Option<String>) -> StatedHotkey {
         // One guard rather than two: a second `read` taken while the first is
         // still held deadlocks against a `write` that queued between them, and
         // saving the settings is exactly that write.
         let words = self.words();
-        let (path, text) = config::read(&self.config_dir, &words).ok()?;
+        let stated = config::read(&self.config_dir, &words)
+            .ok()
+            .and_then(|(path, text)| config::parse(&path, &text, &words).ok())
+            .and_then(which);
 
-        config::stated(which(config::parse(&path, &text, &words).ok()?))
+        StatedHotkey::read(stated)
     }
 
     /// The keys a Hotkey may be on its own, for the window that records one.
@@ -3926,29 +3928,6 @@ mod tests {
     }
 
     #[test]
-    fn a_blank_palette_hotkey_is_one_nobody_stated() {
-        // Absence rather than emptiness: `palette_hotkey = ""` is a combination
-        // that could never be claimed, so it would report itself on every start
-        // — where the user only meant to go back to the built-in one.
-        let demysto = unconfigured("a paragraph");
-
-        let written = saved(
-            &demysto,
-            &Edit {
-                palette_hotkey: Some("   ".to_owned()),
-                ..edited(Vec::new(), None)
-            },
-        );
-
-        assert_eq!(written.palette_hotkey, None);
-        assert!(
-            !stated_in(&settings_file(&demysto)).contains("palette_hotkey"),
-            "{}",
-            settings_file(&demysto)
-        );
-    }
-
-    #[test]
     fn a_palette_hotkey_stated_by_hand_is_read_as_it_was_written() {
         // Trimmed, because the Hotkey parser will not trim it: " F13" would
         // otherwise read back looking right and refuse to be claimed, for a
@@ -3962,7 +3941,10 @@ mod tests {
             demysto.settings().unwrap().palette_hotkey.as_deref(),
             Some("F13")
         );
-        assert_eq!(demysto.palette_hotkey().as_deref(), Some("F13"));
+        assert_eq!(
+            demysto.palette_hotkey(),
+            StatedHotkey::Stated("F13".to_owned())
+        );
     }
 
     #[test]
@@ -6863,12 +6845,47 @@ mod tests {
     }
 
     #[test]
-    fn the_screen_area_hotkey_is_unset_until_somebody_sets_it() {
+    fn a_hotkey_left_out_is_the_default_and_a_blank_one_is_none() {
         let desktop = Arc::new(FakeDesktop::new(None, None));
-        let demysto = rooted(fake::over(&desktop), Some("version = 1\n"));
+        let demysto = rooted(
+            fake::over(&desktop),
+            Some("version = 1\nscreen_area_hotkey = \" \"\n"),
+        );
 
-        assert_eq!(demysto.screen_area_hotkey(), None);
-        assert_eq!(demysto.settings().unwrap().screen_area_hotkey, None);
+        assert_eq!(demysto.palette_hotkey(), StatedHotkey::Default);
+        assert_eq!(demysto.screen_area_hotkey(), StatedHotkey::Cleared);
+        assert_eq!(demysto.settings().unwrap().palette_hotkey, None);
+        assert_eq!(
+            demysto.settings().unwrap().screen_area_hotkey.as_deref(),
+            Some("")
+        );
+    }
+
+    #[test]
+    fn a_cleared_hotkey_is_written_as_blank_and_a_default_one_not_at_all() {
+        let desktop = Arc::new(FakeDesktop::new(None, None));
+        let demysto = rooted(
+            fake::over(&desktop),
+            Some("version = 1\nscreen_area_hotkey = \"Ctrl+Alt+A\"\n"),
+        );
+
+        demysto
+            .save_settings(&Edit {
+                providers: Vec::new(),
+                default_model: None,
+                default_vision_model: None,
+                palette_hotkey: Some(String::new()),
+                screen_area_hotkey: None,
+                large_selection: None,
+                language: None,
+            })
+            .unwrap();
+
+        let file = settings_file(&demysto);
+        assert!(file.contains("palette_hotkey = \"\"\n"), "{file}");
+        assert!(!file.contains("screen_area_hotkey"), "{file}");
+        assert_eq!(demysto.palette_hotkey(), StatedHotkey::Cleared);
+        assert_eq!(demysto.screen_area_hotkey(), StatedHotkey::Default);
     }
 
     #[test]
@@ -6889,7 +6906,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(written.screen_area_hotkey.as_deref(), Some("Ctrl+Alt+A"));
-        assert_eq!(demysto.screen_area_hotkey().as_deref(), Some("Ctrl+Alt+A"));
-        assert_eq!(demysto.palette_hotkey().as_deref(), Some("Ctrl+Alt+P"));
+        assert_eq!(
+            demysto.screen_area_hotkey(),
+            StatedHotkey::Stated("Ctrl+Alt+A".to_owned())
+        );
+        assert_eq!(
+            demysto.palette_hotkey(),
+            StatedHotkey::Stated("Ctrl+Alt+P".to_owned())
+        );
     }
 }

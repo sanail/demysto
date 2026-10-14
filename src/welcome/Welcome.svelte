@@ -5,6 +5,7 @@
     autostart,
     dismiss,
     hotkeys as allowed,
+    screenAreaUnavailable,
     openAccessibility,
     presets as offeredPresets,
     providerModels,
@@ -69,6 +70,9 @@
   let presets = $state<Preset[]>([]);
   /** What opens the Palette, which is what the last step invites a press of. */
   let paletteDefault = $state("");
+  let screenAreaDefault = $state("");
+  /** Wayland with no portal offering Screenshot, where there is no area. */
+  let screenAreaOff = $state(false);
 
   /**
    * The language the flow is being read in, which is the one it offers for
@@ -177,7 +181,10 @@
 
   onMount(async () => {
     presets = await offeredPresets();
-    paletteDefault = (await allowed()).palette_default;
+    const may = await allowed();
+    paletteDefault = may.palette_default;
+    screenAreaDefault = may.screen_area_default;
+    void screenAreaUnavailable().then((off) => (screenAreaOff = off));
     // A system that will not say is drawn as the offer to turn autostart on:
     // this is the first thing the flow hears about the list and there is
     // nothing better to go on.
@@ -205,8 +212,15 @@
     detected = language;
   }
 
-  /** The Hotkey the last step invites a press of, as the user reads it. */
+  /** The Hotkey the last step invites a press of, as the user reads it, and
+      empty where it is cleared. */
   const hotkey = $derived(reading(saved?.palette_hotkey ?? paletteDefault));
+  /** The same for the area, empty where there is none to invite. */
+  const areaHotkey = $derived(
+    screenAreaOff
+      ? ""
+      : reading(saved?.screen_area_hotkey ?? screenAreaDefault),
+  );
 
   /** The Provider as it will be written. */
   function drafted(): ProviderEdit {
@@ -632,13 +646,20 @@
         <!-- The invitation is adjusted rather than contradicted: on Wayland
              there is nothing to be gained by telling somebody to select text
              first and explaining underneath that it will not be read. -->
-        <p class="text-sm opacity-60">
-          {clipboardOnly
-            ? t("welcome-done-clipboard", { hotkey })
-            : t("welcome-done-detail", { hotkey })}
-        </p>
+        {#if hotkey}
+          <p class="text-sm opacity-60">
+            {clipboardOnly
+              ? t("welcome-done-clipboard", { hotkey })
+              : t("welcome-done-detail", { hotkey })}
+          </p>
+        {/if}
         {#if clipboardOnly}
           <p class="text-sm opacity-60">{clipboardOnly}</p>
+        {/if}
+        {#if areaHotkey}
+          <p class="text-sm opacity-60">
+            {t("welcome-done-area", { hotkey: areaHotkey })}
+          </p>
         {/if}
         <p class="text-sm opacity-60">{t("welcome-done-tray")}</p>
       </section>

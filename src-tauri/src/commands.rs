@@ -48,8 +48,8 @@ fn catalogued<R: Runtime>(app: &AppHandle<R>, defined: demysto_core::Catalogue) 
     let demysto = app.state::<Demysto>();
     let unclaimed = crate::hotkey::claim(
         app,
-        demysto.palette_hotkey().as_deref(),
-        demysto.screen_area_hotkey().as_deref(),
+        &demysto.palette_hotkey(),
+        &demysto.screen_area_hotkey(),
         &defined.actions,
     );
 
@@ -61,6 +61,8 @@ fn catalogued<R: Runtime>(app: &AppHandle<R>, defined: demysto_core::Catalogue) 
 pub struct Hotkeys {
     /// The Palette's Hotkey where the settings state none, as the user reads it.
     palette_default: &'static str,
+    /// The same for the screen area's.
+    screen_area_default: &'static str,
     /// The keys a Hotkey may be on its own, because they type nothing.
     no_modifier_needed: Vec<&'static str>,
 }
@@ -70,6 +72,7 @@ pub struct Hotkeys {
 pub fn hotkeys(demysto: State<'_, Demysto>) -> Hotkeys {
     Hotkeys {
         palette_default: crate::hotkey::PALETTE,
+        screen_area_default: crate::hotkey::SCREEN_AREA,
         no_modifier_needed: demysto.keys_that_need_no_modifier(),
     }
 }

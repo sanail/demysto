@@ -121,8 +121,8 @@ pub fn run() {
             let demysto = app.state::<Demysto>();
             for said in hotkey::claim(
                 app.handle(),
-                demysto.palette_hotkey().as_deref(),
-                demysto.screen_area_hotkey().as_deref(),
+                &demysto.palette_hotkey(),
+                &demysto.screen_area_hotkey(),
                 &demysto.catalogue().actions,
             ) {
                 demysto.note(&said);

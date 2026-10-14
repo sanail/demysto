@@ -51,7 +51,9 @@ def misfits(g, lang, slack):
 
 
 def scenario(g):
-    configure(g)
+    # Stated rather than left to the defaults, so that each Hotkey row draws
+    # both its clear and its restore buttons, its widest form.
+    configure(g, settings='palette_hotkey = "Ctrl+Alt+Shift+P"\nscreen_area_hotkey = "Ctrl+Alt+Shift+A"\n')
     slack = SLACK * g.displays()["displays"][0]["scale"]
     tab_role = "radiobutton" if g.os == "macos" else "tab"
     for lang in CATALOGUE_LANGUAGES:

@@ -16,6 +16,7 @@
     paletteHotkey = $bindable(),
     screenAreaHotkey = $bindable(),
     paletteDefault,
+    screenAreaDefault,
     recording = $bindable(),
     unclaimedHotkeys,
     autostartWanted,
@@ -34,11 +35,14 @@
     /** Whether no area of the screen can be had here, which disables its
         field. */
     screenAreaOff: boolean;
-    paletteHotkey: string;
-    /** Empty for none: this one has no default. */
-    screenAreaHotkey: string;
+    /** `null` for the default, empty for none. */
+    paletteHotkey: string | null;
+    /** Read like the Palette's. */
+    screenAreaHotkey: string | null;
     /** What opens the Palette when nothing states otherwise, as it is read. */
     paletteDefault: string;
+    /** The same for the screen area. */
+    screenAreaDefault: string;
     /** Which Hotkey field is being recorded into, `null` for neither. */
     recording: "palette" | "screen_area" | "action" | null;
     /** The Hotkeys stated by an Action and not answered to, in the backend's
@@ -79,14 +83,18 @@
   onDestroy(() => {
     if (acknowledging) clearTimeout(acknowledging);
   });
+
+  function same(one: string, other: string): boolean {
+    return reading(one).toLowerCase() === reading(other).toLowerCase();
+  }
 </script>
 
 {#snippet row(
   which: "palette" | "screen_area",
   caption: string,
-  bound: string,
-  unbound: string,
-  clear: () => void,
+  bound: string | null,
+  fallback: string,
+  set: (hotkey: string | null) => void,
   off = false,
 )}
   <div class="flex flex-col gap-1">
@@ -101,10 +109,12 @@
       >
         {#if recording === which}
           {t("settings-hotkey-recording")}
+        {:else if bound === null}
+          {t("settings-hotkey-default", { hotkey: reading(fallback) })}
         {:else if bound}
           {reading(bound)}
         {:else}
-          {unbound}
+          {t("settings-hotkey-cleared")}
         {/if}
       </span>
 
@@ -122,18 +132,39 @@
           : t("settings-hotkey-record")}
       </button>
 
-      <button
-        type="button"
-        class={BUTTON}
-        aria-describedby="{which}-hotkey"
-        disabled={off || !bound}
-        onclick={() => {
-          clear();
-          recording = null;
-        }}
-      >
-        {t("settings-hotkey-clear")}
-      </button>
+      {#if bound !== ""}
+        <button
+          type="button"
+          class={BUTTON}
+          aria-label={t("settings-hotkey-clear")}
+          title={t("settings-hotkey-clear")}
+          aria-describedby="{which}-hotkey"
+          disabled={off}
+          onclick={() => {
+            set("");
+            recording = null;
+          }}
+        >
+          ×
+        </button>
+      {/if}
+      <!-- Stated by hand as the default itself, it is the default already. -->
+      {#if bound !== null && !same(bound, fallback)}
+        <button
+          type="button"
+          class={BUTTON}
+          aria-label={t("settings-hotkey-restore")}
+          title={t("settings-hotkey-restore")}
+          aria-describedby="{which}-hotkey"
+          disabled={off}
+          onclick={() => {
+            set(null);
+            recording = null;
+          }}
+        >
+          ↺
+        </button>
+      {/if}
     </div>
   </div>
 {/snippet}
@@ -191,15 +222,15 @@
       "palette",
       t("settings-palette-hotkey"),
       paletteHotkey,
-      t("settings-hotkey-default", { hotkey: reading(paletteDefault) }),
-      () => (paletteHotkey = ""),
+      paletteDefault,
+      (hotkey) => (paletteHotkey = hotkey),
     )}
     {@render row(
       "screen_area",
       t("settings-screen-area-hotkey"),
       screenAreaHotkey,
-      t("settings-screen-area-hotkey-none"),
-      () => (screenAreaHotkey = ""),
+      screenAreaDefault,
+      (hotkey) => (screenAreaHotkey = hotkey),
       screenAreaOff,
     )}
     {#if screenAreaOff}

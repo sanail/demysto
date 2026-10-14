@@ -13,6 +13,7 @@
 
 app-name = Demysto
 tray-open = Aktionen…
+tray-area = Bildschirmbereich…
 tray-chats = Chats…
 tray-update = Auf { $version } aktualisieren…
 tray-settings = Einstellungen…
@@ -183,11 +184,12 @@ settings-palette-hotkey = Öffnet die Liste der Aktionen
 settings-screen-area-hotkey = Öffnet die Liste der Aktionen für einen Bildschirmbereich
 settings-hotkey-record = Aufnehmen
 settings-hotkey-clear = Leeren
+settings-hotkey-restore = Standard
 settings-hotkey-cancel = Abbrechen
 settings-hotkey-recording = Tasten drücken… Esc zum Abbrechen
 settings-hotkey-default = { $hotkey } — Standard
 settings-hotkey-none = Keines — diese Aktion wird aus der Liste gestartet
-settings-screen-area-hotkey-none = Keines — legen Sie eines fest, um einen Bildschirmbereich zu wählen
+settings-hotkey-cleared = Keines
 settings-screen-area-unavailable = Unter Wayland sieht Demysto den Bildschirm nur über das Screenshot-Portal der Arbeitsumgebung, und diese bietet keines an; GNOME und KDE Plasma tun es.
 settings-palette-hotkey-rule = Halten Sie Ctrl, Alt oder Shift und drücken Sie eine Taste. Eine Taste, die etwas schreibt, lässt sich nicht allein belegen: sie würde überall aufhören zu schreiben.
 settings-action-hotkey-rule = Halten Sie Ctrl, Alt oder Shift und drücken Sie eine Taste. Eine Taste, die etwas schreibt, lässt sich nicht allein belegen: sie würde überall aufhören zu schreiben. Parameter werden dabei nicht abgefragt — jeder nimmt seinen Standardwert.
@@ -285,6 +287,7 @@ welcome-autostart-choice = Beim Anmelden starten
 welcome-done-title = Das war alles
 welcome-done-detail = Markieren Sie irgendwo Text und drücken Sie { $hotkey }. In der Bildschirmmitte öffnet sich eine Liste der Aktionen; Enter startet die hervorgehobene.
 welcome-done-clipboard = Kopieren Sie Text mit Ctrl+C und drücken Sie { $hotkey }. In der Bildschirmmitte öffnet sich eine Liste der Aktionen; Enter startet die hervorgehobene.
+welcome-done-area = Drücken Sie { $hotkey }, um einen Bildschirmbereich aufzuziehen und die Liste der Aktionen dafür zu öffnen.
 welcome-done-tray = Demysto wartet von nun an im Infobereich, und sein Menü erreicht alles, was das Tastenkürzel erreicht.
 
 ## What an update could not do
@@ -401,7 +404,7 @@ action-file-invalid = { $path } ist keine gültige Aktion: { $detail }
 
 ## Hotkeys the desktop would not give up
 
-hotkey-palette-fell-back = { $why } Demysto verwendet stattdessen { $hotkey }.
+hotkey-fell-back = { $why } Demysto verwendet stattdessen { $hotkey }.
 hotkey-palette-unclaimable = Demysto konnte { $hotkey } nicht beanspruchen, das die Liste der Aktionen öffnet: { $detail }. Vielleicht hat eine andere Anwendung es bereits. Das Menü im Infobereich erreicht alles, was das Tastenkürzel erreicht.
 hotkey-palette-not-a-combination = Die Einstellungen nennen das Tastenkürzel „{ $hotkey }“, das Demysto nicht versteht. Ein Tastenkürzel sind seine Modifikatoren und dann eine Taste, geschrieben wie „Ctrl+Shift+E“.
 hotkey-palette-types-something = Die Einstellungen nennen das Tastenkürzel „{ $hotkey }“ — eine einzelne Taste, die schreibt. Fügen Sie Ctrl, Alt oder Shift hinzu: allein würde sie überall aufhören zu schreiben.
@@ -410,6 +413,8 @@ hotkey-action-not-a-combination = { $action } nennt das Tastenkürzel „{ $hotk
 hotkey-action-types-something = { $action } nennt das Tastenkürzel „{ $hotkey }“ — eine einzelne Taste, die schreibt. Fügen Sie Ctrl, Alt oder Shift hinzu: allein würde sie überall aufhören zu schreiben.
 hotkey-action-already-held = { $action } nennt das Tastenkürzel „{ $hotkey }“, und { $holder } hat es bereits. Nur { $holder } antwortet darauf; geben Sie { $action } ein anderes.
 hotkey-screen-area-already-held = Die Einstellungen nennen das Tastenkürzel „{ $hotkey }“ für einen Bildschirmbereich, und { $holder } hat es bereits. Geben Sie dem Bereich ein anderes.
+hotkey-screen-area-default-held = { $holder } hat bereits { $hotkey }, den Standard für einen Bildschirmbereich. Geben Sie dem Bereich ein anderes.
+hotkey-screen-area-unclaimable = Demysto konnte { $hotkey } nicht beanspruchen, das einen Bildschirmbereich wählt: { $detail }. Vielleicht hat eine andere Anwendung es bereits. Das Menü im Infobereich erreicht alles, was das Tastenkürzel erreicht.
 hotkey-action-refused = { $action } nennt das Tastenkürzel „{ $hotkey }“, und Demysto konnte es nicht beanspruchen: { $detail }. Vielleicht hat eine andere Anwendung es bereits.
 hotkey-palette-holder = die Liste der Aktionen
 hotkey-screen-area-holder = der Bildschirmbereich
@@ -483,15 +488,17 @@ settings-file-preamble =
     # hinausläuft.
     #
     # `palette_hotkey` ist die Tastenkombination, die die Liste der Aktionen öffnet.
-    # Lassen Sie sie weg für die, mit der Demysto ausgeliefert wird. Sie wird als
-    # ihre Modifikatoren und dann eine Taste geschrieben — "Ctrl+Alt+Space". Eine
-    # Taste, die nichts schreibt — eine Lautstärke- oder Medientaste, oder F13 und
-    # aufwärts —, darf für sich stehen. Das Einstellungsfenster nimmt eine für Sie
-    # auf, wenn Sie sie lieber drücken als buchstabieren.
+    # Lassen Sie sie weg für die, mit der Demysto ausgeliefert wird, oder schreiben
+    # Sie "" für keine. Sie wird als ihre Modifikatoren und dann eine Taste
+    # geschrieben — "Ctrl+Shift+E". Eine Taste, die nichts schreibt — eine Lautstärke-
+    # oder Medientaste, oder F13 und aufwärts —, darf für sich stehen. Das
+    # Einstellungsfenster nimmt eine für Sie auf, wenn Sie sie lieber drücken als
+    # buchstabieren.
     #
     # `screen_area_hotkey` ist die Tastenkombination, mit der Sie einen
-    # Bildschirmbereich aufziehen und die Liste der Aktionen dafür öffnen. Es gibt
-    # keine, bis Sie eine angeben.
+    # Bildschirmbereich aufziehen und die Liste der Aktionen dafür öffnen. Lassen Sie
+    # sie weg für die, mit der Demysto ausgeliefert wird, oder schreiben Sie "" für
+    # keine.
     #
     # `language` ist die Sprache, die Demysto spricht: "en", "de", "es", "fr" oder
     # "ru". Lassen Sie sie weg, und Demysto folgt dem Betriebssystem und fällt auf

@@ -38,12 +38,12 @@ pub struct Settings {
     /// And the one an image resolves to first.
     pub default_vision_model: Option<String>,
     /// The Hotkey that opens the Palette, `None` for the one Demysto comes
-    /// with. Carried as the text it was written as, and judged nowhere here,
-    /// for the reason `DefinedAction::hotkey` is: whether a combination can be
-    /// claimed is a question only the desktop can answer.
+    /// with and `""` for none, as the file writes them. Carried as the text it
+    /// was written as, and judged nowhere here, for the reason
+    /// `DefinedAction::hotkey` is: whether a combination can be claimed is a
+    /// question only the desktop can answer.
     pub palette_hotkey: Option<String>,
-    /// The Hotkey that chooses an area of the screen, `None` for none: unlike
-    /// the Palette's it has no default.
+    /// The Hotkey that chooses an area of the screen, read like the Palette's.
     pub screen_area_hotkey: Option<String>,
     /// How many characters a Selection may hold before Demysto says so, `None`
     /// where the file states nothing and Demysto's own figure decides — which
@@ -105,6 +105,26 @@ pub enum KeyStanding {
 
 /// What the window hands back when the user saves.
 ///
+/// A Hotkey as the settings state it, for the shell that claims it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatedHotkey {
+    /// Nothing is stated, so the one Demysto comes with answers.
+    Default,
+    /// Stated as `""`: nothing answers.
+    Cleared,
+    Stated(String),
+}
+
+impl StatedHotkey {
+    pub(crate) fn read(value: Option<String>) -> Self {
+        match config::stated_hotkey(value) {
+            None => Self::Default,
+            Some(value) if value.is_empty() => Self::Cleared,
+            Some(value) => Self::Stated(value),
+        }
+    }
+}
+
 /// The whole of the settings, every time: a Provider the file holds and this
 /// does not is one the user removed.
 #[derive(Debug, Clone, Deserialize)]
@@ -288,12 +308,12 @@ pub(crate) fn read(
         providers,
         default_model: file.default_model,
         default_vision_model: file.default_vision_model,
-        // Trimmed on the way out, unlike the two above it, because this is the
-        // one field that goes to a parser which will not trim it for itself: a
-        // Hotkey stated by hand as " F13" would read back looking right and
-        // then refuse to be claimed, for a reason nothing on screen could show.
-        palette_hotkey: config::stated(file.palette_hotkey),
-        screen_area_hotkey: config::stated(file.screen_area_hotkey),
+        // Trimmed on the way out, unlike the two above, because a Hotkey goes
+        // to a parser which will not trim it for itself: one stated by hand as
+        // " F13" would read back looking right and then refuse to be claimed,
+        // for a reason nothing on screen could show.
+        palette_hotkey: config::stated_hotkey(file.palette_hotkey),
+        screen_area_hotkey: config::stated_hotkey(file.screen_area_hotkey),
         large_selection: file.large_selection,
         // Only a language Demysto speaks reaches the window: it has no field
         // that could show a third, and `i18n::chosen` is already passing the
@@ -518,12 +538,12 @@ fn rewritten(text: &str, edit: &Edit, path: &Path, words: &Words) -> Result<Stri
         config::VISION_SETTING,
         edit.default_vision_model.as_deref(),
     );
-    stating(
+    hotkey(
         root,
         config::PALETTE_SETTING,
         edit.palette_hotkey.as_deref(),
     );
-    stating(
+    hotkey(
         root,
         config::SCREEN_AREA_SETTING,
         edit.screen_area_hotkey.as_deref(),
@@ -624,6 +644,18 @@ fn models(models: &[ConfiguredModel]) -> Array {
 /// blank one means absent.
 fn stating(table: &mut Table, key: &str, held: Option<&str>) {
     match held.map(str::trim).filter(|held| !held.is_empty()) {
+        Some(held) => table[key] = value(held),
+        None => {
+            table.remove(key);
+        }
+    }
+}
+
+/// Writes a Hotkey as [`stating`] writes a field, except that a blank one is
+/// kept: it is the user clearing the Hotkey, where a line left out is the
+/// default.
+fn hotkey(table: &mut Table, key: &str, held: Option<&str>) {
+    match held.map(str::trim) {
         Some(held) => table[key] = value(held),
         None => {
             table.remove(key);

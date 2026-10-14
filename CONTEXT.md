@@ -33,7 +33,7 @@ The window that lists the Actions accepting the current Selection, opened by the
 _Avoid_: launcher, menu, popup, command bar
 
 **Hotkey**:
-A global key combination. One opens the Palette; an Action may additionally own a Hotkey that runs it directly, skipping the Palette.
+A global key combination. One opens the Palette, another opens it on an area of the screen, and either may be cleared; an Action may additionally own a Hotkey that runs it directly, skipping the Palette.
 _Avoid_: shortcut, keybinding, accelerator
 
 ### What keeps Demysto running

@@ -1,11 +1,11 @@
 //! The tray icon, which is the whole of Demysto's presence while it waits.
 //!
-//! Everything the Hotkey reaches is reachable from here as well: the Palette,
-//! and through it every Action, and Settings. That is not a convenience — it is
-//! the path for somebody who has not learned the Hotkey yet, and the path that
-//! still works when another application has taken it. The dock
-//! cannot be relied on for any of it, because Demysto is not in the dock while
-//! it is only waiting; see `dock`.
+//! Everything the Hotkeys reach is reachable from here as well: the Palette,
+//! and through it every Action, an area of the screen, and Settings. That is
+//! not a convenience — it is the path for somebody who has not learned the
+//! Hotkeys yet, or has cleared them, and the path that still works when
+//! another application has taken one. The dock cannot be relied on for any of
+//! it, because Demysto is not in the dock while it is only waiting; see `dock`.
 //!
 //! It also reaches what the Hotkey does not: this session's Conversations, which
 //! nothing else brings back once their window is closed.
@@ -14,6 +14,7 @@
 //! leave out the ones the Selection would be refused by, and the Palette can.
 
 use std::error::Error;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use demysto_core::{say, Demysto};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -21,6 +22,7 @@ use tauri::{App, AppHandle, Manager, Runtime};
 
 /// Menu item ids. Matched in the event handler below.
 const SHOW: &str = "show";
+const AREA: &str = "area";
 const CHATS: &str = "chats";
 const SETTINGS: &str = "settings";
 const UPDATE: &str = "update";
@@ -29,6 +31,10 @@ const QUIT: &str = "quit";
 /// The tray icon's id, so that the menu can be replaced when what it says
 /// changes under it.
 const TRAY: &str = "main";
+
+/// Whether this desktop offers no way to choose an area of the screen, which
+/// only an answer from the portal can tell, and only after the menu is built.
+static AREA_MISSING: AtomicBool = AtomicBool::new(false);
 
 pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
     // The icon the tray is given is not the one the application is bundled
@@ -65,6 +71,12 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
                 give_back_the_foreground();
                 crate::palette::reveal(app)
             }
+            // Handed back too, so that a cancelled overlay leaves in front what
+            // the user was looking at rather than the taskbar.
+            AREA => {
+                give_back_the_foreground();
+                crate::palette::area(app)
+            }
             // No Capture and no foreground handed back: the Conversations are
             // about Selections already taken, and nothing here takes another.
             CHATS => crate::result::reopen(app),
@@ -77,6 +89,17 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
             _ => {}
         })
         .build(app)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let app = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+            if crate::screenshot::missing().await {
+                AREA_MISSING.store(true, Ordering::Relaxed);
+                rebuild(&app);
+            }
+        });
+    }
 
     Ok(())
 }
@@ -113,6 +136,7 @@ fn menu<R: Runtime, M: Manager<R>>(manager: &M, demysto: &Demysto) -> tauri::Res
     let words = demysto.words();
 
     let show = MenuItem::with_id(manager, SHOW, words.text("tray-open"), true, None::<&str>)?;
+    let area = MenuItem::with_id(manager, AREA, words.text("tray-area"), true, None::<&str>)?;
     // Always enabled: with no Conversation yet the window says why it is empty, which
     // a greyed-out item cannot, and an item that changes state would be one
     // more reason to rebuild the menu.
@@ -143,7 +167,13 @@ fn menu<R: Runtime, M: Manager<R>>(manager: &M, demysto: &Demysto) -> tauri::Res
         .transpose()?;
 
     let separator = PredefinedMenuItem::separator(manager)?;
-    let mut top: Vec<&dyn tauri::menu::IsMenuItem<R>> = vec![&show, &chats, &separator];
+    let mut top: Vec<&dyn tauri::menu::IsMenuItem<R>> = vec![&show];
+
+    if !AREA_MISSING.load(Ordering::Relaxed) {
+        top.push(&area);
+    }
+
+    top.extend([&chats as &dyn tauri::menu::IsMenuItem<R>, &separator]);
 
     if let Some(update) = &update {
         top.push(update);

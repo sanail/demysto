@@ -5,7 +5,7 @@ LAUNCH = False
 SESSIONS = ["x11"]
 
 
-ITEMS = ["tray-open", "tray-chats", "tray-settings", "tray-quit"]
+ITEMS = ["tray-open", "tray-area", "tray-chats", "tray-settings", "tray-quit"]
 
 
 def scenario(g):
@@ -19,8 +19,8 @@ def scenario(g):
     names = [item["name"] for item in items]
     for key in ITEMS:
         g.check(f"the tray menu has {say(g, key)}", say(g, key) in names, detail=names)
-    g.check("the tray menu starts with the list of Actions, then the chats",
-            names[:2] == [say(g, "tray-open"), say(g, "tray-chats")], detail=names)
+    g.check("the tray menu starts with the list of Actions, the area, then the chats",
+            names[:3] == [say(g, "tray-open"), say(g, "tray-area"), say(g, "tray-chats")], detail=names)
     g.check("the tray menu has no submenu", not any(item["children"] for item in items), detail=items)
 
     g.tray(tray(g), choose=say(g, "tray-chats"))

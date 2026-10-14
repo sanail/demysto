@@ -52,6 +52,10 @@ def palette_hotkey(g):
     return "cmd+shift+space" if g.os == "macos" else "ctrl+shift+space"
 
 
+def area_hotkey(g):
+    return "ctrl+shift+space" if g.os == "macos" else "ctrl+alt+space"
+
+
 def explain_hotkey(g):
     """The Hotkey given to Explain, as the Action file states it and as a chord."""
     stated = "Cmd+Shift+E" if g.os == "macos" else "Ctrl+Alt+Shift+E"

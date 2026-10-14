@@ -9,6 +9,7 @@
 
 app-name = Demysto
 tray-open = Acciones…
+tray-area = Área de la pantalla…
 tray-chats = Chats…
 tray-update = Actualizar a { $version }…
 tray-settings = Ajustes…
@@ -179,11 +180,12 @@ settings-palette-hotkey = Abre la lista de acciones
 settings-screen-area-hotkey = Abre la lista de acciones sobre un área de la pantalla
 settings-hotkey-record = Grabar
 settings-hotkey-clear = Borrar
+settings-hotkey-restore = Por defecto
 settings-hotkey-cancel = Cancelar
 settings-hotkey-recording = Pulsa las teclas… Esc para cancelar
 settings-hotkey-default = { $hotkey } — por defecto
 settings-hotkey-none = Ninguno — esta acción se lanza desde la lista
-settings-screen-area-hotkey-none = Ninguno — asigna uno para elegir un área de la pantalla
+settings-hotkey-cleared = Ninguno
 settings-screen-area-unavailable = En Wayland, Demysto solo ve la pantalla a través del portal de capturas del escritorio, y este no ofrece ninguno; GNOME y KDE Plasma sí lo ofrecen.
 settings-palette-hotkey-rule = Mantén Ctrl, Alt o Shift y pulsa una tecla. Una tecla que escribe algo no se puede reservar sola: dejaría de escribirse en todas partes.
 settings-action-hotkey-rule = Mantén Ctrl, Alt o Shift y pulsa una tecla. Una tecla que escribe algo no se puede reservar sola: dejaría de escribirse en todas partes. Por esta vía no se piden los parámetros: cada uno toma su valor por defecto.
@@ -281,6 +283,7 @@ welcome-autostart-choice = Iniciarlo al iniciar sesión
 welcome-done-title = Eso es todo
 welcome-done-detail = Selecciona texto en cualquier sitio y pulsa { $hotkey }. En el centro de la pantalla se abre una lista de acciones; Enter ejecuta la resaltada.
 welcome-done-clipboard = Copia texto con Ctrl+C y pulsa { $hotkey }. En el centro de la pantalla se abre una lista de acciones; Enter ejecuta la resaltada.
+welcome-done-area = Pulsa { $hotkey } para trazar un área de la pantalla y abrir la lista de acciones sobre ella.
 welcome-done-tray = A partir de ahora Demysto espera en la bandeja, y su menú llega a todo lo que llega el atajo.
 
 ## What an update could not do
@@ -397,7 +400,7 @@ action-file-invalid = { $path } no es una acción válida: { $detail }
 
 ## Hotkeys the desktop would not give up
 
-hotkey-palette-fell-back = { $why } Demysto está usando { $hotkey } en su lugar.
+hotkey-fell-back = { $why } Demysto está usando { $hotkey } en su lugar.
 hotkey-palette-unclaimable = Demysto no pudo reservar { $hotkey }, que abre la lista de acciones: { $detail }. Puede que ya lo tenga otra aplicación. El menú de la bandeja llega a todo lo que llega el atajo.
 hotkey-palette-not-a-combination = Los ajustes indican el atajo «{ $hotkey }», que Demysto no entiende. Un atajo son sus modificadores y luego una tecla, escrito como «Ctrl+Shift+E».
 hotkey-palette-types-something = Los ajustes indican el atajo «{ $hotkey }», que es una sola tecla que escribe. Añade Ctrl, Alt o Shift: sola dejaría de escribirse en todas partes.
@@ -406,6 +409,8 @@ hotkey-action-not-a-combination = { $action } indica el atajo «{ $hotkey }», q
 hotkey-action-types-something = { $action } indica el atajo «{ $hotkey }», que es una sola tecla que escribe. Añade Ctrl, Alt o Shift: sola dejaría de escribirse en todas partes.
 hotkey-action-already-held = { $action } indica el atajo «{ $hotkey }», y { $holder } ya lo tiene. Solo { $holder } responde a él; dale otro a { $action }.
 hotkey-screen-area-already-held = Los ajustes indican el atajo «{ $hotkey }» para un área de la pantalla, y { $holder } ya lo tiene. Dale otro al área.
+hotkey-screen-area-default-held = { $holder } ya tiene { $hotkey }, el atajo por defecto de un área de la pantalla. Dale otro al área.
+hotkey-screen-area-unclaimable = Demysto no pudo reservar { $hotkey }, que elige un área de la pantalla: { $detail }. Puede que ya lo tenga otra aplicación. El menú de la bandeja llega a todo lo que llega el atajo.
 hotkey-action-refused = { $action } indica el atajo «{ $hotkey }», y Demysto no pudo reservarlo: { $detail }. Puede que ya lo tenga otra aplicación.
 hotkey-palette-holder = la lista de acciones
 hotkey-screen-area-holder = el área de la pantalla
@@ -476,14 +481,15 @@ settings-file-preamble =
     # propio, y `default_vision_model` es a lo que se reduce para una imagen.
     #
     # `palette_hotkey` es la combinación de teclas que abre la lista de acciones.
-    # Déjalo fuera para usar la que trae Demysto. Se escribe como sus modificadores
-    # y después una tecla — "Ctrl+Alt+Space". Una tecla que no escribe nada —de
-    # volumen o de reproducción, o F13 y superiores— puede ir sola. La ventana de
-    # ajustes graba una por ti si prefieres pulsarla a deletrearla.
+    # Déjalo fuera para usar la que trae Demysto, o escribe "" para no tener ninguna.
+    # Se escribe como sus modificadores y después una tecla — "Ctrl+Shift+E". Una
+    # tecla que no escribe nada —de volumen o de reproducción, o F13 y superiores—
+    # puede ir sola. La ventana de ajustes graba una por ti si prefieres pulsarla a
+    # deletrearla.
     #
-    # `screen_area_hotkey` es la combinación de teclas con la que eliges un área de
-    # la pantalla y abres la lista de acciones sobre ella. No hay ninguna hasta que
-    # la indicas.
+    # `screen_area_hotkey` es la combinación de teclas con la que eliges un área de la
+    # pantalla y abres la lista de acciones sobre ella. Déjalo fuera para usar la que
+    # trae Demysto, o escribe "" para no tener ninguna.
     #
     # `language` es el idioma en el que habla Demysto: "en", "de", "es", "fr" o "ru".
     # Déjalo fuera y Demysto sigue al sistema operativo, recurriendo al inglés.

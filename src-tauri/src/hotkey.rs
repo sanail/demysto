@@ -8,7 +8,7 @@
 
 use std::sync::Mutex;
 
-use demysto_core::{say, DefinedAction, Demysto, Words};
+use demysto_core::{say, DefinedAction, Demysto, StatedHotkey, Words};
 use tauri::plugin::TauriPlugin;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcut, GlobalShortcutExt, Shortcut, ShortcutState};
@@ -30,11 +30,20 @@ pub(crate) const PALETTE: &str = if cfg!(target_os = "macos") {
     "Ctrl+Shift+Space"
 };
 
-/// The Palette's Hotkey where the settings state none.
-fn built_in_palette() -> Shortcut {
-    PALETTE
+/// The screen-area Hotkey where the settings state none: beside the Palette's
+/// on macOS, and on Windows and Linux one modifier away from it, because
+/// `Ctrl+Alt` claims nothing a stock desktop answers to with `Space`.
+pub(crate) const SCREEN_AREA: &str = if cfg!(target_os = "macos") {
+    "Ctrl+Shift+Space"
+} else {
+    "Ctrl+Alt+Space"
+};
+
+/// One of Demysto's own defaults, parsed.
+fn built_in(default: &str) -> Shortcut {
+    default
         .parse()
-        .expect("the Palette's own Hotkey should be one Demysto can parse")
+        .expect("Demysto's own Hotkeys should be ones it can parse")
 }
 
 /// Whether a Hotkey stating one key and no modifier is one to claim.
@@ -137,16 +146,14 @@ fn bound(pressed: &Shortcut) -> Option<Bound> {
 /// — and the operating system is the only authority on whether another
 /// application got there first.
 ///
-/// `palette` is the Hotkey the settings state for the Palette, `None` for the
-/// one Demysto comes with. It is claimed first, which means changing it can take
-/// a Hotkey away from an Action stating the same combination — the Action is
+/// The Palette's Hotkey is claimed first, which means changing it can take a
+/// Hotkey away from an Action stating the same combination — the Action is
 /// told so in the report, and the window shows the report the moment the
-/// settings are saved. `screen_area` comes second and has no default: `None`
-/// claims nothing.
+/// settings are saved. The screen area's comes second.
 pub fn claim<R: Runtime>(
     app: &AppHandle<R>,
-    palette: Option<&str>,
-    screen_area: Option<&str>,
+    palette_hotkey: &StatedHotkey,
+    screen_area_hotkey: &StatedHotkey,
     actions: &[DefinedAction],
 ) -> Vec<String> {
     // Wayland lets no application claim a Hotkey from the display server, so
@@ -155,7 +162,7 @@ pub fn claim<R: Runtime>(
     // combination each one answers to (ADR-0003).
     #[cfg(target_os = "linux")]
     if demysto_core::wayland_session() {
-        return through_the_portal(app, palette, screen_area, actions);
+        return through_the_portal(app, palette_hotkey, screen_area_hotkey, actions);
     }
 
     // One at a time: two of these interleaving would each give up what the
@@ -192,20 +199,25 @@ pub fn claim<R: Runtime>(
     // The Palette's first, so that an Action stating it finds it taken rather
     // than taking it: the Hotkey the whole tool opens with is not something a
     // stray Action file gets to quietly take.
-    unclaimed.append(&mut palettes(
+    unclaimed.append(&mut settled(
         app,
         hotkeys,
         &held,
         &mut claimed,
-        palette,
+        palette_hotkey,
+        palette(),
         &words,
     ));
 
-    if let Some(stated) = screen_area {
-        if let Err(said) = screen_areas(app, hotkeys, &held, &mut claimed, stated, &words) {
-            unclaimed.push(said);
-        }
-    }
+    unclaimed.append(&mut settled(
+        app,
+        hotkeys,
+        &held,
+        &mut claimed,
+        screen_area_hotkey,
+        screen_area(),
+        &words,
+    ));
 
     for action in actions {
         let Some(stated) = action.hotkey.as_deref() else {
@@ -254,62 +266,152 @@ fn take<R: Runtime>(
     }
 }
 
-/// Claims the Palette's Hotkey: the one the settings state, or the one Demysto
-/// comes with where they state none — or where the one they state cannot be had.
+/// What sets the Palette's Hotkey and the screen area's apart when they are
+/// claimed. The sentences are functions so that each names its message
+/// outright, where the catalogue's check can find it.
+struct Role {
+    bound: Bound,
+    default: &'static str,
+    holder: fn(&Words) -> String,
+    /// The default could not be registered, with what the system said.
+    unclaimable: fn(&Words, String) -> String,
+    /// An earlier claim holds the stated combination. `None` for the
+    /// Palette's, which is claimed before any other.
+    stated_taken: Option<fn(&Words, &str, String) -> String>,
+    /// An earlier claim holds the default.
+    default_taken: Option<fn(&Words, String) -> String>,
+}
+
+fn palette() -> Role {
+    Role {
+        bound: Bound::Palette,
+        default: PALETTE,
+        holder: |words| words.text("hotkey-palette-holder"),
+        unclaimable: |words, detail| {
+            say!(
+                words,
+                "hotkey-palette-unclaimable",
+                "hotkey" = PALETTE,
+                "detail" = detail
+            )
+        },
+        stated_taken: None,
+        default_taken: None,
+    }
+}
+
+fn screen_area() -> Role {
+    Role {
+        bound: Bound::ScreenArea,
+        default: SCREEN_AREA,
+        holder: |words| words.text("hotkey-screen-area-holder"),
+        unclaimable: |words, detail| {
+            say!(
+                words,
+                "hotkey-screen-area-unclaimable",
+                "hotkey" = SCREEN_AREA,
+                "detail" = detail
+            )
+        },
+        stated_taken: Some(|words, stated, holder| {
+            say!(
+                words,
+                "hotkey-screen-area-already-held",
+                "hotkey" = stated.to_owned(),
+                "holder" = holder
+            )
+        }),
+        default_taken: Some(|words, holder| {
+            say!(
+                words,
+                "hotkey-screen-area-default-held",
+                "hotkey" = SCREEN_AREA,
+                "holder" = holder
+            )
+        }),
+    }
+}
+
+/// Claims the Hotkey of one role: the one the settings state, or the default
+/// where they state none or the one they state cannot be had, or none at all
+/// where they clear it.
 ///
-/// Every way the stated one can fail falls back rather than leaving the Palette
-/// with no Hotkey at all, and every sentence it produces names what is answering
-/// instead. A Palette somebody cannot open is the tool not starting, and being
-/// told which key opens it is the difference between a setting that went wrong
+/// Falling back rather than leaving the role with no Hotkey, and saying which
+/// key answers instead, is the difference between a setting that went wrong
 /// and a tool that appears to be broken.
-fn palettes<R: Runtime>(
+fn settled<R: Runtime>(
     app: &AppHandle<R>,
     hotkeys: &GlobalShortcut<R>,
     held: &[Shortcut],
     claimed: &mut Vec<Claim>,
-    stated: Option<&str>,
+    stated: &StatedHotkey,
+    role: Role,
     words: &Words,
 ) -> Vec<String> {
-    let mut said = Vec::new();
+    let holder_of = |claimed: &[Claim], hotkey: Shortcut| {
+        claimed
+            .iter()
+            .find(|claim| claim.hotkey == hotkey)
+            .map(|claim| claim.holder.clone())
+    };
 
     // The Hotkey that was registered, not the one that was asked for: on the
     // way through a fallback the two differ, and a Claim holding the one nobody
-    // registered would never match the key actually pressed — the Palette would
-    // stop opening while the report said everything was well.
+    // registered would never match the key actually pressed.
     let claim = |claimed: &mut Vec<Claim>, hotkey| {
         claimed.push(Claim {
             hotkey,
-            bound: Bound::Palette,
-            holder: words.text("hotkey-palette-holder"),
+            bound: role.bound.clone(),
+            holder: (role.holder)(words),
         })
     };
 
-    if let Some(stated) = stated {
-        match wanted(app, hotkeys, held, stated, words) {
-            Ok(hotkey) => {
-                claim(claimed, hotkey);
-                return said;
+    let why = match stated {
+        StatedHotkey::Cleared => return Vec::new(),
+        StatedHotkey::Default => None,
+        StatedHotkey::Stated(stated) => {
+            let taken = role.stated_taken.and_then(|told| {
+                let holder = holder_of(claimed, stated.parse().ok()?)?;
+                Some(told(words, stated, holder))
+            });
+
+            match taken.map_or_else(|| wanted(app, hotkeys, held, stated, words), Err) {
+                Ok(hotkey) => {
+                    claim(claimed, hotkey);
+                    return Vec::new();
+                }
+                Err(why) => Some(why),
             }
-            Err(why) => said.push(say!(
-                words,
-                "hotkey-palette-fell-back",
-                "why" = why,
-                "hotkey" = PALETTE
-            )),
         }
-    }
+    };
 
-    match take(hotkeys, held, built_in_palette()) {
-        Ok(()) => claim(claimed, built_in_palette()),
-        Err(error) => said.push(say!(
-            words,
-            "hotkey-palette-unclaimable",
-            "hotkey" = PALETTE,
-            "detail" = error.to_string()
-        )),
-    }
+    let default = built_in(role.default);
+    let taken = role
+        .default_taken
+        .and_then(|told| Some(told(words, holder_of(claimed, default)?)));
+    let fallen = match taken {
+        Some(told) => Err(told),
+        None => take(hotkeys, held, default)
+            .map_err(|error| (role.unclaimable)(words, error.to_string())),
+    };
 
-    said
+    // "Using the default instead" only once the default is in fact answering.
+    match (why, fallen) {
+        (None, Ok(())) => {
+            claim(claimed, default);
+            Vec::new()
+        }
+        (Some(why), Ok(())) => {
+            claim(claimed, default);
+            vec![say!(
+                words,
+                "hotkey-fell-back",
+                "why" = why,
+                "hotkey" = role.default
+            )]
+        }
+        (why, Err(failed)) => why.into_iter().chain([failed]).collect(),
+    }
 }
 
 /// Claims a Hotkey the settings state, or says why not.
@@ -346,38 +448,6 @@ fn wanted<R: Runtime>(
                 "detail" = error.to_string()
             )
         })
-}
-
-/// Claims the screen-area Hotkey, or says why not. Unlike the Palette's there
-/// is nothing to fall back to.
-fn screen_areas<R: Runtime>(
-    app: &AppHandle<R>,
-    hotkeys: &GlobalShortcut<R>,
-    held: &[Shortcut],
-    claimed: &mut Vec<Claim>,
-    stated: &str,
-    words: &Words,
-) -> Result<(), String> {
-    if let Ok(hotkey) = stated.parse::<Shortcut>() {
-        if let Some(holder) = claimed.iter().find(|claim| claim.hotkey == hotkey) {
-            return Err(say!(
-                words,
-                "hotkey-screen-area-already-held",
-                "hotkey" = stated.to_owned(),
-                "holder" = holder.holder.clone()
-            ));
-        }
-    }
-
-    let hotkey = wanted(app, hotkeys, held, stated, words)?;
-
-    claimed.push(Claim {
-        hotkey,
-        bound: Bound::ScreenArea,
-        holder: words.text("hotkey-screen-area-holder"),
-    });
-
-    Ok(())
 }
 
 /// Claims one Action's Hotkey, or says in a whole sentence why it could not be.
@@ -454,8 +524,8 @@ fn claiming<R: Runtime>(
 #[cfg(target_os = "linux")]
 fn through_the_portal<R: Runtime>(
     app: &AppHandle<R>,
-    palette: Option<&str>,
-    screen_area: Option<&str>,
+    palette_hotkey: &StatedHotkey,
+    screen_area_hotkey: &StatedHotkey,
     actions: &[DefinedAction],
 ) -> Vec<String> {
     use crate::portal::Wanted;
@@ -463,17 +533,31 @@ fn through_the_portal<R: Runtime>(
     let demysto = app.state::<Demysto>();
     let words = demysto.words();
 
-    let mut wanted = vec![Wanted {
-        id: crate::portal::OPENS_THE_PALETTE.to_owned(),
-        description: words.text("portal-palette-description"),
-        trigger: crate::portal::trigger(palette.unwrap_or(PALETTE)),
-    }];
+    // A cleared one is not asked for, so that the desktop lists nothing that
+    // Demysto would not answer to.
+    let preferred = |stated: &StatedHotkey, default| match stated {
+        StatedHotkey::Default => Some(crate::portal::trigger(default)),
+        StatedHotkey::Cleared => None,
+        StatedHotkey::Stated(stated) => Some(crate::portal::trigger(stated)),
+    };
 
-    wanted.extend(screen_area.map(|stated| Wanted {
-        id: crate::portal::SELECTS_AN_AREA.to_owned(),
-        description: words.text("portal-screen-area-description"),
-        trigger: crate::portal::trigger(stated),
-    }));
+    let mut wanted = Vec::new();
+
+    if let Some(trigger) = preferred(palette_hotkey, PALETTE) {
+        wanted.push(Wanted {
+            id: crate::portal::OPENS_THE_PALETTE.to_owned(),
+            description: words.text("portal-palette-description"),
+            trigger,
+        });
+    }
+
+    if let Some(trigger) = preferred(screen_area_hotkey, SCREEN_AREA) {
+        wanted.push(Wanted {
+            id: crate::portal::SELECTS_AN_AREA.to_owned(),
+            description: words.text("portal-screen-area-description"),
+            trigger,
+        });
+    }
 
     wanted.extend(actions.iter().filter_map(|action| {
         Some(Wanted {
@@ -584,11 +668,11 @@ mod tests {
     }
 
     #[test]
-    fn the_palettes_own_hotkey_is_one_the_parser_knows() {
-        // `built_in_palette` unwraps this, and it is the Hotkey the whole tool
-        // opens with.
-        let hotkey = built_in_palette();
-
-        assert!(!hotkey.mods.is_empty());
+    fn demystos_own_hotkeys_are_ones_the_parser_knows() {
+        // `built_in` unwraps them, and the Palette's is the Hotkey the whole
+        // tool opens with.
+        for default in [PALETTE, SCREEN_AREA] {
+            assert!(!built_in(default).mods.is_empty());
+        }
     }
 }

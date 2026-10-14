@@ -503,12 +503,13 @@ pub(crate) struct File {
     pub(crate) default_model: Option<String>,
     pub(crate) default_vision_model: Option<String>,
     /// The Hotkey that opens the Palette, `None` for the one Demysto comes
-    /// with. Declared here and resolved nowhere: nothing in this crate runs on
-    /// it, and whether a combination can be claimed is the desktop's answer to
-    /// give. It is a field only because the file denies unknown ones, and a
-    /// file stating a Hotkey has to stay a file Demysto can read.
+    /// with and `""` for none. Declared here and resolved nowhere: nothing in
+    /// this crate runs on it, and whether a combination can be claimed is the
+    /// desktop's answer to give. It is a field only because the file denies
+    /// unknown ones, and a file stating a Hotkey has to stay a file Demysto
+    /// can read.
     pub(crate) palette_hotkey: Option<String>,
-    /// The Hotkey that chooses an area of the screen, `None` for none at all.
+    /// The Hotkey that chooses an area of the screen, read like the Palette's.
     pub(crate) screen_area_hotkey: Option<String>,
     /// How many characters a Selection may hold before Demysto says so, `None`
     /// where the file states nothing and [`DEFAULT_LARGE_SELECTION`] decides.
@@ -832,6 +833,12 @@ fn has_no_keys(entry: &ProviderEntry) -> bool {
     entry
         .preset
         .is_some_and(|preset| matches!(preset.spec().auth, Auth::Nothing))
+}
+
+/// A Hotkey as the settings state it: `None` where they state none, so that the
+/// default answers, and `""` where they state that there is none.
+pub(crate) fn stated_hotkey(value: Option<String>) -> Option<String> {
+    value.map(|value| value.trim().to_owned())
 }
 
 /// A value somebody actually stated: trimmed, and `None` when there was nothing

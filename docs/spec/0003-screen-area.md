@@ -27,8 +27,8 @@ Everything after the Palette is unchanged: fitting and asking for the original
 89. As a reader, I want to drag a rectangle over something on screen and ask
     about it, so that a picture nobody can copy is as easy to ask about as one
     somebody can.
-90. As a user, I want that Hotkey to be one I choose, so that an update does not
-    take a combination another application already answers to.
+90. As a user, I want to change or clear that Hotkey, and the Palette's, so
+    that one another application already answers to can be given back.
 91. As a user, I want pressing it to leave my clipboard and my selection alone,
     so that asking about the screen does not cost me what I had copied.
 92. As a user, I want Esc or a stray click to simply end it, so that changing my
@@ -37,6 +37,8 @@ Everything after the Palette is unchanged: fitting and asking for the original
     that I can tell it apart from one I had copied a while ago.
 94. As a Wayland user, I want the desktop's own screenshot tool to choose the
     area, so that Demysto needs no permission beyond what the desktop asks for.
+95. As a user, I want to start an area from the tray, so that I can ask about
+    the screen without remembering the Hotkey.
 
 ## Implementation Decisions
 
@@ -44,13 +46,20 @@ Everything after the Palette is unchanged: fitting and asking for the original
 
 The screen-area Hotkey lives in Settings → General under the Palette's, recorded
 with the same control, and is written to the Settings File as
-`screen_area_hotkey`. It has no default: until the user sets one, nothing is
-claimed. It is claimed after the Palette's and before any Action's, so an Action
+`screen_area_hotkey`. Its default is Ctrl+Shift+Space on macOS, beside the
+Palette's Cmd+Shift+Space, and Ctrl+Alt+Space on Windows and Linux; a default
+another application holds is reported like the Palette's. Either Hotkey can be
+cleared: the Settings File states it as `""`, and a line left out means the
+default. Settings offers both clearing and going back to the default. It is
+claimed after the Palette's and before any Action's, so an Action
 stating the same combination is told the screen area already has it. On Wayland
 it is one more shortcut asked of the GlobalShortcuts portal, like the Palette's.
 
 Pressing it is an explicit request for the screen. It ignores whatever text is
 selected or copied, sends no copy chord and leaves the clipboard alone.
+
+The tray menu has "Area of the Screen…" under "Actions…", which does what the
+Hotkey does. Where the area is unavailable the item is not there.
 
 ### Capture
 
@@ -69,7 +78,8 @@ ADR-0019 records why the system's own tool is used wherever there is one:
   can still drag, and then no picture is written. So macOS is asked first, at
   every press; where it has not granted it, the press raises the system's own
   prompt, notifies the user naming the pane where it is granted, and opens no
-  Palette. The first-run flow does not ask, since the Hotkey has no default.
+  Palette. The first-run flow names the Hotkey but does not ask: the
+  permission is wanted only by somebody who presses it.
 - **Linux, where the portal offers Screenshot:** an interactive request to
   `org.freedesktop.portal.Screenshot`, which shows GNOME's or KDE's own UI. The
   file it returns is removed once read. GNOME's UI also puts the picture on the

@@ -605,9 +605,12 @@ export type Settings = {
   providers: ConfiguredProvider[];
   default_model: string | null;
   default_vision_model: string | null;
-  /** The Hotkey that opens the Palette, `null` for the one Demysto comes with. */
+  /**
+   * The Hotkey that opens the Palette, `null` for the one Demysto comes with
+   * and empty for none.
+   */
   palette_hotkey: string | null;
-  /** The Hotkey that chooses an area of the screen, `null` for none. */
+  /** The Hotkey that chooses an area of the screen, read the same way. */
   screen_area_hotkey: string | null;
   /**
    * How many characters a Selection may hold before Demysto says so, `null`
@@ -660,6 +663,8 @@ export type Edit = {
 export type Hotkeys = {
   /** The Palette's Hotkey where the settings state none, as it is read. */
   palette_default: string;
+  /** The same for the screen area's. */
+  screen_area_default: string;
   /** The keys a Hotkey may be on its own, because they type nothing. */
   no_modifier_needed: string[];
 };

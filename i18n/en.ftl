@@ -14,6 +14,7 @@
 
 app-name = Demysto
 tray-open = Actions…
+tray-area = Area of the Screen…
 tray-chats = Chats…
 tray-update = Update to { $version }…
 tray-settings = Settings…
@@ -184,11 +185,12 @@ settings-palette-hotkey = Opens the list of Actions
 settings-screen-area-hotkey = Opens the list of Actions on an area of the screen
 settings-hotkey-record = Record
 settings-hotkey-clear = Clear
+settings-hotkey-restore = Default
 settings-hotkey-cancel = Cancel
 settings-hotkey-recording = Press the keys… Esc to cancel
 settings-hotkey-default = { $hotkey } — default
 settings-hotkey-none = None — run this Action from the list
-settings-screen-area-hotkey-none = None — set one to choose an area of the screen
+settings-hotkey-cleared = None
 settings-screen-area-unavailable = Wayland lets Demysto see the screen only through the desktop's screenshot portal, and this desktop offers none; GNOME and KDE Plasma do.
 settings-palette-hotkey-rule = Hold Ctrl, Alt or Shift and press a key. A key that types something cannot be claimed on its own: it would stop typing everywhere.
 settings-action-hotkey-rule = Hold Ctrl, Alt or Shift and press a key. A key that types something cannot be claimed on its own: it would stop typing everywhere. Parameters are not asked for on this path — each takes its default.
@@ -286,6 +288,7 @@ welcome-autostart-choice = Start Demysto at login
 welcome-done-title = That is everything
 welcome-done-detail = Select some text anywhere and press { $hotkey }. A list of Actions opens in the middle of the screen; Enter runs the highlighted one.
 welcome-done-clipboard = Copy some text with Ctrl+C and press { $hotkey }. A list of Actions opens in the middle of the screen; Enter runs the highlighted one.
+welcome-done-area = Press { $hotkey } to drag out an area of the screen and open the list of Actions on it.
 welcome-done-tray = Demysto now waits in the tray, and its menu reaches everything the Hotkey does.
 
 ## What an update could not do
@@ -401,7 +404,7 @@ action-file-invalid = { $path } is not a valid Action: { $detail }
 
 ## Hotkeys the desktop would not give up
 
-hotkey-palette-fell-back = { $why } Demysto is using { $hotkey } instead.
+hotkey-fell-back = { $why } Demysto is using { $hotkey } instead.
 hotkey-palette-unclaimable = Demysto could not claim { $hotkey }, which opens the list of Actions: { $detail }. Another application may already have it. The tray menu reaches everything the Hotkey does.
 hotkey-palette-not-a-combination = The settings state the Hotkey "{ $hotkey }", which Demysto does not understand. A Hotkey is its modifiers and then one key, written like "Ctrl+Shift+E".
 hotkey-palette-types-something = The settings state the Hotkey "{ $hotkey }", which is a single key that types. Add Ctrl, Alt or Shift: on its own it would stop typing everywhere.
@@ -410,6 +413,8 @@ hotkey-action-not-a-combination = { $action } states the Hotkey "{ $hotkey }", w
 hotkey-action-types-something = { $action } states the Hotkey "{ $hotkey }", which is a single key that types. Add Ctrl, Alt or Shift: on its own it would stop typing everywhere.
 hotkey-action-already-held = { $action } states the Hotkey "{ $hotkey }", and { $holder } already has it. Only { $holder } answers to it; give { $action } another.
 hotkey-screen-area-already-held = The settings state the Hotkey "{ $hotkey }" for an area of the screen, and { $holder } already has it. Give the area another.
+hotkey-screen-area-default-held = { $holder } already has { $hotkey }, the default for an area of the screen. Give the area another.
+hotkey-screen-area-unclaimable = Demysto could not claim { $hotkey }, which chooses an area of the screen: { $detail }. Another application may already have it. The tray menu reaches everything the Hotkey does.
 hotkey-action-refused = { $action } states the Hotkey "{ $hotkey }", and Demysto could not claim it: { $detail }. Another application may already have it.
 hotkey-palette-holder = the list of Actions
 hotkey-screen-area-holder = the area of the screen
@@ -478,15 +483,15 @@ settings-file-preamble =
     # `default_model` is what an Action binding no Model of its own resolves to, and
     # `default_vision_model` is what one resolves to for an image.
     #
-    # `palette_hotkey` is the key combination that opens the list of Actions. Leave
-    # it out for the one Demysto comes with. It is written as its modifiers and
-    # then one key — "Ctrl+Alt+Space". A key that types nothing — a volume or media
-    # key, or F13 and above — may stand on its own. Settings records one for you if
-    # you would rather press it than spell it.
+    # `palette_hotkey` is the key combination that opens the list of Actions. Leave it
+    # out for the one Demysto comes with, or write "" for none. It is written as its
+    # modifiers and then one key — "Ctrl+Shift+E". A key that types nothing — a volume
+    # or media key, or F13 and above — may stand on its own. Settings records one for
+    # you if you would rather press it than spell it.
     #
-    # `screen_area_hotkey` is the key combination that lets you drag out an area
-    # of the screen and opens the list of Actions on it. There is none until you
-    # state one.
+    # `screen_area_hotkey` is the key combination that lets you drag out an area of
+    # the screen and opens the list of Actions on it. Leave it out for the one Demysto
+    # comes with, or write "" for none.
     #
     # `language` is the language Demysto speaks: "en", "de", "es", "fr" or "ru".
     # Leave it out and Demysto follows the operating system, falling back to
