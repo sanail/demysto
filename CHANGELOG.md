@@ -21,6 +21,12 @@ What each release brought, newest first.
 - Hotkeys work on GNOME 48 and later on Wayland: the `.deb` and `.rpm` now
   install the desktop entry the shortcuts portal looks Demysto up by.
 
+### Installation and updates
+
+- Linux gets only the `.deb` and the `.rpm`; the `.AppImage` is no longer
+  built. An AppImage already installed stays on its version and reports that it
+  cannot update: install the `.deb` or `.rpm` instead.
+
 ## 1.0.0 — 2026-10-06
 
 ### Palette

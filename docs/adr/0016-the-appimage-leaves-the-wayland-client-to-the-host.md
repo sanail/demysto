@@ -1,6 +1,10 @@
 # ADR-0016: The AppImage leaves the host's Wayland client library to the host
 
-Status: accepted
+Status: superseded
+
+Demysto no longer ships an AppImage: on GNOME 48 and later it got no Hotkey,
+having no installed desktop entry, and no Lab ran it. Linux gets the `.deb` and
+the `.rpm`, and the scripts described below are gone.
 
 ## Context
 

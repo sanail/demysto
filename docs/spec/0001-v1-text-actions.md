@@ -344,7 +344,7 @@ speaks — ADR-0012.
 ### Distribution
 
 Per ADR-0004: the Tauri bundler, a universal macOS artifact, `.dmg` / `.msi` and
-NSIS / `.AppImage` and `.deb` from a GitHub Actions matrix, on an Ubuntu runner
+NSIS / `.deb` and `.rpm` from a GitHub Actions matrix, on an Ubuntu runner
 old enough that its glibc does not become the floor for supported distributions.
 In-app updates through `tauri-plugin-updater` against a manifest in GitHub
 Releases, with its keypair generated before the first release. macOS builds are

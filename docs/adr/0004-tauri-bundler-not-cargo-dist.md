@@ -7,8 +7,9 @@ status: accepted
 The sibling project `plz` ships through cargo-dist, and a reader who knows it
 will ask why Demysto does not. cargo-dist's model is a bare binary dropped into
 `~/.local/bin`; Demysto is an `.app` bundle with `Info.plist`, `LSUIElement`, an
-icon, a tray and a webview, delivered as `.dmg`, `.msi`/NSIS and `.AppImage`.
-cargo-dist has no representation for any of that, and the Tauri bundler does.
+icon, a tray and a webview, delivered as `.dmg`, `.msi`/NSIS, `.deb` and
+`.rpm`. cargo-dist has no representation for any of that, and the Tauri bundler
+does.
 
 macOS ships as a **universal** artifact via `tauri build --target
 universal-apple-darwin`, which builds both architectures and runs `lipo` itself.

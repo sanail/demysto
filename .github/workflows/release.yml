@@ -51,12 +51,10 @@ jobs:
           # inside the build rather than `uname -m` in a README.
           - platform: macos-latest
             args: --target universal-apple-darwin
-          # `.msi` and the NSIS installer both, which is what "targets": "all"
-          # in `tauri.conf.json` asks for.
           - platform: windows-latest
             args: ""
           # Ubuntu 22.04 rather than a newer image: the runner's glibc becomes
-          # the oldest distribution the `.AppImage` and `.deb` will run on. The
+          # the oldest distribution the `.deb` and `.rpm` will run on. The
           # same reason CI pins it, and ADR-0004 records it.
           - platform: ubuntu-22.04
             args: ""
@@ -84,13 +82,6 @@ jobs:
             librsvg2-dev \
             patchelf \
             libxdo-dev
-
-      # An AppImage that carries its own `libwayland-client.so.0` answers the
-      # host's Mesa with it, and a Mesa newer than this image cannot start
-      # against a copy this old: every window comes up blank. See ADR-0016.
-      - name: The AppImage leaves the Wayland client to the host
-        if: matrix.platform == 'ubuntu-22.04'
-        run: ./scripts/prepare-appimage.sh
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -213,20 +204,16 @@ jobs:
           releaseDraft: true
           args: ${{ matrix.args }}
 
-      # The shim put in place before the build is quiet when it stops working:
-      # should the bundler ever read its output plugin from somewhere else,
-      # nothing errors and the library comes back. So the artifact is asked
-      # rather than trusted. The release is a draft until a human publishes it,
-      # which is what makes a failure here still worth something.
-      - name: The built AppImage is one that will draw
+      # With no AppImage built, tauri-action points the bare `linux-x86_64` at
+      # the `.deb` or `.rpm`. An AppImage from an earlier release falls back to
+      # that key and overwrites itself with the package; without the key it
+      # stays on its version, intact.
+      - name: No AppImage is offered a package
         if: matrix.platform == 'ubuntu-22.04'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          shopt -s nullglob
-          images=(target/release/bundle/appimage/*.AppImage)
-          if [ "${#images[@]}" -eq 0 ]; then
-            echo "the Linux job produced no AppImage to check" >&2
-            exit 1
-          fi
-          for image in "${images[@]}"; do
-            ./scripts/check-appimage.sh "$image"
-          done
+          gh release download "$GITHUB_REF_NAME" -p latest.json -D "$RUNNER_TEMP/old"
+          mkdir "$RUNNER_TEMP/new"
+          jq 'del(.platforms["linux-x86_64"])' "$RUNNER_TEMP/old/latest.json" > "$RUNNER_TEMP/new/latest.json"
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/new/latest.json" --clobber

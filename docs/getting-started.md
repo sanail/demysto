@@ -47,7 +47,6 @@ Pick whichever package suits your distribution:
 |---|---|
 | `.deb` (Debian, Ubuntu, Mint) | `sudo apt install ./Demysto_<version>_amd64.deb` |
 | `.rpm` (Fedora, openSUSE) | `sudo dnf install ./Demysto-<version>-1.x86_64.rpm` |
-| `.AppImage` (any distribution) | `chmod +x Demysto_<version>_amd64.AppImage`, then run it |
 
 ## The first run
 
@@ -219,7 +218,6 @@ bug.
 - **macOS:** quit Demysto from the menu bar and move it from **Applications**
   to the Trash.
 - **Windows:** remove Demysto in **Settings → Apps → Installed apps**.
-- **Linux:** remove the Demysto package with your package manager, or delete
-  the AppImage.
+- **Linux:** remove the Demysto package with your package manager.
 
 To remove your settings and Actions too, delete the folder listed above.
