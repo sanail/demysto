@@ -15,9 +15,12 @@ jobs:
   # A tag that does not match the version in the manifests would publish a
   # `latest.json` announcing the version already installed, and every installed
   # copy would go on believing it is current. Cheaper to refuse the tag than to
-  # explain that afterwards.
+  # explain that afterwards — and the same goes for a tag with no CHANGELOG.md
+  # section to be its release notes.
   version:
     runs-on: ubuntu-latest
+    outputs:
+      notes: ${{ steps.notes.outputs.notes }}
     steps:
       - uses: actions/checkout@v7
 
@@ -33,6 +36,24 @@ jobs:
             echo "the tag says $tagged, Cargo.toml says $cargo, package.json says $node" >&2
             exit 1
           fi
+
+      # Wrapped bullets are joined because GitHub shows every line break in
+      # release notes.
+      - name: CHANGELOG.md has notes for the version
+        id: notes
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          notes="$(awk -v v="$tagged" '
+            $1 == "##" && $2 == v { section = 1; next }
+            /^## / { section = 0 }
+            section' CHANGELOG.md | perl -0pe 's/\n[ \t]+/ /g; s/\A\s+|\s+\z//g')"
+
+          if [ -z "$notes" ]; then
+            echo "CHANGELOG.md has no notes under ## $tagged" >&2
+            exit 1
+          fi
+
+          { echo 'notes<<END_OF_NOTES'; echo "$notes"; echo 'END_OF_NOTES'; } >> "$GITHUB_OUTPUT"
 
   release:
     needs: version
@@ -197,9 +218,9 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Demysto ${{ github.ref_name }}
-          # A draft, and deliberately: publishing is where the release notes are
-          # written, and it is also the moment every installed copy is offered
-          # the update — `latest.json` is read through
+          releaseBody: ${{ needs.version.outputs.notes }}
+          # A draft, and deliberately: publishing is the moment every installed
+          # copy is offered the update — `latest.json` is read through
           # `releases/latest/download`, which a draft is not part of.
           releaseDraft: true
           args: ${{ matrix.args }}
