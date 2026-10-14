@@ -4,7 +4,7 @@
   "description": "Explain, translate and summarise whatever you are looking at.",
   "type": "module",
   "private": true,
-  "license": "MIT",
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

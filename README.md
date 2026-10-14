@@ -61,7 +61,7 @@ asked about.
   screen. It works from the keyboard alone, and with the mouse just as well.
 - **At home on every desktop.** macOS, Windows, and Linux on both X11 and
   Wayland.
-- **Free and open source,** under the MIT License.
+- **Free and open source,** under the Apache License 2.0.
 
 ## Get started
 
@@ -75,5 +75,5 @@ choosing a Provider, working with pictures, and writing your own Actions.
 ---
 
 <p align="center">
-  <a href="CHANGELOG.md">Changelog</a> · <a href="LICENSE">MIT License</a>
+  <a href="CHANGELOG.md">Changelog</a> · <a href="LICENSE">Apache License 2.0</a>
 </p>

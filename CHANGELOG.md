@@ -29,6 +29,11 @@ What each release brought, newest first.
   built. An AppImage already installed stays on its version and reports that it
   cannot update: install the `.deb` or `.rpm` instead.
 
+### License
+
+- Demysto is now licensed under the Apache License 2.0. Releases up to
+  and including 1.0.0 remain under the MIT License.
+
 ## 1.0.0 — 2026-10-06
 
 ### Palette
