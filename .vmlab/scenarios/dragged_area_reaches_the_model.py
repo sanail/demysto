@@ -1,7 +1,7 @@
 import time
 
 from _demysto import (APP, BLOCKS, configured_launch, decode_png, foreground, mock, nearest_block, nonce,
-                      received, say, show_blocks)
+                      received, say, show_blocks, shows_answer)
 
 LAUNCH = False
 
@@ -70,8 +70,8 @@ def scenario(g):
 
     g.type(say(g, "action-describe-image-name"))
     g.press("enter")
-    answered = g.wait_for(text=answer, app=APP, timeout=30)
-    g.check("Describe image shows the vision Model's answer", answered["met"], detail=[answered, provider.output()[-500:]])
+    answered, seen = shows_answer(g, answer)
+    g.check("Describe image shows the vision Model's answer", answered, detail=[seen, provider.output()[-500:]])
     g.press("escape")
 
     sent = received(provider)

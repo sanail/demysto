@@ -1,4 +1,4 @@
-from _demysto import APP, configured_launch, copy_picture, mock, nonce, palette_hotkey, pictures, say, tray
+from _demysto import APP, configured_launch, copy_picture, mock, nonce, palette_hotkey, pictures, say, shows_answer, tray
 
 LAUNCH = False
 # The picture is put on the clipboard with xclip, an X11 client.
@@ -33,8 +33,8 @@ def scenario(g):
     # the same Action on every OS.
     g.type(say(g, "action-describe-image-name"))
     g.press("enter")
-    answered = g.wait_for(text=answer, app=APP, timeout=30)
-    g.check("Describe image shows the vision Model's answer", answered["met"], detail=[answered, provider.output()[-500:]])
+    answered, seen = shows_answer(g, answer)
+    g.check("Describe image shows the vision Model's answer", answered, detail=[seen, provider.output()[-500:]])
     sent = pictures(provider)
     g.check("the Model is sent the picture fitted under the ceiling", sent == [FITTED], detail=sent)
     g.screenshot("answer about the picture")
@@ -45,7 +45,7 @@ def scenario(g):
     g.tray(tray(g), choose=say(g, "tray-chats"))
     sealed = g.wait_for(text=say(g, "result-sealed"), app=APP, timeout=15)
     g.check("a picture chat reopened from the tray says why it cannot go on", sealed["met"], detail=sealed)
-    kept = g.find(text=answer, app=APP)["matches"]
-    g.check("the Sealed chat still reads as it did", kept != [], detail=kept)
+    kept, seen = shows_answer(g, answer, timeout=5)
+    g.check("the Sealed chat still reads as it did", kept, detail=seen)
     g.screenshot("sealed chat reopened")
     g.press("escape")

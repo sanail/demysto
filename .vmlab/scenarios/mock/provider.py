@@ -2,8 +2,9 @@
 
     provider.py PORT STATUS ANSWER DELAY
 
-GET answers a Model list; POST holds DELAY seconds, then answers ANSWER, or,
-with STATUS of 400 and up, refuses with ANSWER as the error's message. Every
+GET answers a Model list; POST holds DELAY seconds, then answers ANSWER, as a
+stream of a few events when the request asks for one, or, with STATUS of 400
+and up, refuses with ANSWER as the error's message in plain JSON. Every
 request is printed as "METHOD PATH #N BASE64BODY", so a Scenario can read the
 prompt the app sent. Bound to loopback: a listener on 0.0.0.0 makes macOS ask
 about the firewall in a dialog nobody answers.
@@ -36,11 +37,31 @@ class Provider(BaseHTTPRequestHandler):
         self._log()
         self._send({"data": [{"id": "mock-small"}, {"id": "mock-large"}]})
 
+    def _stream(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        third = -(-len(ANSWER) // 3)
+        events = [{"choices": [{"delta": {"content": ANSWER[i:i + third]}}]} for i in range(0, len(ANSWER), third)]
+        events.append({"choices": [{"delta": {}, "finish_reason": "stop"}]})
+        try:
+            for event in events:
+                self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
+                self.wfile.flush()
+                time.sleep(0.05)
+            self.wfile.write(b"data: [DONE]\n\n")
+        except (BrokenPipeError, ConnectionResetError):
+            # The key check hangs up at the headers (ADR-0008).
+            pass
+
     def do_POST(self):
-        self._log(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self._log(body)
         time.sleep(DELAY)
         if STATUS >= 400:
             self._send({"error": {"message": ANSWER}}, STATUS)
+        elif json.loads(body).get("stream"):
+            self._stream()
         else:
             self._send({"choices": [{"message": {"content": ANSWER}}]})
 

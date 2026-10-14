@@ -96,6 +96,14 @@ def mock(g, answer, status=200, delay=0):
     return handle
 
 
+def shows_answer(g, answer, timeout=30):
+    """Waits for the Model's answer; (met, what was seen). Not met while Demysto
+    says it could not read the answer: that message quotes the body whole."""
+    shown = g.wait_for(text=answer, app=APP, timeout=timeout)
+    misread = g.find(text=say(g, "provider-malformed").split("{ $")[0].rstrip(" ("), app=APP)["matches"]
+    return shown["met"] and not misread, {"shown": shown, "misread": misread}
+
+
 def prompts(handle):
     """The user prompt of every chat request the mock received, oldest first."""
     found = []

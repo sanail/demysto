@@ -1,4 +1,4 @@
-from _demysto import APP, configured_launch, mock, nonce, palette_hotkey, prompts, say
+from _demysto import APP, configured_launch, mock, nonce, palette_hotkey, prompts, say, shows_answer
 
 LAUNCH = False
 # The selection is read with a synthetic copy, which Wayland refuses.
@@ -22,10 +22,13 @@ def scenario(g):
     listed = g.find(text=say(g, "action-explain-name"), app=APP)["matches"]
     g.check("the Palette lists Explain", listed != [], detail=listed)
 
+    # Named in the filter rather than taken from the highlight, which is not
+    # the same Action on every OS.
+    g.type(say(g, "action-explain-name"))
     g.press("enter")
-    answered = g.wait_for(text=answer, app=APP, timeout=30)
+    answered, seen = shows_answer(g, answer)
     g.check("Enter runs Explain and the Conversation shows the Model's answer",
-            answered["met"], detail=[answered, provider.output()])
+            answered, detail=[seen, provider.output()])
     g.screenshot("answer")
     sent = prompts(provider)
     g.check("the prompt carries the selection intact", any(text in p for p in sent), detail=sent)

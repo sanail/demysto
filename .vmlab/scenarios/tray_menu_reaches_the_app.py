@@ -1,4 +1,4 @@
-from _demysto import APP, configured_launch, language, mock, nonce, prompts, say, tray
+from _demysto import APP, configured_launch, language, mock, nonce, prompts, say, shows_answer, tray
 
 LAUNCH = False
 # The selection is read with a synthetic copy, which Wayland refuses.
@@ -43,16 +43,16 @@ def scenario(g):
     # the same Action on every OS.
     g.type(say(g, "action-explain-name"))
     g.press("enter")
-    answered = g.wait_for(text=answer, app=APP, timeout=30)
-    g.check("the Palette opened from the tray runs Explain", answered["met"], detail=[answered, provider.output()[-500:]])
+    answered, seen = shows_answer(g, answer)
+    g.check("the Palette opened from the tray runs Explain", answered, detail=[seen, provider.output()[-500:]])
     g.press("escape")
     closed = g.wait_for(text=answer, app=APP, gone=True, timeout=10)
     g.check("Escape closes the chat window", closed["met"], detail=closed)
     g.close_staged(staged)
 
     g.tray(tray(g), choose=say(g, "tray-chats"))
-    back = g.wait_for(text=answer, app=APP, timeout=15)
-    g.check("Chats… brings the chat window back on the chat it closed on", back["met"], detail=back)
+    back, seen = shows_answer(g, answer, timeout=15)
+    g.check("Chats… brings the chat window back on the chat it closed on", back, detail=seen)
     g.screenshot("chat reopened from the tray")
     # Typed without a click: the reopened window has to hold the focus.
     question = "And resistance? " + nonce()
