@@ -3,12 +3,12 @@
 //! Everything the Hotkey reaches is reachable from here as well: the Palette,
 //! and through it every Action, and Settings. That is not a convenience — it is
 //! the path for somebody who has not learned the Hotkey yet, and the path that
-//! still works when another application has taken it (user story 51). The dock
+//! still works when another application has taken it. The dock
 //! cannot be relied on for any of it, because Demysto is not in the dock while
 //! it is only waiting; see `dock`.
 //!
 //! It also reaches what the Hotkey does not: this session's Conversations, which
-//! nothing else brings back once their window is closed (user story 88).
+//! nothing else brings back once their window is closed.
 //!
 //! There is no list of Actions here: a menu built before any Capture cannot
 //! leave out the ones the Selection would be refused by, and the Palette can.
@@ -55,8 +55,8 @@ pub fn build<R: Runtime>(app: &App<R>) -> Result<(), Box<dyn Error>> {
         .icon_as_template(cfg!(target_os = "macos"))
         // What the icon is called. Windows shows it as a tooltip and, more to
         // the point, hands it to a screen reader — without one the icon is
-        // nameless, and the mouse-only path user story 51 is about starts at an
-        // icon nobody can identify. macOS and the Linux indicators ignore it.
+        // nameless, and the mouse-only path starts at an icon nobody can
+        // identify. macOS and the Linux indicators ignore it.
         .tooltip(demysto.words().text("app-name"))
         .menu(&menu(app, &demysto)?)
         .show_menu_on_left_click(true)

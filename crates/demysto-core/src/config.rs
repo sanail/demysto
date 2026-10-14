@@ -141,7 +141,7 @@ pub(crate) struct Config {
     /// file states it. `None` where it states nothing, which is the default.
     pub(crate) large_selection: Option<u64>,
     /// The language the file asks the interface to speak, `None` where it asks
-    /// for none and the operating system decides (user story 59).
+    /// for none and the operating system decides.
     pub(crate) language: Option<String>,
 }
 

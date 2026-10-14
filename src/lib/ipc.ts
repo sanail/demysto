@@ -388,7 +388,7 @@ export function accessibilityAskedFor(): Promise<boolean> {
 /**
  * Whether Demysto is in the login items now, and `null` where the system would
  * not say — which is not the same as saying no, and is why this is not a
- * `boolean` (ticket 27).
+ * `boolean`.
  */
 export function autostart(): Promise<boolean | null> {
   return invoke<boolean | null>("autostart");

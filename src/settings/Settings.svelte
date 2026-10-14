@@ -81,7 +81,7 @@
   let unclaimedHotkeys = $state<string[]>([]);
   /**
    * The sentence a desktop that will not let Demysto read a Selection is owed,
-   * `null` everywhere else (user story 56). ADR-0003 puts it here as well as in
+   * `null` everywhere else. ADR-0003 puts it here as well as in
    * the Palette: the Palette says it to somebody who has just pressed the
    * Hotkey, and this says it to somebody working out what the tool does.
    */
@@ -135,7 +135,7 @@
   /**
    * How many times the box has been acted on, and what the login items were
    * last asked — the two things that keep a reading and a change from
-   * answering out of turn (ticket 27).
+   * answering out of turn.
    *
    * Both are needed and neither is enough. One click on a window that did not
    * have focus sends both questions at once: `focus` on the way down asks what
@@ -215,7 +215,7 @@
     // The first thing this window hears about the login items, and the only
     // one with nothing to fall back on: a system that will not say is drawn as
     // the offer to turn autostart on, which is what it was drawn as when the
-    // backend answered no on its behalf (ticket 27).
+    // backend answered no on its behalf.
     autostartWanted = (await inTheList()) ?? false;
 
     // A refused key is reported in the Conversation and fixed here, so the
@@ -627,7 +627,7 @@
     const pressed = combination(event, bareKeys);
 
     // Escape on its own is the way out — the keyboard's half of the way out
-    // the Record button offers while it is recording (user story 66). Escape
+    // the Record button offers while it is recording. Escape
     // with a modifier is a combination like any other.
     if (event.code === "Escape" && !pressed) {
       recording = null;

@@ -191,7 +191,7 @@ pub struct Preset {
 }
 
 /// Every preset there is, so that configuring a common service is picking a
-/// name rather than looking up a base URL (user story 32).
+/// name rather than looking up a base URL.
 pub(crate) fn presets() -> Vec<Preset> {
     config::Preset::ALL
         .into_iter()

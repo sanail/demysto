@@ -81,7 +81,7 @@
    * Confirming means "whatever decided this was right", not "write this down":
    * a file stating the language it was already following would stop following
    * the operating system, and would bake in a `DEMYSTO_LANGUAGE` exported for
-   * one launch (user story 58). Choosing another language is the change, and
+   * one launch. Choosing another language is the change, and
    * that is what gets written.
    */
   let detected = $state(spokenTag());
@@ -94,7 +94,7 @@
   let languageFixed = $state<Exported | null>(null);
   /**
    * The sentence a desktop that will not let Demysto read a Selection is owed,
-   * `null` everywhere else (user story 56).
+   * `null` everywhere else.
    *
    * The last step invites a press of the Hotkey over selected text, and on
    * Wayland that is the one thing it cannot do (ADR-0003): the invitation would
@@ -144,7 +144,7 @@
    *
    * The flow does not go past the Provider until it has: a key that turns out
    * to be wrong at the first Run is exactly the first impression this ticket
-   * exists to prevent (user story 42).
+   * exists to prevent.
    */
   let verified = $state(false);
 
@@ -180,7 +180,7 @@
     paletteDefault = (await allowed()).palette_default;
     // A system that will not say is drawn as the offer to turn autostart on:
     // this is the first thing the flow hears about the list and there is
-    // nothing better to go on (ticket 27).
+    // nothing better to go on.
     autostartWanted = (await autostart()) ?? false;
     const reported = await status();
     languageFixed = reported.language_env;
@@ -288,7 +288,7 @@
   }
 
   /** Asks the Provider what it offers, so that nobody types an identifier from
-      memory (user story 34). */
+      memory. */
   async function askForModels() {
     asking = true;
     said = null;
@@ -350,7 +350,7 @@
    *
    * Acted on as it is answered rather than at the end of the flow: the checkbox
    * is the choice, and one that took effect somewhere else would be a choice
-   * the user cannot see they have made (user story 52).
+   * the user cannot see they have made.
    */
   async function autostartIs(wanted: boolean) {
     const was = autostartWanted;
@@ -360,7 +360,7 @@
     // What the system says it did, rather than what it was asked for: a
     // refusal leaves the box where it was rather than lying about it. Where
     // the system will not say either, where it was is the best answer there is
-    // — and it is the one the user had before they clicked (ticket 27).
+    // — and it is the one the user had before they clicked.
     if (autostartProblem !== null) autostartWanted = (await autostart()) ?? was;
   }
 
@@ -464,8 +464,8 @@
 
         <!--
           Every field here says `autocorrect="off"`, for the reason the
-          Palette's fields do (ticket 21) and with a consequence of its own:
-          macOS corrects what is typed into a WebKit field, and none of this is
+          Palette's fields do, and with a consequence of its own: macOS
+          corrects what is typed into a WebKit field, and none of this is
           prose. Watched on a live desktop — "mock" was written down as "Mock"
           and "mock-small" as "Mock-small", which is a Provider refusing a Model
           the user typed correctly, at the first question they ask.

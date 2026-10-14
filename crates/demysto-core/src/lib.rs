@@ -1,7 +1,7 @@
 //! Demysto's product logic.
 //!
 //! This crate deliberately depends on no user interface toolkit: it is the
-//! single seam the test suite attaches to (see `docs/spec/0001-v1-text-actions.md`).
+//! single seam the test suite attaches to.
 //! The Tauri layer in `src-tauri` is a set of thin adapters over the [`Demysto`]
 //! facade defined here, and nothing in this crate may reference Tauri types.
 
@@ -585,7 +585,7 @@ impl Demysto {
                 Ok(conversation) => conversation,
                 // Either there is no Conversation to ask in, or the one on
                 // screen has had its picture let go of and there is nothing
-                // left to ask about (user story 84).
+                // left to ask about.
                 Err(missing) => {
                     return RunOutcome::Failed(run::nothing_left(missing, &self.words()))
                 }
@@ -613,7 +613,7 @@ impl Demysto {
     ///
     /// `model` is the Model to switch this Conversation to, `None` for trying
     /// again with nothing changed — the two affordances a failed Turn is
-    /// offered (user stories 20 and 44), which are one operation because
+    /// offered, which are one operation because
     /// switching a Model without asking anything would leave the user looking
     /// at the same failure.
     ///
@@ -642,7 +642,7 @@ impl Demysto {
 
     /// Asks the last Turn of the Conversation on screen again, at the original
     /// resolution of the picture it is about — and leaves it there for every
-    /// Turn after this one (user stories 77 and 79).
+    /// Turn after this one.
     ///
     /// The recovery ADR-0017 puts after the answer rather than before it: the
     /// decision is made by somebody looking at the evidence, and the price of it
@@ -670,7 +670,7 @@ impl Demysto {
     }
 
     /// The picture the last Capture produced, as a data URL, so that the Palette
-    /// can show what it caught (user story 69). `None` for a Capture that
+    /// can show what it caught. `None` for a Capture that
     /// produced words, or nothing at all.
     pub fn captured_picture(&self) -> Option<String> {
         self.last_capture()
@@ -726,13 +726,13 @@ impl Demysto {
     }
 
     /// Every Model configured, by the name one is switched to, so that the
-    /// Conversation window can offer somewhere else to ask (user story 20).
+    /// Conversation window can offer somewhere else to ask.
     pub fn models(&self) -> Vec<String> {
         self.models_configured()
     }
 
     /// Where this session's log files are, for the button in Settings that
-    /// opens the folder (user story 63).
+    /// opens the folder.
     pub fn logs_dir(&self) -> PathBuf {
         self.log.dir().to_owned()
     }
@@ -758,7 +758,7 @@ impl Demysto {
         // then runs it, so a warning put on the Conversation now is on screen
         // while the Model is still being asked — which is the whole of what
         // "before you spend tokens on it" can mean for something that is not
-        // going to block (user story 48).
+        // going to block.
         let warning = selection
             .as_ref()
             .and_then(|selection| self.warning(selection));
@@ -847,7 +847,7 @@ impl Demysto {
     fn ask(&self, id: u64, asking: Asking, mut showing: impl FnMut(Arriving)) -> RunOutcome {
         // Recorded before anything is resolved, so that a Turn which never
         // reached a Provider is still a Turn — one the user can try again once
-        // they have fixed what stopped it (user story 44). Nothing is sent by
+        // they have fixed what stopped it. Nothing is sent by
         // recording it; what a Turn holds and what a Turn cost are separate
         // facts, and only the second needs the settings to be right.
         let Asking {
@@ -921,7 +921,7 @@ impl Demysto {
 
         let outcome = match asked {
             // What arrived before it broke is the user's, and is offered the
-            // rest of itself rather than thrown away (user story 46). Nothing
+            // rest of itself rather than thrown away. Nothing
             // having arrived leaves nothing to keep, and that is a plain
             // failure with a retry on it.
             Err(error) => RunOutcome::stopped_short(assembly.text(), error),
@@ -1011,16 +1011,15 @@ impl Demysto {
         // would read — including the failure a saved file can still be, which
         // the Run is where the user is told about. The language comes with it:
         // a save that changed it is a save after which everything Demysto has
-        // yet to say is owed in the new one (user story 59).
+        // yet to say is owed in the new one.
         self.reload();
 
         Ok(saved)
     }
 
     /// Puts every key typed into the window to its Provider before any of it
-    /// is written — ticket 08's "A key entered here is verified against the
-    /// Provider before it is saved", and user story 42's "immediately rather
-    /// than at the first Run".
+    /// is written, so that a wrong key is found at once rather than at the
+    /// first Run.
     ///
     /// Only a key typed now: one the file already holds was put to its Provider
     /// when it was typed, and asking again would put a request behind every
@@ -1067,7 +1066,7 @@ impl Demysto {
     ///
     /// Asked once, by the shell, before there is a window on screen: a fresh
     /// installation is met by the flow rather than by a tray icon it has to
-    /// work out for itself (user story 57).
+    /// work out for itself.
     pub fn welcomed(&self) -> bool {
         settings::welcomed(&self.config_dir, &self.words())
     }
@@ -1089,7 +1088,7 @@ impl Demysto {
     }
 
     /// The Model identifiers a Provider says it offers, so that the user picks
-    /// one rather than typing it from memory (user story 34).
+    /// one rather than typing it from memory.
     ///
     /// Asked of the Provider as the window has it now — a key just typed
     /// included — rather than as the file holds it, because the commonest
@@ -1361,7 +1360,7 @@ mod tests {
     /// The one facade the suite does not hand English to. Neither the variable
     /// nor the operating system is asked — an assertion about a sentence must
     /// not turn on the machine the suite is running on — so what is left is the
-    /// leg this exists to exercise: the file (user story 59).
+    /// leg this exists to exercise: the file.
     fn ready_speaking(settings: &str, selection: &str) -> Rooted {
         let dir = TempDir::new().unwrap();
         std::fs::write(
@@ -1580,7 +1579,7 @@ mod tests {
     #[test]
     fn a_clipboard_holding_both_text_and_a_picture_is_read_as_the_text() {
         // A spreadsheet cell, a fragment of a page, a Word selection: they mean
-        // the text and carry the picture as a secondary flavour (user story 71).
+        // the text and carry the picture as a secondary flavour.
         let desktop = Arc::new(
             FakeDesktop::new(Some("copied a moment ago"), None)
                 .holding_picture(fake::pixels(8, 6, 1)),
@@ -1655,7 +1654,7 @@ mod tests {
 
     #[test]
     fn a_capture_that_displaced_a_picture_puts_it_back() {
-        // The guarantee v1 gave for text, now covering pictures (user story 70).
+        // The guarantee v1 gave for text, now covering pictures.
         let held = fake::pixels(8, 6, 1);
         let desktop =
             Arc::new(FakeDesktop::new(None, Some("a paragraph")).holding_picture(held.clone()));
@@ -1707,7 +1706,7 @@ mod tests {
     #[test]
     fn a_wayland_session_reads_a_picture_off_the_clipboard_too() {
         // The half that works there, and the one platform without a synthetic
-        // copy is not also the one without pictures (user story 72).
+        // copy is not also the one without pictures.
         let desktop = Arc::new(FakeDesktop::new(None, None).holding_picture(fake::pixels(8, 6, 1)));
 
         assert!(matches!(
@@ -1787,7 +1786,7 @@ mod tests {
         // The path an Action's own Hotkey takes: nothing on screen said the
         // Capture was refused, so the Conversation is where it has to be said —
         // and "select some text and press the Hotkey again" would be advice
-        // that cannot work (user story 55).
+        // that cannot work.
         assert_eq!(
             demysto.run("explain", &BTreeMap::new(), |_| {}).error(),
             Some(&RunError::Permission {
@@ -1840,7 +1839,7 @@ mod tests {
     }
 
     /// What the windows show is what the Capture actually does, at the seam
-    /// where the Capture is substituted (user story 56).
+    /// where the Capture is substituted.
     #[test]
     fn a_session_that_reads_only_the_clipboard_says_so_for_the_interface() {
         let desktop = Arc::new(FakeDesktop::new(None, None));
@@ -2175,7 +2174,7 @@ mod tests {
         assert!(message.contains("401"), "{message}");
 
         // Which Provider, so that the window can offer the settings that fix it
-        // rather than the settings in general (user story 45).
+        // rather than the settings in general.
         assert_eq!(provider, "a provider");
     }
 
@@ -2552,9 +2551,9 @@ mod tests {
         endpoint.assert();
     }
 
-    /// The other half of user story 30: the language the answer is asked for
-    /// in is the language the interface speaks, which is now something the user
-    /// can change rather than a constant.
+    /// The language the answer is asked for in is the language the interface
+    /// speaks, which is now something the user can change rather than a
+    /// constant.
     ///
     /// Asked for by its English name whatever the interface is drawn in — see
     /// `Interface::prompt_name`, and `language` for why a Model is told
@@ -2663,7 +2662,7 @@ mod tests {
 
     /// Following the operating system is the setting taken out of the file, not
     /// a language written into it: somebody who chose one and changed their
-    /// mind is back where a fresh installation starts (user story 58).
+    /// mind is back where a fresh installation starts.
     #[test]
     fn choosing_to_follow_the_system_takes_the_language_out_of_the_file() {
         let demysto = unconfigured("a paragraph");
@@ -2754,7 +2753,7 @@ mod tests {
 
     /// The whole of what a Russian interface is for, in one sentence: the
     /// warning about a large Selection counts in it, and counts grammatically
-    /// (user story 60).
+    ///.
     #[test]
     fn the_warning_about_a_large_selection_counts_in_the_interface_language() {
         let settings = format!(
@@ -3609,9 +3608,9 @@ mod tests {
 
     #[test]
     fn a_provider_configured_in_the_interface_is_what_the_next_run_asks() {
-        // The whole of ticket 08 in one Run: a Provider, a key and a Model
-        // entered in the window, and an Action running against them with
-        // nothing restarted and nothing edited by hand.
+        // A Provider, a key and a Model entered in the window, and an Action
+        // running against them with nothing restarted and nothing edited by
+        // hand.
         let mut server = Server::new();
         let asked = server
             .mock("POST", "/v1/chat/completions")
@@ -4305,7 +4304,7 @@ mod tests {
     }
 
     // The first run: the flow that ends with the user having run an Action,
-    // and the one thing about it the file has to remember (ticket 15).
+    // and the one thing about it the file has to remember.
 
     #[test]
     fn a_fresh_installation_has_not_been_welcomed() {
@@ -4391,7 +4390,7 @@ mod tests {
     }
 
     // The Action catalogue on disk: what the user writes, what they change
-    // about a built-in, and the effective set the two make together (ticket 09).
+    // about a built-in, and the effective set the two make together.
 
     /// An edit of a new Action, stating the two things one has to state.
     fn writing(name: &str, template: &str) -> ActionEdit {
@@ -4560,8 +4559,8 @@ mod tests {
 
     #[test]
     fn an_action_carried_to_another_installation_as_a_file_runs_there() {
-        // The other half of user story 29: a file arriving in that directory is
-        // an Action, with nothing to import and nothing restarted.
+        // A file arriving in that directory is an Action, with nothing to
+        // import and nothing restarted.
         let mut server = Server::new();
         let endpoint = asked_for(&mut server, vec![Matcher::Regex("Fault it".to_owned())]);
 
@@ -4948,8 +4947,8 @@ mod tests {
 
     #[test]
     fn renaming_an_action_leaves_it_in_the_file_it_was_already_in() {
-        // The identifier is the identity: an Override is keyed on it, and so —
-        // once ticket 10 lands — is a Hotkey. Renaming is not re-filing.
+        // The identifier is the identity: an Override and a Hotkey are keyed
+        // on it. Renaming is not re-filing.
         let demysto = unconfigured("a paragraph");
 
         authored(
@@ -5370,7 +5369,7 @@ mod tests {
         assert_eq!(session.conversations().len(), 1);
 
         // The same configuration directory, and nothing of the Conversation in
-        // it: history is held in memory and nowhere else (user story 62).
+        // it: history is held in memory and nowhere else.
         let next = as_a_session(dir.path(), fake::over(&desktop));
 
         assert!(next.conversations().is_empty());
@@ -5910,7 +5909,7 @@ mod tests {
         assert_eq!(run(&demysto), RunOutcome::Answered("an answer".to_owned()));
 
         // Sent whole: the warning is a warning, and nothing about it blocks or
-        // truncates (user story 48).
+        // truncates.
         endpoint.assert();
 
         let warning = showing(&demysto)
@@ -6207,7 +6206,7 @@ mod tests {
     #[test]
     fn the_original_stays_for_the_turn_after_the_one_that_asked_for_it() {
         // Somebody who asked for resolution asked because of a detail, and the
-        // question after that one is about the same detail (user story 79).
+        // question after that one is about the same detail.
         let mut server = Server::new();
         let (_, original) = fitted_and_original(2000, 100);
         let endpoint = asked_for(&mut server, vec![carrying(&original)]).expect(2);
