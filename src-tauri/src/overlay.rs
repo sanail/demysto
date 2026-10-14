@@ -202,7 +202,7 @@ fn png(frame: &Frame, area: Area) -> Option<Vec<u8>> {
         &frame.bgra[start..start + width as usize * 4]
     };
     let mut rgba: Vec<u8> = (0..height).flat_map(row).copied().collect();
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
 
@@ -289,7 +289,7 @@ mod system {
         }
 
         // GDI leaves the alpha byte at zero.
-        for pixel in bgra.chunks_exact_mut(4) {
+        for pixel in bgra.as_chunks_mut::<4>().0 {
             pixel[3] = u8::MAX;
         }
 
@@ -460,7 +460,7 @@ mod system {
         };
 
         let mut bgra = bgra.ok_or("the screen's pixel format is not BGRX")?;
-        for pixel in bgra.chunks_exact_mut(4) {
+        for pixel in bgra.as_chunks_mut::<4>().0 {
             pixel[3] = u8::MAX;
         }
 
