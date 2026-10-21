@@ -1,6 +1,6 @@
 # Demysto v1 — text Actions, Palette, and Conversation
 
-Status: ready for implementation. Vocabulary follows `CONTEXT.md`; decisions
+Status: ready for implementation. Vocabulary follows `GLOSSARY.md`; decisions
 recorded in `docs/adr/0001`–`0005` are binding here and are not re-argued.
 
 ## Problem Statement

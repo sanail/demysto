@@ -1,6 +1,6 @@
 # Demysto — an area of the screen
 
-Status: ready for implementation. Vocabulary follows `CONTEXT.md`; the decisions
+Status: ready for implementation. Vocabulary follows `GLOSSARY.md`; the decisions
 recorded in `docs/adr/0001`–`0019` are binding here and are not re-argued. This
 builds on `docs/spec/0001` and `docs/spec/0002`, which stand unchanged except
 where this document says otherwise. User stories continue their numbering.

@@ -5,7 +5,7 @@ use crate::picture::Picture;
 /// The input a Run operates on, captured at invocation time.
 ///
 /// The kind names what a Model is handed rather than where Demysto found it
-/// (`CONTEXT.md`): a picture read from the clipboard and a picture opened from
+/// (`GLOSSARY.md`): a picture read from the clipboard and a picture opened from
 /// a path reach a Model the same way, so both are image Selections. Where it
 /// came from is the Capture's business, and is [`crate::Captured`]'s to say.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]

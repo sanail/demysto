@@ -1,6 +1,6 @@
 # Demysto v1.1 — image Selections
 
-Status: ready for implementation. Vocabulary follows `CONTEXT.md`; the decisions
+Status: ready for implementation. Vocabulary follows `GLOSSARY.md`; the decisions
 recorded in `docs/adr/0001`–`0017` are binding here and are not re-argued. This
 milestone builds on `docs/spec/0001`, which stands unchanged except where this
 document says otherwise. User stories continue that spec's numbering.
@@ -109,7 +109,7 @@ resolution was built and tested against it in v1; nothing about that chain
 changes here.
 
 The kind names what a Model is handed, not where Demysto found it — recorded in
-`CONTEXT.md`. That is what settles, ahead of v1.2, that a picture opened from a
+`GLOSSARY.md`. That is what settles, ahead of v1.2, that a picture opened from a
 path is an image Selection and not a file one.
 
 An image Selection carries the picture twice: **fitted**, which is what a Run
@@ -244,7 +244,7 @@ The rule is that a picture lives as long as the window that shows it:
 
 Releasing a picture does **not** discard the Conversation. The exchange stays in
 the list and reads exactly as it did; what is gone is the ability to add to it,
-because there is no longer anything to resend. `CONTEXT.md` calls a Conversation
+because there is no longer anything to resend. `GLOSSARY.md` calls a Conversation
 in that state **Sealed**, and the window says so where the input box was, rather
 than offering a box that would fail.
 

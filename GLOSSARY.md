@@ -39,7 +39,7 @@ _Avoid_: shortcut, keybinding, accelerator
 ### What keeps Demysto running
 
 **Autostart**:
-Whether Demysto is in the operating system's login items, so that a resident tool is already running by the time it is wanted. The answer belongs to the system rather than to Demysto: it is asked for rather than remembered, and it changes whenever somebody edits that list in the system's own settings. Demysto offers the choice once in the first-run flow, and holds it in Settings for anybody who changes their mind.
+Whether Demysto is in the operating system's login items, so that a resident tool is already running by the time it is wanted. The answer belongs to the system rather than to Demysto: it is asked for rather than remembered, and it changes whenever somebody edits that list in the system's own settings.
 _Avoid_: login item, startup entry, auto-launch, launch at login
 
 **Settings**:
@@ -47,7 +47,7 @@ The window in which a user tells Demysto what it needs to know: the Providers an
 _Avoid_: preferences, options, configuration, config window
 
 **Settings File**:
-The one file Demysto writes down what it was told in: the Providers, the Default Model, the Default Vision Model, the Palette's Hotkey, the size at which a Selection is called large, the interface language, and whether the first run has happened. Written as text a person may read and edit, which is why Demysto refuses to write over one it could not parse. Actions are not in it.
+The one file in which Demysto writes down what it was told, as text a person may read and edit. Actions are not in it.
 _Avoid_: config file, config, preferences file, settings
 
 ### What answers
@@ -81,14 +81,9 @@ A single user message and the Model's reply within a Conversation.
 _Avoid_: message, exchange, round
 
 **Sealed**:
-A Conversation that can be read but not added to, because the Selection it was about has been let go. Only a picture is ever let go — one weighs enough that holding every Conversation's would cost a resident tool more memory than it may take — so a text Conversation is never Sealed. Internal: the window never says "sealed" or "let go of", it says the picture is no longer kept and what to do about it.
+A Conversation that can be read but not added to, because the Selection it was about has been let go. Only a picture is ever let go, so a text Conversation is never Sealed. Internal: the window never says "sealed" or "let go of", it says the picture is no longer kept and what to do about it.
 _Avoid_: closed, archived, expired, stale
 
 **Reasoning**:
-The chain of thought a Model may produce before its answer. Demysto asks a Provider that takes the instruction not to reason at all, because none of the Actions gains anything from it and the wait is what the user pays. Where reasoning arrives anyway it is never part of the answer and is not kept: the window says only that the Model is working.
+The chain of thought a Model may produce before its answer. Never part of the answer and not kept: the window says only that the Model is working.
 _Avoid_: thinking, deliberation, reflection
-
-## Conventions
-
-Comments in the sources and any documentation committed to git are written in
-English, whatever language the conversation around them happens in.
