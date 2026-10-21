@@ -206,11 +206,11 @@ it turns out to be wanted.
 
 ### Windows
 
-The **Palette** shows a thumbnail where it shows two clamped lines of text for a
-text Selection, in the same box and at the same height, cropped across rather
-than resized down — the Palette must not change size according to what was
-caught. Its only job is confirming this is the right picture, which a line
-reading "Image 1280×720" does not do.
+The **Palette** shows the whole picture where it shows two clamped lines of text
+for a text Selection, fitted and centred on no background in a box about 160 px
+high, the same for every picture, wide or tall: the Palette must not change size
+according to which picture was caught. It is there to show what the Capture
+caught, not only that it is the right picture.
 
 The **Conversation** window shows the picture above the first Turn, and a button
 to ask again at the original resolution carrying the weight it will send

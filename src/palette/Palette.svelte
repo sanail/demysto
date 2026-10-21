@@ -373,11 +373,9 @@
           <p class="text-sm opacity-60">{t("palette-nothing-captured")}</p>
         {/if}
       {:else if selection.kind === "image"}
-        <!-- A thumbnail where the text is quoted, in the same box and at the
-             same height: the Palette must not change size according to what was
-             caught. Cropped across rather than resized down, because its one
-             job is confirming this is the right picture, and a strip of the
-             picture does that where a line reading "Image 1280×720" does not.
+        <!-- The whole picture, fitted into a box of one height for every
+             picture: it is there to show what the Capture caught, not only
+             that it is the right one.
 
              The box is drawn before the picture arrives rather than after, so
              that the list of Actions below does not jump down the moment it
@@ -388,10 +386,10 @@
             alt={t("palette-picture", {
               dimensions: selection.picture.dimensions,
             })}
-            class="h-10 w-full rounded object-cover object-left-top"
+            class="h-40 w-full object-contain"
           />
         {:else}
-          <div class="h-10 w-full rounded bg-neutral-100 dark:bg-neutral-800"></div>
+          <div class="h-40 w-full rounded bg-neutral-100 dark:bg-neutral-800"></div>
         {/if}
       {:else}
         <p class="line-clamp-2 text-sm whitespace-pre-wrap opacity-60">
