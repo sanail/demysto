@@ -133,6 +133,14 @@ pub fn run() {
                 palette::into_panel(&window)?;
             }
 
+            // GTK will not shrink a window that is neither shown nor resizable,
+            // and the Palette is fitted before it is shown. The cost is that a
+            // window manager may let it be resized with a modifier and a drag.
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window(palette::LABEL) {
+                window.set_resizable(true)?;
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| match event {

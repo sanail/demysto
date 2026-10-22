@@ -918,6 +918,7 @@ version = "1.1.0"
 dependencies = [
  "ashpd",
  "demysto-core",
+ "dispatch2",
  "futures-util",
  "gdkx11",
  "gtk",

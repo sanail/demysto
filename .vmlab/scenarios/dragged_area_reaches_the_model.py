@@ -1,7 +1,7 @@
 import time
 
 from _demysto import (APP, BLOCKS, area_hotkey, configured_launch, decode_png, foreground, mock, nearest_block, nonce,
-                      received, say, show_blocks, shows_answer)
+                      received, say, show_blocks, shows_answer, check_no_resize, watch_the_palette)
 
 LAUNCH = False
 
@@ -56,6 +56,7 @@ def scenario(g):
 
     clip = "copied before " + nonce()
     g.set_clipboard(clip)
+    watching = watch_the_palette(g)
     g.press(chord)
     tool_up()
     start = (x + w // 3 + w // 12, y + h // 8)
@@ -65,6 +66,7 @@ def scenario(g):
         g.press("enter")
     shown = g.wait_for(text=say(g, "palette-origin-screen"), app=APP, timeout=15)
     g.check("the dragged area opens the Palette from the screen", shown["met"], detail=shown)
+    check_no_resize(g, watching, "on a picture")
     g.screenshot("palette on the area")
 
     g.type(say(g, "action-describe-image-name"))

@@ -43,6 +43,48 @@ def nonce():
     return uuid.uuid4().hex[:8]
 
 
+def watch_the_palette(g):
+    """Starts recording each place and size Demysto's windows take on screen,
+    far faster than the UI tree can be read; None on Wayland, which shows a
+    Guest helper no other application's windows."""
+    if g.session == "wayland":
+        return None
+    script = (HERE / "watch" / {"macos": "palette.js", "windows": "palette.ps1", "linux": "palette.sh"}[g.os]).read_text()
+    if g.os == "macos":
+        watching = g.spawn(["osascript", "-l", "JavaScript", g.put("/tmp/demysto-watch.js", script)])
+    elif g.os == "windows":
+        path = g.put(r"%TEMP%\demysto-watch.ps1", script)
+        watching = g.spawn(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path])
+    else:
+        watching = g.spawn(["sh", g.put("/tmp/demysto-watch.sh", script)])
+    up = g.wait_for(log=watching.log, pattern="none", timeout=30)
+    g.check("the window watcher is running", up["met"], detail=[up, watching.output()])
+    return watching
+
+
+def check_no_resize(g, watching, what, settle=1.5):
+    """Checks that the Palette, once on screen, keeps one shape for `settle`
+    seconds. A shape is a height-to-width ratio, give or take rounding: macOS
+    grows a panel into view at a constant one, and no resize keeps it."""
+    name = f"{what} the Palette does not resize after it appears"
+    if watching is None:
+        return g.skip(name, "Wayland shows a Guest helper no other application's windows")
+    # Slept rather than waited for: what is waited for is something not happening.
+    time.sleep(settle)
+    watching.stop()
+    # Only lines of bounds: osascript logs lines of its own.
+    lines = [line.strip() for line in watching.output().splitlines()
+             if line.strip() == "none" or re.match(r"-?[\d.]+ -?[\d.]+ [\d.]+ [\d.]+( \||$)", line.strip())]
+    # From its last appearance: the area overlay may have been on screen before it.
+    since = lines[len(lines) - lines[::-1].index("none"):] if "none" in lines else lines
+    shapes = []
+    for line in since:
+        _, _, w, h = (float(n) for n in line.split(" | ")[0].split())
+        if not shapes or abs(h / w - shapes[-1][1]) > 0.01:
+            shapes.append((line, h / w))
+    g.check(name, len(shapes) == 1, detail=since)
+
+
 def tray(g):
     # g.tray takes the process name on Windows, the app's own name elsewhere.
     return "demysto" if g.os == "windows" else "Demysto"

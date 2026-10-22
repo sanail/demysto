@@ -87,6 +87,8 @@
 
   /** The Actions that accept this Capture, as the backend filtered them. */
   let offered = $state<Action[]>([]);
+  /** Whether `offered` is this Capture's, or still the one before it. */
+  let arrived = $state(false);
   /** What the user has typed to narrow that list. */
   let filter = $state("");
   /** Which of the Actions still matching is the one Enter runs. */
@@ -100,9 +102,10 @@
   /** Whichever field is on screen: there is never more than one. */
   let field = $state<HTMLInputElement | null>(null);
 
-  /** The window's frame, its body, and the list of Actions, to be measured. */
+  /** The window's frame, its body, its footer and the list of Actions, to be measured. */
   let frame = $state<HTMLElement | null>(null);
   let body = $state<HTMLElement | null>(null);
+  let footer = $state<HTMLElement | null>(null);
   let list = $state<HTMLElement | null>(null);
 
   /** How many Actions the Palette lists before the list scrolls. */
@@ -186,13 +189,19 @@
 
     if (current?.status !== "captured" || current.detail.origin === "nothing") {
       offered = [];
+      arrived = true;
       return;
     }
+
+    arrived = false;
 
     let stale = false;
 
     offeredActions().then((list) => {
-      if (!stale) offered = list;
+      if (stale) return;
+
+      offered = list;
+      arrived = true;
     });
 
     // Only where there is one to ask for: a Capture of words has no picture,
@@ -210,20 +219,32 @@
 
   // Fitted to what each Capture brought and not to anything typed after it:
   // filtering and collecting a Parameter leave room rather than resize the Palette.
+  // The thumbnail is not waited for: its box is drawn at its size without it.
   $effect(() => {
-    void outcome;
     void offered;
     void unreachable;
+    const ready = outcome !== null && arrived;
 
-    tick().then(fit);
+    tick().then(() => fit(ready));
   });
 
   /**
    * Asks for the height that shows everything above and below the list and up
-   * to `VISIBLE_ACTIONS` Actions in it, whatever the window's height now squeezes.
+   * to `VISIBLE_ACTIONS` Actions in it, whatever the window's height now squeezes;
+   * `ready` lets the backend show the Palette at that height.
    */
-  function fit() {
-    if (!frame || !body) return;
+  function fit(ready: boolean) {
+    if (!frame || !body || !footer) return;
+
+    // Down to the footer rather than the frame's own height: Linux lays out a
+    // window it has never shown at next to no height, and the frame overflows it.
+    const style = getComputedStyle(frame);
+    const around =
+      footer.getBoundingClientRect().bottom -
+      frame.getBoundingClientRect().top +
+      parseFloat(style.paddingBottom) +
+      parseFloat(style.borderBottomWidth) -
+      body.clientHeight;
 
     // Plus `scrollTop`: focusing the field scrolls a squeezed body, however
     // hidden its overflow.
@@ -232,13 +253,17 @@
         body.getBoundingClientRect().top +
         body.scrollTop
       : 0;
+    // Every Action offered rather than those the filter leaves: a Palette shown
+    // before its Actions arrived may already have been typed into.
     const row = list?.firstElementChild?.getBoundingClientRect().height ?? 0;
     const squeezed = list
-      ? Math.min(list.scrollHeight, row * VISIBLE_ACTIONS) - list.clientHeight
+      ? row * Math.min(Math.max(offered.length, 1), VISIBLE_ACTIONS) -
+        list.clientHeight
       : 0;
 
     fitPalette(
-      Math.ceil(frame.offsetHeight - body.clientHeight + content + squeezed),
+      Math.ceil(around + content + squeezed),
+      ready,
     );
   }
 
@@ -343,9 +368,11 @@
 
 <svelte:window onkeydown={onKeydown} />
 
+<!-- As wide as `tauri.conf.json` makes the window, so that it measures the
+     same before Linux has ever shown it, when it is next to no width at all. -->
 <main
   bind:this={frame}
-  class="flex h-screen flex-col gap-3 border border-black/10 bg-white p-4 font-sans
+  class="flex h-screen w-[560px] flex-col gap-3 border border-black/10 bg-white p-4 font-sans
          text-neutral-900 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
 >
   <header class="flex items-baseline justify-between gap-3">
@@ -514,7 +541,7 @@
     {/if}
   </div>
 
-  <footer class="text-xs opacity-40">
+  <footer bind:this={footer} class="text-xs opacity-40">
     {#if collecting}
       {t("palette-keys-collecting")}
     {:else if selection}

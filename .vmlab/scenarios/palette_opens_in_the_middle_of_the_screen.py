@@ -1,4 +1,4 @@
-from _demysto import APP, configured_launch, nonce, palette_hotkey
+from _demysto import APP, configured_launch, nonce, palette_hotkey, check_no_resize, watch_the_palette
 
 LAUNCH = False
 # Where a window goes does not depend on the Lab language.
@@ -44,11 +44,13 @@ def opened_with_pointer_at(g, at, corner):
     """Opens the Palette over a selection with the pointer parked at `at`, and
     returns where its window came up."""
     g.pointer("move", *at)
+    watching = watch_the_palette(g)
     text = f"pointer {corner} {nonce()}"
     staged = g.stage_text(text, then=palette_hotkey(g))
     shown = g.wait_for(text=text, app=APP, timeout=15)
     g.check(f"the Palette opens with the pointer in the {corner} corner", shown["met"],
             detail=[staged, shown])
+    check_no_resize(g, watching, f"with the pointer in the {corner} corner")
     windows = [m["bounds"] for m in g.find(role="window", app=APP)["matches"] if m.get("bounds")]
     g.screenshot(f"pointer {corner}")
     g.press("escape")

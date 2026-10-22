@@ -436,10 +436,15 @@ pub fn dismiss<R: Runtime>(window: WebviewWindow<R>) {
     crate::welcome::gone(window.app_handle(), window.label());
 }
 
-/// Fits the Palette to the height its content takes, in logical pixels.
+/// Fits the Palette to the height its content takes, in logical pixels, and
+/// lets it be shown once that content is the whole of a Capture.
 #[tauri::command]
-pub fn fit_palette<R: Runtime>(window: WebviewWindow<R>, height: f64) {
+pub fn fit_palette<R: Runtime>(window: WebviewWindow<R>, height: f64, ready: bool) {
     let _ = crate::palette::fit(window.app_handle(), &window, height);
+
+    if ready {
+        crate::palette::ready();
+    }
 }
 
 /// The frozen frame the overlay selects on, as a BMP file; empty once the

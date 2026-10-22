@@ -17,9 +17,9 @@ export type Work<T> = {
  * it showed last time is still on screen when it is next shown; and the Capture
  * it shows begins before it is visible, so the events carrying one can arrive
  * before the window has ever loaded. It therefore listens for the state
- * changing and asks once for whatever it missed — but only while it has heard
- * nothing, since by the time that question is answered a newer state may
- * already have arrived.
+ * changing and, once both listeners are in place, asks once for whatever it
+ * missed — keeping the answer only if nothing was heard since asking, since by
+ * the time that question is answered a newer state may already have arrived.
  *
  * `null` is "there is nothing to show yet", which the window renders as the
  * work being under way: it is what the beginning of a Capture leaves behind.
@@ -45,11 +45,18 @@ export function latest<T>(work: Work<T>) {
         value = next;
       });
 
-      work.last().then((missed) => {
-        if (!heard) {
-          value = missed;
-        }
-      });
+      // Asked only once both are listening: the start of a Capture may be heard
+      // while its end slips past a listener not yet in place.
+      Promise.all([began, completed])
+        .then(() => {
+          heard = false;
+          return work.last();
+        })
+        .then((missed) => {
+          if (!heard) {
+            value = missed;
+          }
+        });
 
       return () => {
         for (const listening of [began, completed]) {

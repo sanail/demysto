@@ -1,6 +1,8 @@
 //! The Palette: the window the Hotkey opens, over whatever the user is reading.
 
 use std::sync::atomic::AtomicBool;
+use std::sync::{mpsc, Mutex};
+use std::time::Duration;
 
 use demysto_core::{CaptureError, CaptureOutcome, Demysto};
 use tauri::{
@@ -22,6 +24,13 @@ const CAPTURING_EVENT: &str = "palette://capturing";
 
 /// How close the Palette may come to the edge of the screen, in logical pixels.
 const SCREEN_MARGIN: f64 = 8.0;
+
+/// How long a Palette that has been handed a Capture is given to say it has
+/// drawn it and fitted itself, before it is shown anyway.
+const READY_WITHIN: Duration = Duration::from_millis(500);
+
+/// Told when the Palette says it is ready, while a Capture waits to show it.
+static WAITING: Mutex<Option<mpsc::Sender<()>>> = Mutex::new(None);
 
 /// Whether the Palette is in the middle of opening. Held through
 /// [`Underway`] rather than touched directly; see that module for why the
@@ -81,9 +90,8 @@ pub fn area<R: Runtime>(app: &AppHandle<R>) {
         };
 
         let _ = position_on_screen(app, window);
-        let _ = window.emit(CAPTURED_EVENT, &outcome);
 
-        show(app, window);
+        show_with(app, window, &outcome);
     });
 }
 
@@ -126,12 +134,31 @@ fn open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
 
     let _ = position_on_screen(app, window);
 
-    // Also before the window is shown, so that what it comes up showing is this
-    // Capture rather than the one before it. A window that has never loaded
-    // hears neither event, and asks for the Capture itself when it mounts.
-    let _ = window.emit(CAPTURED_EVENT, &outcome);
+    show_with(app, window, &outcome);
+}
 
+/// Hands the Palette a Capture and shows it once it has drawn it and fitted
+/// itself, so that it does not resize in front of the user.
+///
+/// A window that has never loaded hears nothing and never answers: it asks for
+/// the Capture itself when it mounts, and is shown after [`READY_WITHIN`] all
+/// the same.
+fn show_with<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>, outcome: &CaptureOutcome) {
+    let (tell, told) = mpsc::channel();
+    *WAITING.lock().unwrap() = Some(tell);
+
+    let _ = window.emit(CAPTURED_EVENT, outcome);
+    let _ = told.recv_timeout(READY_WITHIN);
+
+    WAITING.lock().unwrap().take();
     show(app, window);
+}
+
+/// Lets a Capture waiting in [`show_with`] show the Palette.
+pub fn ready() {
+    if let Some(tell) = WAITING.lock().unwrap().take() {
+        let _ = tell.send(());
+    }
 }
 
 /// Fits the Palette to the height its content asks for, in logical pixels, as
@@ -457,6 +484,10 @@ fn on_the_display(frame: &gtk::ApplicationWindow) -> Option<gdkx11::X11Window> {
 #[cfg(target_os = "macos")]
 fn show<R: Runtime>(app: &AppHandle<R>, _window: &WebviewWindow<R>) {
     use tauri_nspanel::ManagerExt;
+
+    // tao resizes and moves a window on the main dispatch queue, which the event
+    // loop does not wait for: the panel would come up before its fit lands.
+    dispatch2::DispatchQueue::main().exec_sync(|| {});
 
     on_main_thread(app, |app| {
         if let Ok(panel) = app.get_webview_panel(LABEL) {

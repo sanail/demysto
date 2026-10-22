@@ -1,4 +1,4 @@
-from _demysto import APP, configured_launch, nonce, palette_hotkey, say
+from _demysto import APP, configured_launch, nonce, palette_hotkey, say, check_no_resize, watch_the_palette
 
 LAUNCH = False
 # What this measures is the same in every Lab language.
@@ -30,8 +30,10 @@ def scenario(g):
 
     g.set_clipboard("")
     g.focus(staged["app"])
+    watching = watch_the_palette(g)
     g.press(palette_hotkey(g))
     empty = g.wait_for(text=say(g, "palette-nothing-captured"), app=APP, timeout=15)
     g.check("with an empty clipboard the Palette says nothing is selected", empty["met"], detail=empty)
+    check_no_resize(g, watching, "saying nothing is selected,")
     g.press("escape")
     g.close_staged(staged)

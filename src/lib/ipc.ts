@@ -122,9 +122,12 @@ export function dismiss(): Promise<void> {
   return invoke<void>("dismiss");
 }
 
-/** Fits the Palette to the height its content takes, in CSS pixels. */
-export function fitPalette(height: number): Promise<void> {
-  return invoke<void>("fit_palette", { height });
+/**
+ * Fits the Palette to the height its content takes, in CSS pixels; `ready`
+ * once that content is the whole of a Capture, which lets it be shown.
+ */
+export function fitPalette(height: number, ready: boolean): Promise<void> {
+  return invoke<void>("fit_palette", { height, ready });
 }
 
 /**
