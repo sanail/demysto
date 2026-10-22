@@ -2,6 +2,39 @@
 
 What each release brought, newest first.
 
+## 1.2.0 — 2026-10-22
+
+### Palette
+
+- The Palette shows the captured picture whole, fitted above the Actions,
+  instead of a strip cut from its top-left corner.
+- The Palette is as tall as what it shows, up to ten Actions or the bottom of
+  the screen, and opens centred on the screen the pointer is on.
+- The Palette appears already filled in and at its final size instead of
+  resizing in front of you.
+
+### Chat
+
+- A click or Enter on the picture in the chat opens it over the chat, fitted to
+  the window; a click or Escape closes it. It is the picture the Model was last
+  sent: the fitted one, or the original once you ask again at the original
+  resolution.
+
+### Capture
+
+- Reading the Selection no longer fails when the clipboard holds a picture that
+  cannot be read. That picture is not put back on the clipboard afterwards.
+
+### Settings
+
+- The two Default Model fields are named for what each serves, "Default Model
+  for text" and "Default Model for pictures", and stay level in every language.
+
+### Security
+
+- markdown-it, which renders the Model's answers, is updated past its security
+  advisory.
+
 ## 1.1.0 — 2026-10-14
 
 ### Capture
