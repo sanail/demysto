@@ -162,7 +162,7 @@ settings-provider-answered = { $model } hat geantwortet.
 ### Defaults
 
 settings-defaults = Standardwerte
-settings-default-model = Standardmodell — sofern eine Aktion kein eigenes nennt
+settings-default-model = Standardmodell für Text
 settings-default-vision-model = Standardmodell für Bilder
 settings-model-none = Keines
 settings-model-does-not-see = { $model } (sieht keine Bilder)

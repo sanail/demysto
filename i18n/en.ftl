@@ -163,7 +163,7 @@ settings-provider-answered = { $model } answered.
 ### Defaults
 
 settings-defaults = Defaults
-settings-default-model = Default Model — used unless an Action names its own
+settings-default-model = Default Model for text
 settings-default-vision-model = Default Model for pictures
 settings-model-none = None
 settings-model-does-not-see = { $model } (does not see)

@@ -158,7 +158,7 @@ settings-provider-answered = { $model } ответила.
 ### Defaults
 
 settings-defaults = Умолчания
-settings-default-model = Модель по умолчанию — если действие не указывает свою
+settings-default-model = Модель по умолчанию для текста
 settings-default-vision-model = Модель по умолчанию для изображений
 settings-model-none = Нет
 settings-model-does-not-see = { $model } (не видит изображений)

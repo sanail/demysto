@@ -13,6 +13,8 @@ import zlib
 HERE = pathlib.Path(__file__).parent
 # Found by walking up, so that Scenarios outside .vmlab/scenarios (ad-hoc ones) read them too.
 CATALOGUES = next(p / "i18n" for p in [HERE.resolve(), *HERE.resolve().parents] if (p / "i18n").is_dir())
+# Every interface language Demysto has a catalogue for.
+CATALOGUE_LANGUAGES = sorted(p.stem for p in CATALOGUES.glob("*.ftl"))
 
 # The name each interface language goes by in the welcome flow's language list.
 LANGUAGE_NAMES = {"en": "English", "ru": "Русский"}
@@ -525,3 +527,17 @@ def configured_launch(g, actions=None, settings=""):
     configure(g, actions, settings)
     g.launch()
     approve_shortcuts(g)
+
+
+def nodes(tree):
+    stack = [tree]
+    while stack:
+        n = stack.pop()
+        yield n
+        stack.extend(n.get("children") or [])
+
+
+def largest_window(tree):
+    """The bounds of the app's largest window in a UI tree."""
+    windows = [n for n in nodes(tree) if n["role"] == "window" and n.get("bounds")]
+    return max(windows, key=lambda n: n["bounds"]["w"] * n["bounds"]["h"])["bounds"]

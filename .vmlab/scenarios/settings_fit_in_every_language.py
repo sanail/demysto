@@ -1,25 +1,13 @@
-import pathlib
-
-from _demysto import APP, CATALOGUES, approve_shortcuts, configure, say, tray
+from _demysto import APP, CATALOGUE_LANGUAGES, approve_shortcuts, configure, largest_window, nodes, say, tray
 
 LAUNCH = False
 TIMEOUT = 1200
 # An en-US Lab measures every catalogue; another Lab language adds nothing.
 LANGUAGES = ["en-US"]
 
-# Every interface language Demysto has a catalogue for.
-CATALOGUE_LANGUAGES = sorted(p.stem for p in pathlib.Path(CATALOGUES).glob("*.ftl"))
 TABS = ["settings-tab-models", "settings-tab-actions", "settings-tab-general", "settings-tab-about"]
 CONTROLS = {"button", "tab", "radiobutton", "textfield", "textarea", "combobox", "checkbox"}
 SLACK = 1  # a logical pixel of rounding between how the toolkit and the window report bounds
-
-
-def nodes(tree):
-    stack = [tree]
-    while stack:
-        n = stack.pop()
-        yield n
-        stack.extend(n.get("children") or [])
 
 
 def visible(b, win, slack):
@@ -29,8 +17,7 @@ def visible(b, win, slack):
 def misfits(g, lang, slack):
     """What sticks out of the Settings window sideways, and which controls overlap."""
     tree = g.tree(app=APP)
-    windows = [n for n in nodes(tree) if n["role"] == "window" and n.get("bounds")]
-    win = max(windows, key=lambda n: n["bounds"]["w"] * n["bounds"]["h"])["bounds"]
+    win = largest_window(tree)
     shown = [n for n in nodes(tree) if n["role"] not in ("desktop", "application", "window", "menuitem", "menubar", "menu")
              and visible(n.get("bounds"), win, slack)]
     outside = [f'{n["role"]} {n.get("name") or n.get("value")!r} {n["bounds"]}' for n in shown

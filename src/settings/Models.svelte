@@ -507,7 +507,7 @@
   <div class="grid grid-cols-2 gap-3">
     <label class="flex flex-col gap-1">
       <span class="text-xs opacity-60">{t("settings-default-model")}</span>
-      <select bind:value={defaultModel} class={FIELD}>
+      <select bind:value={defaultModel} class="{FIELD} mt-auto">
         <option value="">{t("settings-model-none")}</option>
         {#each nominable as model (model.name)}
           <option value={model.name}>{model.name}</option>
@@ -519,7 +519,7 @@
       <span class="text-xs opacity-60">
         {t("settings-default-vision-model")}
       </span>
-      <select bind:value={defaultVisionModel} class={FIELD}>
+      <select bind:value={defaultVisionModel} class="{FIELD} mt-auto">
         <option value="">{t("settings-model-none")}</option>
         {#each nominable as model (model.name)}
           <option value={model.name}>

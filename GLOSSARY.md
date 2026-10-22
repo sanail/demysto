@@ -7,7 +7,7 @@ Demysto is a resident desktop utility that turns whatever the user is looking at
 ### What the user acts on
 
 **Selection**:
-The input a Run operates on, captured at invocation time. Its kind is one of text, image, or file, and names what a Model is handed rather than where Demysto found it: a picture read from the clipboard and a picture opened from a path reach a Model the same way, so both are image Selections. Where it came from is the Capture's business, not the kind's.
+The input a Run operates on, captured at invocation time. Its kind is text or image, and names what a Model is handed rather than where Demysto found it: a picture read from the clipboard and a picture opened from a path reach a Model the same way, so both are image Selections. Where it came from is the Capture's business, not the kind's.
 _Avoid_: input, content, context, payload
 
 **Capture**:
@@ -61,7 +61,7 @@ A specific model offered by a Provider, together with the capabilities Demysto n
 _Avoid_: LLM, engine, deployment
 
 **Default Model**:
-The Model used by any Action that does not bind one of its own.
+The Model that serves a text Selection for any Action that binds no Model of its own.
 
 **Default Vision Model**:
 The Model used by any Action whose Selection is an image and that does not bind one of its own. Separate from the Default Model because the cheap everyday Model usually cannot see.
