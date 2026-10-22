@@ -134,6 +134,45 @@ fn open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     show(app, window);
 }
 
+/// Fits the Palette to the height its content asks for, in logical pixels, as
+/// far as the work area allows, and centres it again at that height.
+pub fn fit<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &WebviewWindow<R>,
+    height: f64,
+) -> tauri::Result<()> {
+    let Some(screen) = window.current_monitor()? else {
+        return Ok(());
+    };
+
+    let scale = screen.scale_factor();
+    let work_area = *screen.work_area();
+    // The width is the configured one rather than the drawn one: on Windows the
+    // outer size takes in a frame the inner size does not, and the Palette
+    // would widen by it on every fit.
+    let size: PhysicalSize<u32> = LogicalSize::new(
+        configured_size(app).map_or(0.0, |configured| configured.width),
+        fitted_height(height, work_area.size.height, scale),
+    )
+    .to_physical(scale);
+
+    window.set_size(size)?;
+
+    let (outer, inner) = (window.outer_size()?, window.inner_size()?);
+    let framed = PhysicalSize::new(
+        size.width + outer.width.saturating_sub(inner.width),
+        size.height + outer.height.saturating_sub(inner.height),
+    );
+
+    window.set_position(placement(work_area, framed, scale))
+}
+
+/// The height asked for, cut down to what fits between the work area's
+/// margins; `work_area` is physical, the rest logical.
+fn fitted_height(asked: f64, work_area: u32, scale: f64) -> f64 {
+    asked.min(f64::from(work_area) / scale - 2.0 * SCREEN_MARGIN)
+}
+
 /// Puts the Palette in the middle of the screen the pointer is on.
 ///
 /// Not beside the pointer: the pointer is often nowhere near what is being
@@ -174,20 +213,22 @@ fn logical_size<R: Runtime>(
         return Ok(drawn.to_logical(window.scale_factor()?));
     }
 
-    Ok(app
-        .config()
+    Ok(configured_size(app).unwrap_or_else(|| drawn.to_logical(1.0)))
+}
+
+/// The size the Palette is configured with in `tauri.conf.json`.
+fn configured_size<R: Runtime>(app: &AppHandle<R>) -> Option<LogicalSize<f64>> {
+    app.config()
         .app
         .windows
         .iter()
         .find(|configured| configured.label == LABEL)
-        .map_or(drawn.to_logical(1.0), |configured| {
-            LogicalSize::new(configured.width, configured.height)
-        }))
+        .map(|configured| LogicalSize::new(configured.width, configured.height))
 }
 
-/// Where the Palette's top-left corner goes on a screen: centred across its
-/// work area, the top edge a quarter of the way down, and kept off the edges
-/// by [`SCREEN_MARGIN`], which `scale` turns into physical pixels.
+/// Where the Palette's top-left corner goes on a screen: centred on its work
+/// area both ways, and kept off the edges by [`SCREEN_MARGIN`], which `scale`
+/// turns into physical pixels.
 fn placement(
     work_area: PhysicalRect<i32, u32>,
     size: PhysicalSize<u32>,
@@ -205,7 +246,7 @@ fn placement(
     let margin = SCREEN_MARGIN * scale;
 
     let x = left + (width - wide) / 2.0;
-    let y = top + height / 4.0;
+    let y = top + (height - tall) / 2.0;
 
     // `max` after `min`, so that a window larger than the screen still has its
     // top-left corner on it rather than off the near edge.
@@ -494,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    fn the_palette_is_centred_a_quarter_of_the_way_down_the_work_area() {
+    fn the_palette_is_centred_on_the_work_area_both_ways() {
         // A work area that starts away from the origin, as one does beside a
         // menu bar or on a second screen to the left of the primary one.
         let at = placement(
@@ -503,7 +544,7 @@ mod tests {
             1.0,
         );
 
-        assert_eq!(at, PhysicalPosition::new(-1260.0, 300.0));
+        assert_eq!(at, PhysicalPosition::new(-1260.0, 350.0));
     }
 
     #[test]
@@ -515,9 +556,13 @@ mod tests {
     }
 
     #[test]
-    fn a_palette_taller_than_the_room_below_a_quarter_stays_centred_across() {
-        let at = placement(area(0, 0, 1000, 800), PhysicalSize::new(400, 700), 2.0);
+    fn the_height_asked_for_is_kept_while_the_work_area_has_room() {
+        assert_eq!(fitted_height(240.0, 1600, 2.0), 240.0);
+    }
 
-        assert_eq!(at, PhysicalPosition::new(300.0, 84.0));
+    #[test]
+    fn the_height_stops_at_the_work_area_less_both_margins() {
+        // 1600 physical pixels at 2x are 800 logical, less 8 above and below.
+        assert_eq!(fitted_height(1000.0, 1600, 2.0), 784.0);
     }
 }

@@ -67,10 +67,9 @@ def scenario(g):
     # moves there without a click, which could open what the desktop shows in a corner.
     for at, corner in [((x + width - 40 * scale, y + 40 * scale), "top-right"),
                        ((x + 40 * scale, y + height - 120 * scale), "bottom-left")]:
-        bounds = opened_with_pointer_at(g, at, corner) or {"x": None, "y": None, "w": 0}
-        expected = (x + (width - bounds["w"]) / 2, y + height / 4)
-        g.check(f"with the pointer in the {corner} corner the Palette is centred a quarter of "
-                "the way down the work area",
+        bounds = opened_with_pointer_at(g, at, corner) or {"x": None, "y": None, "w": 0, "h": 0}
+        expected = (x + (width - bounds["w"]) / 2, y + (height - bounds["h"]) / 2)
+        g.check(f"with the pointer in the {corner} corner the Palette is centred on the work area",
                 bounds["x"] is not None
                 and abs(bounds["x"] - expected[0]) <= slack and abs(bounds["y"] - expected[1]) <= slack,
                 detail={"work area": [x, y, width, height], "expected": expected, "bounds": bounds})

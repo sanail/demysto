@@ -4,6 +4,7 @@
     actions as offeredActions,
     capturedPicture,
     dismiss,
+    fitPalette,
     lastCapture,
     onCapture,
     onCapturing,
@@ -41,7 +42,7 @@
 
   /**
    * The sentence a session that cannot read a Selection is owed, `null`
-   * everywhere else (user story 56).
+   * everywhere else.
    *
    * Said here rather than carried from the backend: the sentence is a sentence
    * like any other, and the catalogue is where they live. What the backend says
@@ -99,6 +100,14 @@
   /** Whichever field is on screen: there is never more than one. */
   let field = $state<HTMLInputElement | null>(null);
 
+  /** The window's frame, its body, and the list of Actions, to be measured. */
+  let frame = $state<HTMLElement | null>(null);
+  let body = $state<HTMLElement | null>(null);
+  let list = $state<HTMLElement | null>(null);
+
+  /** How many Actions the Palette lists before the list scrolls. */
+  const VISIBLE_ACTIONS = 10;
+
   /** What stopped the user being sent somewhere, in the backend's own words. */
   let unreachable = $state<string | null>(null);
 
@@ -126,7 +135,7 @@
     }
   }
 
-  /** Walks the user to the permission macOS is withholding (user story 55). */
+  /** Walks the user to the permission macOS is withholding */
   async function grant() {
     unreachable = await sending(openAccessibility);
   }
@@ -198,6 +207,40 @@
       stale = true;
     };
   });
+
+  // Fitted to what each Capture brought and not to anything typed after it:
+  // filtering and collecting a Parameter leave room rather than resize the Palette.
+  $effect(() => {
+    void outcome;
+    void offered;
+    void unreachable;
+
+    tick().then(fit);
+  });
+
+  /**
+   * Asks for the height that shows everything above and below the list and up
+   * to `VISIBLE_ACTIONS` Actions in it, whatever the window's height now squeezes.
+   */
+  function fit() {
+    if (!frame || !body) return;
+
+    // Plus `scrollTop`: focusing the field scrolls a squeezed body, however
+    // hidden its overflow.
+    const content = body.lastElementChild
+      ? body.lastElementChild.getBoundingClientRect().bottom -
+        body.getBoundingClientRect().top +
+        body.scrollTop
+      : 0;
+    const row = list?.firstElementChild?.getBoundingClientRect().height ?? 0;
+    const squeezed = list
+      ? Math.min(list.scrollHeight, row * VISIBLE_ACTIONS) - list.clientHeight
+      : 0;
+
+    fitPalette(
+      Math.ceil(frame.offsetHeight - body.clientHeight + content + squeezed),
+    );
+  }
 
   // The field is focused as the Palette opens and again as it moves between
   // listing Actions and collecting a Parameter, because each is a different
@@ -301,6 +344,7 @@
 <svelte:window onkeydown={onKeydown} />
 
 <main
+  bind:this={frame}
   class="flex h-screen flex-col gap-3 border border-black/10 bg-white p-4 font-sans
          text-neutral-900 dark:border-white/10 dark:bg-neutral-900 dark:text-neutral-100"
 >
@@ -321,13 +365,13 @@
          by nobody. It is drawn empty rather than not at all so that the one
          path that does change them in front of somebody — the tray or a
          second launch re-opening a Palette already on screen — has a region
-         to speak from (ticket 18). -->
+         to speak from. -->
     <span id="capture-origin" role="status" class="text-xs opacity-50"
       >{origin ?? ""}</span
     >
   </header>
 
-  <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+  <div bind:this={body} class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
     <!-- Named by that caption rather than headed by one of its own: reaching
          the captured text, a screen reader reads where it came from as part
          of it, and the window says nothing louder than it did. -->
@@ -405,7 +449,7 @@
       claimed is held rather than delivered: the Hotkey stops closing the
       Palette it has just opened, and an Action's own Hotkey stops running it,
       until a key ends the input session — Escape — and the whole queue arrives
-      at once (ticket 21). Neither field is prose: one filters a list of Actions
+      at once. Neither field is prose: one filters a list of Actions
       by name, the other collects a Parameter.
     -->
     {#if selection}
@@ -425,7 +469,7 @@
         <!-- The mouse's half of this step. Enter and Escape do the same and
              remain what the footer teaches: whoever reached here from the
              keyboard needs none of this, and whoever clicked an Action should
-             not be handed back to the keyboard to run it (user story 66). -->
+             not be handed back to the keyboard to run it. -->
         <div class="flex justify-end gap-2">
           <button type="button" class={BUTTON} onclick={back}>
             {t("palette-back")}
@@ -445,7 +489,7 @@
           autocorrect="off"
         />
 
-        <ul class="min-h-0 flex-1 overflow-y-auto">
+        <ul bind:this={list} class="min-h-0 overflow-y-auto">
           {#each matching as action, index (action.id)}
             <li>
               <button

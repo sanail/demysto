@@ -208,9 +208,9 @@ it turns out to be wanted.
 
 The **Palette** shows the whole picture where it shows two clamped lines of text
 for a text Selection, fitted and centred on no background in a box about 160 px
-high, the same for every picture, wide or tall: the Palette must not change size
-according to which picture was caught. It is there to show what the Capture
-caught, not only that it is the right picture.
+high, the same for every picture, wide or tall. It is there to show what the
+Capture caught, not only that it is the right picture. The Palette is as tall as
+the picture and the Actions under it need, as for any other Selection.
 
 The **Conversation** window shows the picture above the first Turn, and a button
 to ask again at the original resolution carrying the weight it will send

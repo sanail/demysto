@@ -122,6 +122,11 @@ export function dismiss(): Promise<void> {
   return invoke<void>("dismiss");
 }
 
+/** Fits the Palette to the height its content takes, in CSS pixels. */
+export function fitPalette(height: number): Promise<void> {
+  return invoke<void>("fit_palette", { height });
+}
+
 /**
  * Every request to close this window that did not come from Escape — the title
  * bar's button, and whatever else the desktop offers.

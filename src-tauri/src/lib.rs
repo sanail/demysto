@@ -212,6 +212,7 @@ pub fn run() {
             commands::provider_models,
             commands::verify_provider,
             commands::dismiss,
+            commands::fit_palette,
             commands::overlay_frame,
             commands::overlay_chosen,
         ])
