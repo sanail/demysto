@@ -1,8 +1,7 @@
 import collections
-import time
 
 from _demysto import (APP, configured_launch, copy_picture, mock, nonce, nothing_selected, palette_hotkey, pictures,
-                      say, screen_pixels, shows_answer)
+                      poll, say, screen_pixels, shows_answer)
 
 LAUNCH = False
 
@@ -30,17 +29,6 @@ def picture_bounds(rows, area):
     if not xs or not ys:
         return None
     return {"x": x0 + xs[0], "y": y0 + ys[0], "w": xs[-1] - xs[0] + 1, "h": ys[-1] - ys[0] + 1}
-
-
-def poll(read, done, timeout):
-    """read() until done(what it read) or timeout seconds pass; answers the
-    last read. For the focus, which wait_for cannot wait on."""
-    deadline = time.monotonic() + timeout
-    while True:
-        seen = read()
-        if done(seen) or time.monotonic() > deadline:
-            return seen
-        time.sleep(0.3)
 
 
 def open_picture(g, thumbnail, name):

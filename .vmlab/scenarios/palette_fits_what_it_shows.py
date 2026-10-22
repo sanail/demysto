@@ -1,11 +1,14 @@
 from _demysto import (APP, MANY_ACTIONS, check_fitted, check_no_resize, check_scrolls_to_last, configured_launch,
                       copy_picture, ink, listed, nonce, nothing_selected, palette_hotkey, palette_layout, picture_name,
-                      say, screen_pixels, watch_the_palette, work_area)
+                      poll, say, screen_pixels, watch_the_palette, work_area)
 
 LAUNCH = False
 
 # How far the Palette may stray from the middle of the work area, in logical pixels.
 SLACK = 2
+
+# The share of a window's pixels that stand out once the Palette is drawn in it.
+DRAWN = 0.005
 
 # Wider than the Palette's picture box by far more than it is tall, so that
 # shown whole it leaves a band above and below it; cropped, it would fill the box.
@@ -49,12 +52,13 @@ def scenario(g):
     staged, watching = open_on(g, text)
     shown = g.wait_for(text=text, app=APP, timeout=15)
     g.check("the first open after the launch shows the Selection", shown["met"], detail=shown)
-    # Taken at once: a window drawn only later was blank when it came up.
-    _, _, rows = screen_pixels(g, "first open")
+    # Watched for a while from the moment it shows: opened while its page still
+    # loads, a Palette may show an older frame at first; one not drawn stays blank.
+    window = palette_layout(g, choosing)[0]
+    drawn = poll(lambda: ink(screen_pixels(g, "first open")[2], window), lambda seen: seen > DRAWN, 3) if window else 0
+    g.check("the first open after the launch draws the Palette", drawn > DRAWN, detail={"ink": drawn, "window": window})
     check_no_resize(g, watching, "on the first open,")
     window, footer, actions = palette_layout(g, choosing)
-    drawn = ink(rows, window) if window else 0
-    g.check("the first open after the launch draws the Palette", drawn > 0.005, detail={"ink": drawn, "window": window})
     check_fitted(g, window, footer, "on a text Selection")
     check_centred(g, window, "on a text Selection")
     shows = listed(actions, footer) if footer else []

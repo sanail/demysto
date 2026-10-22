@@ -213,6 +213,17 @@ def screen_pixels(g, name):
     return decode_png(path.read_bytes())
 
 
+def poll(read, done, timeout):
+    """read() until done(what it read) or timeout seconds pass; answers the
+    last read. For what wait_for cannot wait on: the focus, pixels."""
+    deadline = time.monotonic() + timeout
+    while True:
+        seen = read()
+        if done(seen) or time.monotonic() > deadline:
+            return seen
+        time.sleep(0.3)
+
+
 def ink(rows, bounds):
     """The share of the pixels inside bounds that stand out from their
     commonest colour: none at all is a window that was not drawn."""
