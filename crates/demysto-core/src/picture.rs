@@ -107,12 +107,8 @@ impl Picture {
         Some(Self { fitted, original })
     }
 
-    /// What a Run sends, and what a window shows: the picture fitted to the
-    /// ceiling.
-    ///
-    /// One method for both, because it is one picture: showing the original
-    /// would cross megabytes to draw something a few hundred pixels wide, and
-    /// sending it is what the button is for.
+    /// The picture fitted to the ceiling: what a Run sends, and what a window
+    /// shows, until somebody asks again at the original resolution.
     pub(crate) fn fitted(&self) -> &Arc<Png> {
         &self.fitted
     }

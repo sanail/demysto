@@ -100,6 +100,7 @@
       // again because it was not necessarily what held the focus when the
       // window was closed.
       onReopened(async () => {
+        enlarged = false;
         await refresh();
         composer?.focus();
       }),
@@ -244,6 +245,15 @@
    */
   let shown = $state<string | null>(null);
 
+  /** Whether the picture is open over the Conversation. */
+  let enlarged = $state(false);
+
+  /** The thumbnail, which the focus goes back to when the picture closes. */
+  let thumbnail = $state<HTMLButtonElement>();
+
+  /** The open picture, which holds the focus while it is open. */
+  let enlargement = $state<HTMLElement>();
+
   /**
    * Whether this Conversation can still be added to. A Sealed one cannot: the
    * picture it is about has been let go of, and there is nothing left to
@@ -275,22 +285,45 @@
     expanded = false;
     whole = null;
     shown = null;
-
-    // A picture is asked for as the Conversation arrives rather than when
-    // somebody expands it, unlike the rest of a text Selection: it is what this
-    // window shows above the first Turn, not something behind a Show more.
-    if (showing?.picture && !showing.picture.sealed) {
-      let stale = false;
-
-      picture().then((held) => {
-        if (!stale) shown = held;
-      });
-
-      return () => {
-        stale = true;
-      };
-    }
+    enlarged = false;
   });
+
+  /** Which picture `shown` was asked for, so that a late answer to an older ask is dropped. */
+  let picturing: string | null = null;
+
+  // Asked for as the Conversation arrives, since it shows above the first Turn,
+  // and again once the original is sent: what is shown is what the Model got.
+  $effect(() => {
+    const wanted =
+      showing?.picture && !showing.picture.sealed
+        ? `${showing.id}:${showing.picture.original}`
+        : null;
+    if (wanted === picturing) return;
+
+    picturing = wanted;
+    if (wanted === null) {
+      // A Sealed Conversation's picture is let go of here too, not only in the core.
+      shown = null;
+      return;
+    }
+
+    picture().then((held) => {
+      if (picturing === wanted) shown = held;
+    });
+  });
+
+  async function enlarge() {
+    enlarged = true;
+    await tick();
+    enlargement?.focus();
+  }
+
+  async function shrink() {
+    enlarged = false;
+    // An inert element takes no focus, so not before the window is live again.
+    await tick();
+    thumbnail?.focus();
+  }
 
   /**
    * What asking again at the original resolution would send, as somebody reads
@@ -588,9 +621,10 @@
 
     event.preventDefault();
 
-    // The way out of a list is the list: Escape closes it, and only closes the
-    // window from there.
-    if (listing) {
+    // Escape closes an open picture or list first, and only then the window.
+    if (enlarged) {
+      shrink();
+    } else if (listing) {
       close();
     } else {
       dismiss();
@@ -610,6 +644,7 @@
 <svelte:window onkeydown={onKeydown} onresize={measure} />
 
 <main
+  inert={enlarged}
   class="flex h-screen flex-col gap-3 bg-white p-6 font-sans text-neutral-900
          dark:bg-neutral-900 dark:text-neutral-100"
 >
@@ -702,13 +737,20 @@
           </p>
         {:else}
           {#if shown}
-            <img
-              src={shown}
-              onload={keepUp}
-              alt={showing.preview ?? ""}
-              class="max-h-64 max-w-full rounded border border-neutral-200
-                     object-contain dark:border-neutral-700"
-            />
+            <button
+              bind:this={thumbnail}
+              type="button"
+              class="max-w-full cursor-zoom-in"
+              onclick={enlarge}
+            >
+              <img
+                src={shown}
+                onload={keepUp}
+                alt={showing.preview ?? ""}
+                class="max-h-64 max-w-full rounded border border-neutral-200
+                       object-contain dark:border-neutral-700"
+              />
+            </button>
           {/if}
 
           <!-- The recovery ADR-0017 puts after the answer, where the evidence
@@ -980,3 +1022,24 @@
     {/if}
   </footer>
 </main>
+
+{#if enlarged && shown}
+  <!-- Fitted with no zoom: what is being checked is what the Model was given. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div
+    bind:this={enlargement}
+    role="dialog"
+    aria-modal="true"
+    aria-label={t("result-picture-label")}
+    tabindex="-1"
+    class="fixed inset-0 flex cursor-zoom-out items-center justify-center
+           bg-white p-6 outline-none dark:bg-neutral-900"
+    onclick={shrink}
+  >
+    <img
+      src={shown}
+      alt={showing?.preview ?? ""}
+      class="h-full w-full object-contain"
+    />
+  </div>
+{/if}

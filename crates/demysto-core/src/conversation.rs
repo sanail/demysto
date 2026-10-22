@@ -601,9 +601,21 @@ impl Conversation {
     }
 
     /// The picture this Conversation is about, as the window shows one. `None`
-    /// where it is about words, and where the picture has been let go of.
+    /// where it is about words, and where the picture has been let go of. The
+    /// one last sent, so that a misread answer can be checked against it.
     pub(crate) fn picture_url(&self) -> Option<String> {
-        self.selection.as_ref().and_then(Selection::picture_url)
+        self.picture_sent().map(|png| png.url())
+    }
+
+    /// The picture a Turn sends: the fitted one until somebody asks again at
+    /// the original resolution, the original from then on.
+    fn picture_sent(&self) -> Option<&Arc<Png>> {
+        let picture = self.selection.as_ref()?.as_picture()?;
+
+        Some(match self.at_original_resolution() {
+            true => picture.original(),
+            false => picture.fitted(),
+        })
     }
 
     /// What holding this Conversation's picture costs, `None` where it holds
@@ -714,7 +726,7 @@ impl Conversation {
     /// is a second question answered from the Model's memory of its own first
     /// answer.
     fn carrying_the_picture(&self, said: &mut [(&'static str, Said)]) {
-        let Some(picture) = self.selection.as_ref().and_then(Selection::as_picture) else {
+        let Some(picture) = self.picture_sent().map(Arc::clone) else {
             return;
         };
 
@@ -728,10 +740,7 @@ impl Conversation {
 
         *first = Said::WordsAndPicture {
             text: std::mem::take(text),
-            picture: match self.at_original_resolution() {
-                true => Arc::clone(picture.original()),
-                false => Arc::clone(picture.fitted()),
-            },
+            picture,
         };
     }
 

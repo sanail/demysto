@@ -66,9 +66,8 @@ impl Selection {
         }
     }
 
-    /// The picture as a window shows one, `None` for a Selection made of
-    /// words. The one place that walk is written down, because two callers ask
-    /// it: the Conversation on screen, and the Capture the Palette is showing.
+    /// The fitted picture as the Palette's thumbnail shows it, `None` for a
+    /// Selection made of words.
     pub(crate) fn picture_url(&self) -> Option<String> {
         self.as_picture().map(|picture| picture.fitted().url())
     }

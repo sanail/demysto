@@ -69,6 +69,9 @@ the price of doing so written on the button.
 79. As a reader who has asked again, I want the rest of that Conversation to
     stay at the original resolution, so that the second question is not answered
     worse than the first.
+96. As a reader whose answer misread the picture, I want to open the picture in
+    the chat large, as the Model was last sent it, so that I can see whether
+    fitting is why.
 
 ### Models
 
@@ -219,6 +222,12 @@ to ask again at the original resolution carrying the weight it will send
 the same Selection, and every Turn after it in that Conversation sends the
 original too: a person who asked for resolution asked because of a detail, and
 the question after that one is about the same detail.
+
+The picture the Conversation shows is the one last sent: the fitted one until
+somebody asks again at the original resolution, the original from then on.
+Clicking it, or Enter on it, opens it over the Conversation, fitted to the window, with
+no zoom and no caption; a click or Escape closes it and gives the focus back to
+the picture. The Palette's thumbnail does not open.
 
 There is **no setting** governing this, in Settings, in the Palette or in an
 Action file — ADR-0017.

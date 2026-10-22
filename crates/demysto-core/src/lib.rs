@@ -6281,6 +6281,44 @@ mod tests {
     }
 
     #[test]
+    fn the_window_shows_the_picture_last_sent() {
+        // Somebody looking at a misread answer is looking for what the Model
+        // was given, so the window shows it rather than the clearer one.
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .expect(2)
+            .create();
+        let (fitted, original) = fitted_and_original(2000, 100);
+
+        let demysto = ready_to_look(&server, 2000, 100);
+        running(&demysto, "describe-image", &[]);
+        assert_eq!(demysto.picture(), Some(fitted));
+
+        demysto.ask_at_original_resolution(|_| {});
+        assert_eq!(demysto.picture(), Some(original));
+    }
+
+    #[test]
+    fn a_picture_never_fitted_is_shown_the_same_both_times() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .expect(2)
+            .create();
+        let (fitted, _) = fitted_and_original(8, 6);
+
+        let demysto = ready_to_look(&server, 8, 6);
+        running(&demysto, "describe-image", &[]);
+        assert_eq!(demysto.picture().as_ref(), Some(&fitted));
+
+        demysto.ask_at_original_resolution(|_| {});
+        assert_eq!(demysto.picture(), Some(fitted));
+    }
+
+    #[test]
     fn asking_again_at_the_original_resolution_does_not_add_a_turn() {
         // The same question asked a second time, as a retry is: a Conversation
         // that accumulated one copy of it per attempt would send every attempt
