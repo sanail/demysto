@@ -276,7 +276,8 @@
   let quoting: number | null = null;
 
   // A different Conversation is a different Selection: the quotation opens
-  // closed again rather than standing expanded on somebody else's text.
+  // closed again rather than standing expanded on somebody else's text, and
+  // the picture closes, leaving the focus in the box rather than nowhere.
   $effect(() => {
     const id = showing?.id ?? null;
     if (id === quoting) return;
@@ -285,7 +286,10 @@
     expanded = false;
     whole = null;
     shown = null;
-    enlarged = false;
+    if (enlarged) {
+      enlarged = false;
+      tick().then(() => composer?.focus());
+    }
   });
 
   /** Which picture `shown` was asked for, so that a late answer to an older ask is dropped. */

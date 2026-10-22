@@ -136,8 +136,26 @@ def scenario(g):
     kept, seen = shows_answer(g, answer, timeout=5)
     g.check("Escape leaves the window open", kept, detail=seen)
 
+    # With the open picture gone, the focus must land in the box, not on nothing.
+    g.click(text=thumbnail["name"], role="button", app=APP)
+    opened = g.wait_for(text=say(g, "result-picture-enlarged-label"), app=APP, timeout=10)
+    g.check("the picture opens again", opened["met"], detail=opened)
+    if not opened["met"]:
+        return
+    g.press(palette_hotkey(g))
+    shown = g.wait_for(text=say(g, "palette-picture", dimensions=f"{WIDTH} × {HEIGHT}"), app=APP, timeout=15)
+    g.check("the Palette opens over the open picture", shown["met"], detail=shown)
+    g.type(say(g, "action-describe-image-name"))
+    g.press("enter")
+    left = g.wait_for(text=say(g, "result-picture-enlarged-label"), app=APP, gone=True, timeout=15)
+    g.check("a new Run closes the open picture", left["met"], detail=left)
+    # A textarea is a text field to some accessibility trees.
+    focused = poll(lambda: [m for role in ("textarea", "textfield")
+                            for m in g.find(role=role, app=APP)["matches"] if m.get("focused")], bool, 5)
+    g.check("after a new Run, the focus is in the box", focused != [], detail=focused)
+
     g.press("escape")
     gone = g.wait_for(text=answer, app=APP, gone=True, timeout=10)
-    g.check("a second Escape closes the window", gone["met"], detail=gone)
+    g.check("Escape from the box closes the window", gone["met"], detail=gone)
     if staged:
         g.close_staged(staged)
