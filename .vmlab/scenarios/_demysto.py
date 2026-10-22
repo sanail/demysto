@@ -414,6 +414,28 @@ def copy_picture(g, width, height):
         g.wait_for(exec=["sh", "-c", "xclip -selection clipboard -t TARGETS -o | grep -q image/png"], timeout=10)
 
 
+def copy_a_broken_picture(g):
+    """Puts bytes that are no picture on the Guest's clipboard, under the type
+    each OS keeps pictures in."""
+    junk = bytes(range(1, 65))
+    if g.os == "windows":
+        # The format browsers copy pictures in.
+        path = g.put(r"%TEMP%\demysto-bad-picture.png", junk)
+        script = g.put(r"%TEMP%\demysto-bad-picture.ps1", (
+            "param([string]$Path)\n"
+            "Add-Type -AssemblyName System.Windows.Forms\n"
+            "$data = New-Object System.Windows.Forms.DataObject\n"
+            "$data.SetData('PNG', (New-Object System.IO.MemoryStream(,[IO.File]::ReadAllBytes($Path))))\n"
+            "[System.Windows.Forms.Clipboard]::SetDataObject($data, $true)\n"))
+        g.exec(["powershell", "-STA", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, path])
+    elif g.os == "macos":
+        g.exec(["osascript", "-e", f'set the clipboard to «data PNGf{junk.hex().upper()}»'])
+    else:
+        path = g.put("/tmp/demysto-bad-picture.png", junk)
+        g.spawn(["xclip", "-quiet", "-selection", "clipboard", "-t", "image/png", "-i", path])
+        g.wait_for(exec=["sh", "-c", "xclip -selection clipboard -t TARGETS -o | grep -q image/png"], timeout=10)
+
+
 GNOME_SHORTCUTS = "gnome-control-center-global-shortcuts-provider"
 
 

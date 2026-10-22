@@ -1,5 +1,5 @@
-from _demysto import (APP, check_fitted, check_no_resize, configured_launch, nonce, nothing_selected, palette_hotkey,
-                      palette_layout, say, watch_the_palette)
+from _demysto import (APP, check_fitted, check_no_resize, configured_launch, copy_a_broken_picture, nonce,
+                      nothing_selected, palette_hotkey, palette_layout, say, watch_the_palette)
 
 LAUNCH = False
 
@@ -16,13 +16,7 @@ def break_the_capture(g):
         g.exec(["sudo", "-n", "sqlite3", TCC, f"UPDATE access SET auth_value = 0 WHERE {ACCESSIBILITY}"])
         return say(g, "capture-no-accessibility")
     if g.os == "windows":
-        # A picture that is not one, under the format browsers copy pictures in.
-        script = g.put(r"%TEMP%\demysto-bad-picture.ps1", (
-            "Add-Type -AssemblyName System.Windows.Forms\n"
-            "$data = New-Object System.Windows.Forms.DataObject\n"
-            "$data.SetData('PNG', (New-Object System.IO.MemoryStream(,[byte[]](1..64))))\n"
-            "[System.Windows.Forms.Clipboard]::SetDataObject($data, $true)\n"))
-        g.exec(["powershell", "-STA", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script])
+        copy_a_broken_picture(g)
     else:
         # Text that is not UTF-8 under the type that promises it; on Wayland it
         # reaches Demysto through Xwayland.

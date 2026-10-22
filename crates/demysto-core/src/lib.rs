@@ -775,9 +775,9 @@ impl Demysto {
     /// about before it is paid for. `None` for one that is not, and for a user
     /// who has turned the warning off.
     ///
-    /// It warns and does not refuse. Nothing is cut and nothing is split — the
-    /// spec puts both out of scope for v1 — so the only honest thing to do with
-    /// a large Selection is send it and say that it was large.
+    /// It warns and does not refuse. Nothing is cut and nothing is split, so the
+    /// only honest thing to do with a large Selection is send it and say that it
+    /// was large.
     fn warning(&self, selection: &Selection) -> Option<String> {
         let held = self.config.read().unwrap();
         let config = held.as_ref().ok()?;
@@ -1656,7 +1656,7 @@ mod tests {
 
     #[test]
     fn a_capture_that_displaced_a_picture_puts_it_back() {
-        // The guarantee v1 gave for text, now covering pictures.
+        // What is given back for text is given back for a picture too.
         let held = fake::pixels(8, 6, 1);
         let desktop =
             Arc::new(FakeDesktop::new(None, Some("a paragraph")).holding_picture(held.clone()));
@@ -1696,6 +1696,85 @@ mod tests {
                 "incorrect type received from clipboard".to_owned()
             ))
         );
+    }
+
+    #[test]
+    fn a_picture_nobody_can_read_on_the_clipboard_does_not_stop_the_copy() {
+        let desktop =
+            Arc::new(FakeDesktop::new(None, Some("a paragraph")).holding_an_unreadable_picture());
+
+        assert_eq!(
+            captured(&demysto(fake::over(&desktop))),
+            Captured::Selection(Selection::text("a paragraph"))
+        );
+    }
+
+    #[test]
+    fn a_picture_nobody_can_read_and_nothing_selected_is_reported_and_left_alone() {
+        let desktop = Arc::new(FakeDesktop::new(None, None).holding_an_unreadable_picture());
+
+        assert_eq!(
+            demysto(fake::over(&desktop)).capture(),
+            CaptureOutcome::Failed(CaptureError::Clipboard("invalid PNG".to_owned()))
+        );
+        assert!(desktop.clipboard_picture().is_err());
+    }
+
+    #[test]
+    fn a_picture_displaced_by_one_nobody_can_read_is_put_back() {
+        let held = fake::pixels(8, 6, 1);
+        let desktop = Arc::new(
+            FakeDesktop::new(None, None)
+                .holding_picture(held.clone())
+                .selecting_an_unreadable_picture(),
+        );
+
+        demysto(fake::over(&desktop)).capture();
+
+        assert_eq!(desktop.clipboard_picture(), Ok(Some(held)));
+    }
+
+    #[test]
+    fn a_wayland_session_reports_a_picture_nobody_can_read() {
+        let desktop = Arc::new(FakeDesktop::new(None, None).holding_an_unreadable_picture());
+
+        assert_eq!(
+            demysto(fake::clipboard_only_over(&desktop)).capture(),
+            CaptureOutcome::Failed(CaptureError::Clipboard("invalid PNG".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_picture_nobody_can_read_on_x11_does_not_stop_the_copy_either() {
+        // Where the clipboard answers a request for words with a failure,
+        // which is what X11 does while it holds only a picture.
+        let desktop = Arc::new(
+            FakeDesktop::new(None, Some("a paragraph"))
+                .refusing_text()
+                .holding_an_unreadable_picture(),
+        );
+
+        assert_eq!(
+            captured(&demysto(fake::over(&desktop))),
+            Captured::Selection(Selection::text("a paragraph"))
+        );
+    }
+
+    #[test]
+    fn a_picture_nobody_can_read_on_x11_and_nothing_selected_is_left_alone() {
+        let desktop = Arc::new(
+            FakeDesktop::new(None, None)
+                .refusing_text()
+                .holding_an_unreadable_picture(),
+        );
+
+        assert_eq!(
+            demysto(fake::over(&desktop)).capture(),
+            CaptureOutcome::Failed(CaptureError::Clipboard(
+                "incorrect type received from clipboard".to_owned()
+            ))
+        );
+        assert!(desktop.clipboard_picture().is_err());
     }
 
     #[test]
@@ -6127,8 +6206,8 @@ mod tests {
 
     #[test]
     fn a_text_run_still_sends_its_message_as_a_bare_string() {
-        // Nothing about a request v1 recorded changes: the parts array is what
-        // a picture needs, and it is used where there is one and nowhere else.
+        // The parts array is what a picture needs, and it is used where there
+        // is one and nowhere else.
         let mut server = Server::new();
         let endpoint = asked_for(
             &mut server,
@@ -6609,7 +6688,7 @@ mod tests {
     #[test]
     fn a_text_conversation_is_never_sealed() {
         // A picture is what weighs enough to be worth letting go of; the words
-        // somebody asked about keep until the session ends, as in v1.
+        // somebody asked about keep until the session ends.
         let mut server = Server::new();
         let _endpoint = server
             .mock("POST", "/v1/chat/completions")

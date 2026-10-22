@@ -20,7 +20,7 @@ pub trait Capture: Send + Sync {
 /// Answered once, from the session Demysto started in, and shown rather than
 /// inferred: everywhere but Wayland a Capture reads what the user selected, and
 /// on Wayland it can only read what they copied themselves. A user who is not
-/// told that reasonably concludes the Hotkey is broken (user story 56).
+/// told that reasonably concludes the Hotkey is broken.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "reads", content = "detail", rename_all = "snake_case")]
 pub enum Capturing {
@@ -190,8 +190,8 @@ pub(crate) trait Desktop: Send + Sync {
     /// where it happens.
     fn clipboard_picture(&self) -> Result<Option<Pixels>, CaptureError>;
 
-    /// Puts a picture back on the clipboard, so that the guarantee v1 gave for
-    /// text covers pictures too (user story 70).
+    /// Puts a picture back on the clipboard, so that a Capture gives back a
+    /// picture it displaced just as it gives back text.
     fn set_clipboard_picture(&self, picture: &Pixels) -> Result<(), CaptureError>;
 
     /// Sends the platform's copy keystroke to the foreground application.
@@ -267,6 +267,9 @@ struct Held {
     /// What that picture is recognised by afterwards. Taken once, here, so that
     /// a Capture never walks the same megabytes twice.
     signature: Option<u64>,
+    /// Why a picture that was there could not be read. Nothing can be put back
+    /// over it, so a Capture that leaves it untouched leaves it alone.
+    unreadable: Option<CaptureError>,
 }
 
 /// What a picture is known by: its size, and a hash of its pixels.
@@ -286,19 +289,18 @@ fn signature(picture: &Pixels) -> u64 {
 
 /// What the clipboard holds, which is now text or a picture.
 ///
-/// The picture is read only where the text is nothing anybody meant to act on,
-/// which is where v1 returned [`Captured::Nothing`]. Text wins: the ambiguous
-/// sources — a spreadsheet cell, a fragment of a page — almost always mean the
-/// text and carry a picture as a secondary flavour, while the unambiguous ones
-/// put no text on the clipboard at all, so the picture loses nothing by
-/// yielding (user story 71). It also keeps megabytes out of the common Capture,
-/// which is somebody pressing a Hotkey over a paragraph.
+/// The picture is read only where the text is nothing anybody meant to act on.
+/// Text wins: the ambiguous sources — a spreadsheet cell, a fragment of a page —
+/// almost always mean the text and carry a picture as a secondary flavour,
+/// while the unambiguous ones put no text on the clipboard at all, so the
+/// picture loses nothing by yielding. It also keeps megabytes out of the common
+/// Capture, which is somebody pressing a Hotkey over a paragraph.
 ///
-/// What it costs is one case: a clipboard holding both, whose picture is
-/// therefore never read and so cannot be put back if the copy displaces it.
-/// That is the price of not walking megabytes on every Hotkey press over a
-/// paragraph, and it is paid where the picture was the secondary flavour of
-/// something the user copied as text.
+/// What it costs is two cases, both a picture that cannot be put back if the
+/// copy displaces it: one held beside text, and so never read, and one that
+/// could not be read at all. The second is no reason to leave the Selection
+/// uncopied; where nothing is selected, or there is no copy to send, it is
+/// reported after all.
 fn held<D: Desktop>(desktop: &D) -> Result<Held, CaptureError> {
     // A clipboard holding a picture and no text does not answer the same way on
     // every platform. macOS and Wayland say there is nothing to read; X11
@@ -306,21 +308,21 @@ fn held<D: Desktop>(desktop: &D) -> Result<Held, CaptureError> {
     // where it has none is a request it cannot satisfy — which is not a
     // clipboard that is broken, and reporting it as one made every picture on
     // X11 a Capture that failed. So the failure is held rather than returned,
-    // and it is reported only where the picture turns out not to be there
-    // either.
-    let (text, refused) = match desktop.clipboard_text() {
+    // and it is reported only where the clipboard turns out to hold no picture,
+    // readable or not.
+    let (text, mut refused) = match desktop.clipboard_text() {
         Ok(text) => (text, None),
         Err(error) => (None, Some(error)),
     };
 
-    let picture = match meaningful(&text) {
-        Some(_) => None,
+    let (picture, unreadable) = match meaningful(&text) {
+        Some(_) => (None, None),
         None => match desktop.clipboard_picture() {
-            Ok(picture) => picture,
+            Ok(picture) => (picture, None),
             // Neither half could be read. The one about words is the one worth
             // showing: it is the answer to what the user was almost certainly
             // asking for.
-            Err(error) => return Err(refused.unwrap_or(error)),
+            Err(error) => (None, Some(refused.take().unwrap_or(error))),
         },
     };
 
@@ -330,6 +332,7 @@ fn held<D: Desktop>(desktop: &D) -> Result<Held, CaptureError> {
             signature: picture.as_ref().map(signature),
             text,
             picture,
+            unreadable,
         }),
     }
 }
@@ -433,11 +436,10 @@ impl<D: Desktop> DesktopCapture<D> {
                 // Held rather than returned, for the reason [`held`] holds one:
                 // the copy that has just landed a picture is a clipboard that
                 // answers a request for words with a failure, and that is not
-                // a Capture that failed. What the clipboard holds is unknown
-                // either way, which is reason enough to put back what the user
-                // had.
+                // a Capture that failed. Whether the copy changed the clipboard
+                // is told by comparing the text, not by the refusal: one that
+                // refused before the copy as well may hold what cannot be put back.
                 Err(error) => {
-                    disturbed = true;
                     refused = Some(error);
                     None
                 }
@@ -454,9 +456,8 @@ impl<D: Desktop> DesktopCapture<D> {
             }
         }
 
-        // No text arrived, which in v1 was the end of it. It is now where a
-        // picture is looked for — and only here, because text wins wherever the
-        // clipboard holds both.
+        // No text arrived, so this is where a picture is looked for — and only
+        // here, because text wins wherever the clipboard holds both.
         if let Some(text) = meaningful(&last) {
             return (Ok(Captured::Clipboard(Selection::text(text))), disturbed);
         }
@@ -477,9 +478,13 @@ impl<D: Desktop> DesktopCapture<D> {
         disturbed: bool,
         refused: Option<CaptureError>,
     ) -> (Result<Captured, CaptureError>, bool) {
+        // A clipboard that cannot be read is put back, unless what it held
+        // could not be read either: that one is still the user's, left alone.
+        let restore = disturbed || before.unreadable.is_none();
+
         let picture = match self.desktop.clipboard_picture() {
             Ok(picture) => picture,
-            Err(error) => return (Err(refused.unwrap_or(error)), true),
+            Err(error) => return (Err(refused.unwrap_or(error)), restore),
         };
 
         let Some(picture) = picture else {
@@ -487,7 +492,7 @@ impl<D: Desktop> DesktopCapture<D> {
             // reported after all — this is where it turns out to have been a
             // clipboard nobody can read rather than one holding a picture.
             if let Some(error) = refused {
-                return (Err(error), true);
+                return (Err(error), restore);
             }
 
             // Nothing worth showing arrived within the window, so this is a
@@ -573,7 +578,13 @@ impl<D: Desktop> Capture for ClipboardCapture<D> {
     /// so there is no permission it could be missing. Reading the clipboard is
     /// something every session allows.
     fn capture(&self) -> Result<Captured, CaptureError> {
-        Ok(fallback(&held(&self.desktop)?))
+        let held = held(&self.desktop)?;
+
+        // With no copy to send, a clipboard nobody can read is all there is.
+        match (fallback(&held), held.unreadable) {
+            (Captured::Nothing, Some(error)) => Err(error),
+            (captured, _) => Ok(captured),
+        }
     }
 }
 
@@ -609,6 +620,8 @@ pub(crate) mod fake {
         /// The picture the copy lands, for the desktop where what the user is
         /// looking at is one.
         selected_picture: Option<Pixels>,
+        /// A Selection the copy lands as a picture nobody can read.
+        selects_an_unreadable_picture: bool,
         lands_after: u32,
         reads_since_copy: Mutex<Option<u32>>,
         refuses_writes: bool,
@@ -616,6 +629,9 @@ pub(crate) mod fake {
         /// is what X11 does when its owner holds a picture and nothing else.
         refuses_text: bool,
         refuses_permission: bool,
+        /// A picture on the clipboard that cannot be decoded, until something
+        /// is written over it.
+        unreadable_picture: Mutex<bool>,
         /// How many times the picture has been read, so that a test can see a
         /// Capture over text does not walk megabytes to find that out.
         picture_reads: Mutex<u32>,
@@ -664,6 +680,16 @@ pub(crate) mod fake {
         /// exercise — see [`FakeDesktop::landing_after`].
         pub(crate) fn selecting_picture(mut self, picture: Pixels) -> Self {
             self.selected_picture = Some(picture);
+            self
+        }
+
+        pub(crate) fn holding_an_unreadable_picture(self) -> Self {
+            *self.unreadable_picture.lock().unwrap() = true;
+            self
+        }
+
+        pub(crate) fn selecting_an_unreadable_picture(mut self) -> Self {
+            self.selects_an_unreadable_picture = true;
             self
         }
 
@@ -723,21 +749,25 @@ pub(crate) mod fake {
 
     impl Desktop for FakeDesktop {
         fn clipboard_text(&self) -> Result<Option<String>, CaptureError> {
-            if self.refuses_text {
-                return Err(CaptureError::Clipboard(
-                    "incorrect type received from clipboard".to_owned(),
-                ));
-            }
-
+            let mut landed = false;
             let mut reads = self.reads_since_copy.lock().unwrap();
             if let Some(count) = reads.as_mut() {
                 if *count >= self.lands_after {
                     if let Some(selection) = &self.selection {
                         *self.clipboard.lock().unwrap() = Some(selection.clone());
+                        landed = true;
                     }
                 }
                 *count += 1;
             }
+
+            // Text the copy landed is text the clipboard can answer with.
+            if self.refuses_text && !landed {
+                return Err(CaptureError::Clipboard(
+                    "incorrect type received from clipboard".to_owned(),
+                ));
+            }
+
             Ok(self.clipboard.lock().unwrap().clone())
         }
 
@@ -747,11 +777,16 @@ pub(crate) mod fake {
             }
 
             *self.clipboard.lock().unwrap() = text.map(str::to_owned);
+            *self.unreadable_picture.lock().unwrap() = false;
             Ok(())
         }
 
         fn clipboard_picture(&self) -> Result<Option<Pixels>, CaptureError> {
             *self.picture_reads.lock().unwrap() += 1;
+
+            if *self.unreadable_picture.lock().unwrap() {
+                return Err(CaptureError::Clipboard("invalid PNG".to_owned()));
+            }
 
             Ok(self.picture.lock().unwrap().clone())
         }
@@ -762,6 +797,7 @@ pub(crate) mod fake {
             }
 
             *self.picture.lock().unwrap() = Some(picture.clone());
+            *self.unreadable_picture.lock().unwrap() = false;
             Ok(())
         }
 
@@ -771,6 +807,13 @@ pub(crate) mod fake {
             if let Some(picture) = &self.selected_picture {
                 *self.picture.lock().unwrap() = Some(picture.clone());
                 *self.clipboard.lock().unwrap() = None;
+                *self.unreadable_picture.lock().unwrap() = false;
+            }
+
+            if self.selects_an_unreadable_picture {
+                *self.picture.lock().unwrap() = None;
+                *self.clipboard.lock().unwrap() = None;
+                *self.unreadable_picture.lock().unwrap() = true;
             }
 
             Ok(())

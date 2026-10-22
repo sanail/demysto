@@ -141,7 +141,8 @@ Demysto whether or not anything is fitted.
 Change is detected by a signature of width, height and a hash of the buffer, not
 by comparing buffers: a Hotkey press must not walk megabytes twice. Restoring
 uses `set_image` where a picture was displaced, so the guarantee v1 gave for
-text now covers pictures.
+text now covers pictures. A picture that cannot be read is the exception: it
+does not stop the copy, and once displaced it is not put back.
 
 **Text wins.** Where the clipboard holds both — a spreadsheet cell, a fragment
 of a page, a Word selection — the text is the Selection. The picture is read
