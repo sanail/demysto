@@ -10,7 +10,8 @@ LAUNCH = False
 SLACK = 2
 # Display modes each Guest offers that leave a work area shorter than a picture
 # with ten Actions under it, and still taller than the Palette's other rows.
-SHORT = {"macos": "1024x576", "windows": "1280x960", "x11": "1024x576", "wayland": "848x480"}
+# Windows takes physical pixels, so it has a mode per scale, each 480 logical pixels tall.
+SHORT = {"macos": "1024x576", "windows": {1.5: "1280x720", 2.0: "1280x960"}, "x11": "1024x576", "wayland": "848x480"}
 
 # xrandr knows no mode the Guest's driver does not list, so one is made from gtf.
 X11_MODE = """set -e
@@ -39,7 +40,8 @@ def short_screen(g):
     elif g.os == "windows":
         script = g.put(r"%TEMP%\demysto-short.ps1", (HERE / "screen" / "short.ps1").read_text())
         run = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
-        switched = g.exec(run + size.split("x"))
+        mode = size[g.displays()["displays"][0]["scale"]]
+        switched = g.exec(run + mode.split("x"))
         if not switched.ok:
             raise RuntimeError(f"the display stayed as it was: {switched.stderr}")
         try:
