@@ -1,4 +1,4 @@
-from _demysto import APP, configured_launch, nonce, palette_hotkey, check_no_resize, watch_the_palette
+from _demysto import APP, configured_launch, nonce, palette_hotkey, check_no_resize, watch_the_palette, work_area
 
 LAUNCH = False
 # Where a window goes does not depend on the Lab language.
@@ -9,35 +9,6 @@ SESSIONS = ["x11"]
 # How far the Palette may stray from where it belongs, in logical pixels:
 # rounding, and nothing a user would see.
 SLACK = 2
-
-# The work area in physical pixels, so the script declares itself DPI-aware
-# or Windows scales its answer.
-WINDOWS_WORK_AREA = """
-Add-Type -Name Dpi -Namespace Vmlab -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
-[void][Vmlab.Dpi]::SetProcessDPIAware()
-Add-Type -AssemblyName System.Windows.Forms
-$a = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-"$($a.X) $($a.Y) $($a.Width) $($a.Height)"
-"""
-
-# NSScreen counts in points from the bottom; the tree counts in pixels from the top.
-MAC_WORK_AREA = ('ObjC.import("AppKit"); var s = $.NSScreen.mainScreen, f = s.frame, v = s.visibleFrame;'
-                 '[v.origin.x, f.size.height - v.origin.y - v.size.height, v.size.width, v.size.height].join(" ")')
-
-
-def work_area(g, scale):
-    """The primary screen less its Dock, menu bar, taskbar or panels, in the
-    pixels the tree gives bounds in: x, y, width, height."""
-    if g.os == "windows":
-        script = g.put(r"%TEMP%\demysto-work-area.ps1", WINDOWS_WORK_AREA)
-        out = g.exec(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]).stdout
-    elif g.os == "macos":
-        out = g.exec(["osascript", "-l", "JavaScript", "-e", MAC_WORK_AREA]).stdout
-        return [float(n) * scale for n in out.split()[:4]]
-    else:
-        # _NET_WORKAREA: x, y, width, height once per desktop.
-        out = g.exec(["xprop", "-root", "_NET_WORKAREA"]).stdout.split("=")[1].replace(",", " ")
-    return [float(n) for n in out.split()[:4]]
 
 
 def opened_with_pointer_at(g, at, corner):

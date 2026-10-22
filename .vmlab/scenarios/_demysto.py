@@ -1,6 +1,7 @@
 """What every Demysto Scenario needs: a mock Provider, the Settings File
 pointed at it, and the names the app goes by on each OS."""
 import base64
+import collections
 import json
 import pathlib
 import re
@@ -35,6 +36,10 @@ def say(g, key, lang=None, **args):
                 text = text.replace("{ $" + name + " }", str(value))
             return text
     raise KeyError(f"{key} is not in i18n/{lang}.ftl")
+# The Palette's width in logical pixels, as the app configures it.
+PALETTE_WIDTH = next(window["width"] for window in
+                     json.loads((CATALOGUES.parent / "src-tauri" / "tauri.conf.json").read_text())["app"]["windows"]
+                     if window["label"] == "palette")
 PORT = 18080
 APP = "demysto"  # the process, which every OS's ui commands accept as the app
 
@@ -45,19 +50,22 @@ def nonce():
 
 def watch_the_palette(g):
     """Starts recording each place and size Demysto's windows take on screen,
-    far faster than the UI tree can be read; None on Wayland, which shows a
-    Guest helper no other application's windows."""
+    far faster than the UI tree can be read."""
     if g.session == "wayland":
-        return None
-    script = (HERE / "watch" / {"macos": "palette.js", "windows": "palette.ps1", "linux": "palette.sh"}[g.os]).read_text()
-    if g.os == "macos":
+        script = (HERE / "watch" / "palette-wayland.py").read_text()
+        watching = g.spawn(["python3", "-u", g.put("/tmp/demysto-watch.py", script)])
+    elif g.os == "macos":
+        script = (HERE / "watch" / "palette.js").read_text()
         watching = g.spawn(["osascript", "-l", "JavaScript", g.put("/tmp/demysto-watch.js", script)])
     elif g.os == "windows":
+        script = (HERE / "watch" / "palette.ps1").read_text()
         path = g.put(r"%TEMP%\demysto-watch.ps1", script)
         watching = g.spawn(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path])
     else:
+        script = (HERE / "watch" / "palette.sh").read_text()
         watching = g.spawn(["sh", g.put("/tmp/demysto-watch.sh", script)])
-    up = g.wait_for(log=watching.log, pattern="none", timeout=30)
+    # The watcher's first line: "none", or bounds when the Palette is already open.
+    up = g.wait_for(log=watching.log, pattern=r"(?m)^(none|-?\d)", timeout=30)
     g.check("the window watcher is running", up["met"], detail=[up, watching.output()])
     return watching
 
@@ -67,8 +75,6 @@ def check_no_resize(g, watching, what, settle=1.5):
     seconds. A shape is a height-to-width ratio, give or take rounding: macOS
     grows a panel into view at a constant one, and no resize keeps it."""
     name = f"{what} the Palette does not resize after it appears"
-    if watching is None:
-        return g.skip(name, "Wayland shows a Guest helper no other application's windows")
     # Slept rather than waited for: what is waited for is something not happening.
     time.sleep(settle)
     watching.stop()
@@ -83,6 +89,138 @@ def check_no_resize(g, watching, what, settle=1.5):
         if not shapes or abs(h / w - shapes[-1][1]) > 0.01:
             shapes.append((line, h / w))
     g.check(name, len(shapes) == 1, detail=since)
+
+
+# The work area in physical pixels, so the script declares itself DPI-aware
+# or Windows scales its answer.
+WINDOWS_WORK_AREA = """
+Add-Type -Name Dpi -Namespace Vmlab -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
+[void][Vmlab.Dpi]::SetProcessDPIAware()
+Add-Type -AssemblyName System.Windows.Forms
+$a = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+"$($a.X) $($a.Y) $($a.Width) $($a.Height)"
+"""
+
+# NSScreen counts in points from the bottom; the tree counts in pixels from the top.
+MAC_WORK_AREA = ('ObjC.import("AppKit"); var s = $.NSScreen.mainScreen, f = s.frame, v = s.visibleFrame;'
+                 '[v.origin.x, f.size.height - v.origin.y - v.size.height, v.size.width, v.size.height].join(" ")')
+
+
+def work_area(g, scale):
+    """The primary screen less its Dock, menu bar, taskbar or panels, in the
+    pixels the tree gives bounds in: x, y, width, height."""
+    if g.os == "windows":
+        script = g.put(r"%TEMP%\demysto-work-area.ps1", WINDOWS_WORK_AREA)
+        out = g.exec(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]).stdout
+    elif g.os == "macos":
+        out = g.exec(["osascript", "-l", "JavaScript", "-e", MAC_WORK_AREA]).stdout
+        return [float(n) * scale for n in out.split()[:4]]
+    else:
+        # _NET_WORKAREA: x, y, width, height once per desktop.
+        out = g.exec(["xprop", "-root", "_NET_WORKAREA"]).stdout.split("=")[1].replace(",", " ")
+    return [float(n) for n in out.split()[:4]]
+
+
+# Eleven Actions of the user's own over the built-ins, each taking text and
+# pictures: fifteen offered for text and fourteen for a picture, past the ten
+# the Palette lists before its list scrolls.
+MANY_ACTIONS = {f"extra-{n:02}": f'name = "Extra {n:02}"\naccepts = ["text", "image"]\ntemplate = "{{{{selection}}}}"\n'
+                for n in range(1, 12)}
+
+
+def action_names(g):
+    """The name of every Action MANY_ACTIONS leaves offered, in the Lab language."""
+    built_in = ["action-explain-name", "action-translate-name", "action-summarize-name",
+                "action-describe-image-name", "action-custom-name"]
+    return [say(g, key) for key in built_in] + [f"Extra {n:02}" for n in range(1, 12)]
+
+
+def palette_layout(g, footer):
+    """The bounds of the Palette's window and of its footer, which says
+    `footer`, and of each of its Actions, by name: in the tree's pixels."""
+    bottom = g.wait_for(text=footer, app=APP, timeout=10)
+    footer_bounds = bottom["matches"][0]["bounds"] if bottom["met"] else None
+    windows = [m["bounds"] for m in g.find(role="window", app=APP)["matches"] if m.get("bounds")]
+    window = next((w for w in windows if footer_bounds and w["y"] <= footer_bounds["y"] <= w["y"] + w["h"]),
+                  windows[0] if windows else None)
+    names = set(action_names(g))
+    actions = {m["name"]: m["bounds"] for m in g.find(role="button", app=APP)["matches"]
+               if m["name"] in names and m.get("bounds")}
+    return window, footer_bounds, actions
+
+
+def listed(actions, footer):
+    """The Actions whose whole button shows above the footer, which is where
+    the list ends."""
+    return sorted(name for name, b in actions.items() if b["y"] + b["h"] <= footer["y"])
+
+
+def nothing_selected(g):
+    """An editor in front with nothing selected, so that the Palette's copy
+    leaves the clipboard as it is; None on Wayland, where no copy is sent."""
+    if g.session == "wayland":
+        return None
+    staged = g.stage_text("nothing selected " + nonce())
+    g.press("right")
+    return staged
+
+
+def picture_name(g):
+    """What the Palette calls a picture, short of its size."""
+    return say(g, "palette-picture", dimensions="").strip(" ,")
+
+
+def check_scrolls_to_last(g, actions, footer):
+    """Presses Up from the first Action, which goes round to the last, and
+    checks the list scrolls to bring it into view."""
+    last = max(actions, key=lambda name: actions[name]["y"]) if actions else None
+    g.press("up")
+    _, below, actions = palette_layout(g, footer)
+    g.check("the list scrolls to the last Action", last in listed(actions, below),
+            detail={"last": last, "actions": actions})
+
+
+def check_fitted(g, window, footer, what):
+    """Checks the Palette ends where its content does: under the footer is the
+    frame's padding and border, and no empty space."""
+    scale = g.displays()["displays"][0]["scale"]
+    drawn = drawn_bounds(g, window)
+    under = drawn["y"] + drawn["h"] - (footer["y"] + footer["h"]) if window and footer else None
+    # 16 of padding, 1 of border, and rounding.
+    g.check(f"{what}, the Palette ends at its footer", under is not None and 0 <= under <= 19 * scale,
+            detail={"window": window, "drawn": drawn, "footer": footer, "under the footer": under})
+
+
+def drawn_bounds(g, window):
+    """The part of the Palette's window bounds it draws in. Windows counts a
+    frame that draws nothing at the sides and bottom; the Palette's width
+    tells how wide it is."""
+    if not window:
+        return None
+    scale = g.displays()["displays"][0]["scale"]
+    frame = max(0, (window["w"] - PALETTE_WIDTH * scale) / 2)
+    return {"x": window["x"] + frame, "y": window["y"], "w": window["w"] - 2 * frame, "h": window["h"] - frame}
+
+
+def screen_pixels(g, name):
+    """A screenshot, kept as evidence, decoded: (width, height, rows)."""
+    shot = g.screenshot(name)
+    # The Run folder is .vmlab/runs/<timestamp>-<lab>, the latest of them this Run's.
+    path = next(run / shot for run in sorted((HERE.parent / "runs").glob(f"*-{g.lab}"), reverse=True)
+                if (run / shot).is_file())
+    return decode_png(path.read_bytes())
+
+
+def ink(rows, bounds):
+    """The share of the pixels inside bounds that stand out from their
+    commonest colour: none at all is a window that was not drawn."""
+    inset = 4
+    region = [pixel for row in rows[int(bounds["y"]) + inset:int(bounds["y"] + bounds["h"]) - inset]
+              for pixel in row[int(bounds["x"]) + inset:int(bounds["x"] + bounds["w"]) - inset]]
+    if not region:
+        return 0
+    background = collections.Counter(region).most_common(1)[0][0]
+    return sum(1 for pixel in region if sum(abs(a - b) for a, b in zip(pixel, background)) > 96) / len(region)
 
 
 def tray(g):

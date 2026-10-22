@@ -174,6 +174,9 @@
     collecting !== null && asking + 1 >= collecting.parameters.length,
   );
 
+  /** Where on the screen the pointer was last seen over the list. */
+  let pointer: string | null = null;
+
   // Every Capture starts the Palette over: it is hidden rather than unloaded,
   // so without this it comes back up filtered by what was typed into it last.
   $effect(() => {
@@ -181,6 +184,7 @@
 
     filter = "";
     highlighted = 0;
+    pointer = null;
     collecting = null;
     asking = 0;
     answers = {};
@@ -267,6 +271,12 @@
     );
   }
 
+  // The arrows move the highlight while the filter keeps the focus, so nothing
+  // else brings an Action past the end of the list into view.
+  $effect(() => {
+    list?.children[at]?.scrollIntoView({ block: "nearest" });
+  });
+
   // The field is focused as the Palette opens and again as it moves between
   // listing Actions and collecting a Parameter, because each is a different
   // element and the one before it has gone.
@@ -314,6 +324,19 @@
       event.preventDefault();
       choose(chosen);
     }
+  }
+
+  /**
+   * Highlights the Action the pointer moved onto. A pointer at rest is left
+   * out: the list scrolling under it is the keyboard's doing, and WebKit
+   * reports that as the pointer moving where it already was.
+   */
+  function pointed(event: MouseEvent, index: number) {
+    const now = `${event.screenX},${event.screenY}`;
+    const moved = pointer !== null && now !== pointer;
+
+    pointer = now;
+    if (moved) highlighted = index;
   }
 
   /** Moves the highlight, wrapping round rather than stopping at the ends. */
@@ -522,7 +545,7 @@
               <button
                 type="button"
                 onclick={() => choose(action)}
-                onmouseenter={() => (highlighted = index)}
+                onmousemove={(event) => pointed(event, index)}
                 class="w-full cursor-pointer rounded px-2 py-1 text-left text-sm
                        {index === at
                   ? 'bg-neutral-200 dark:bg-neutral-700'

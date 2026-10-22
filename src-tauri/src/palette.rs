@@ -168,7 +168,13 @@ pub fn fit<R: Runtime>(
     window: &WebviewWindow<R>,
     height: f64,
 ) -> tauri::Result<()> {
-    let Some(screen) = window.current_monitor()? else {
+    // Wayland names no screen for a window that has never been shown, which the
+    // Palette is the first time it opens.
+    let screen = match window.current_monitor()? {
+        Some(screen) => Some(screen),
+        None => screen_holding(app, app.cursor_position().unwrap_or_default())?,
+    };
+    let Some(screen) = screen else {
         return Ok(());
     };
 
