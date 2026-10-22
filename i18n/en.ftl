@@ -72,6 +72,7 @@ result-nothing-asked-yet = Nothing asked yet.
 result-no-chats = No chats in this session yet. Chats are kept only until Demysto quits.
 result-quotation-label = The text this chat is about
 result-picture-label = The picture this chat is about
+result-picture-enlarged-label = Picture, enlarged
 result-show-more = Show more
 result-show-less = Show less
 result-ask-at-original = Ask again at full resolution — { $weight }

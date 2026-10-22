@@ -71,6 +71,7 @@ result-nothing-asked-yet = Noch nichts gefragt.
 result-no-chats = In dieser Sitzung gibt es noch keine Chats. Chats bleiben nur erhalten, bis Demysto beendet wird.
 result-quotation-label = Der Text dieses Chats
 result-picture-label = Das Bild dieses Chats
+result-picture-enlarged-label = Bild, vergrößert
 result-show-more = Mehr anzeigen
 result-show-less = Weniger anzeigen
 result-ask-at-original = Erneut in voller Auflösung fragen — { $weight }

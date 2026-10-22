@@ -67,6 +67,7 @@ result-nothing-asked-yet = Aún no has preguntado nada.
 result-no-chats = Aún no hay chats en esta sesión. Los chats se guardan solo hasta que cierras Demysto.
 result-quotation-label = El texto de este chat
 result-picture-label = La imagen de este chat
+result-picture-enlarged-label = Imagen ampliada
 result-show-more = Mostrar más
 result-show-less = Mostrar menos
 result-ask-at-original = Volver a preguntar en resolución original — { $weight }

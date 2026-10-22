@@ -67,6 +67,7 @@ result-nothing-asked-yet = Здесь пока пусто.
 result-no-chats = В этом сеансе чатов пока не было. Чаты хранятся только до завершения Demysto.
 result-quotation-label = Текст этого чата
 result-picture-label = Изображение этого чата
+result-picture-enlarged-label = Изображение крупно
 result-show-more = Показать целиком
 result-show-less = Свернуть
 result-ask-at-original = Спросить снова в исходном разрешении — { $weight }

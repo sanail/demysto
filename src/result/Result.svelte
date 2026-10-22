@@ -258,7 +258,7 @@
    * Whether this Conversation can still be added to. A Sealed one cannot: the
    * picture it is about has been let go of, and there is nothing left to
    * resend — so the window says so where the input box was, rather than
-   * offering a box that would fail (user story 84).
+   * offering a box that would fail.
    */
   const sealed = $derived(showing?.picture?.sealed === true);
 
@@ -334,7 +334,7 @@
     // Kilobytes below a megabyte, and megabytes above it. One unit for both
     // would put "0.1 MB" on a screenshot of a dialog and "0 MB" on a small
     // one, which is a price that says nothing — and the price is the whole of
-    // what the button has to say (user story 78).
+    // what the button has to say.
     const megabytes = bytes >= 1_000_000;
 
     return new Intl.NumberFormat(spokenTag(), {
@@ -345,7 +345,7 @@
     }).format(bytes / (megabytes ? 1_000_000 : 1_000));
   }
 
-  /** Asks the Turn on screen again at the original resolution (user story 77). */
+  /** Asks the Turn on screen again at the original resolution. */
   async function askAtOriginal() {
     pinned = true;
     progress = null;
@@ -387,7 +387,7 @@
     if (whole === null) whole = await selection();
   }
 
-  /** Walks the user to the permission macOS is withholding (user story 55). */
+  /** Walks the user to the permission macOS is withholding. */
   async function grant() {
     unreachable = await sending(openAccessibility);
   }
@@ -425,10 +425,10 @@
   let menu = $state<HTMLElement>();
 
   // A pointer put down anywhere else closes the list, because that is what a
-  // menu does (user story 67). In the capture phase so that a handler that
-  // stops propagation cannot leave the list standing, and without preventing
-  // anything: the click the user aimed at also lands, rather than being spent
-  // on dismissing a menu they had already stopped looking at.
+  // menu does. In the capture phase so that a handler that stops propagation
+  // cannot leave the list standing, and without preventing anything: the click
+  // the user aimed at also lands, rather than being spent on dismissing a menu
+  // they had already stopped looking at.
   $effect(() => {
     if (!listing) return;
 
@@ -602,7 +602,7 @@
 
     // A URL the Model wrote is not somewhere the user asked to be taken, and
     // following it would replace the answer with a web page. Left as text
-    // until a later ticket has somewhere to send them.
+    // until there is somewhere to send them.
     if (clicked.closest("a")) event.preventDefault();
 
     const block = copyable(clicked);
@@ -720,7 +720,7 @@
     {#if showing?.picture}
       <!-- The picture above the first Turn, for the reason the text is quoted
            there: the window opens over whatever the user was looking at, and a
-           third question should not have to be asked blind (user story 75).
+           third question should not have to be asked blind.
 
            A named region rather than a heading, as the quotation is: on screen
            the picture says what it is, and a screen reader is given the label
@@ -789,8 +789,7 @@
            What it is, though, has to be said rather than drawn: on screen the
            rule down the left and the grey say "this is the text, not the
            answer", and a screen reader is given neither. So the quotation is a
-           named region — true of both origins, and nothing added to the window
-           (ticket 18). -->
+           named region — true of both origins, and nothing added to the window. -->
       <section
         aria-label={t("result-quotation-label")}
         class="flex flex-col items-start gap-1.5"
@@ -1030,7 +1029,7 @@
     bind:this={enlargement}
     role="dialog"
     aria-modal="true"
-    aria-label={t("result-picture-label")}
+    aria-label={t("result-picture-enlarged-label")}
     tabindex="-1"
     class="fixed inset-0 flex cursor-zoom-out items-center justify-center
            bg-white p-6 outline-none dark:bg-neutral-900"

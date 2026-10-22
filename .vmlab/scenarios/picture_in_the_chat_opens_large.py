@@ -34,7 +34,7 @@ def picture_bounds(rows, area):
 
 def poll(read, done, timeout):
     """read() until done(what it read) or timeout seconds pass; answers the
-    last read. For what wait_for has no condition for."""
+    last read. For the focus, which wait_for cannot wait on."""
     deadline = time.monotonic() + timeout
     while True:
         seen = read()
@@ -43,24 +43,15 @@ def poll(read, done, timeout):
         time.sleep(0.3)
 
 
-def enlarged(g, thumbnail):
-    """The picture open over the chat, as the tree has it. The thumbnail's
-    place in the chat shares its label, but starts where the thumbnail does;
-    the open picture starts at the window's edge."""
-    scale = g.displays()["displays"][0]["scale"]
-    return [m for m in g.find(text=say(g, "result-picture-label"), app=APP)["matches"]
-            if m.get("bounds") and m["bounds"]["x"] < thumbnail["x"] - PADDING * scale / 2]
-
-
 def open_picture(g, thumbnail, name):
     """Clicks the picture in the chat and checks it opens fitted to the
     window; answers its pixels, or None when it does not open."""
     g.click(text=thumbnail["name"], role="button", app=APP)
-    opened = poll(lambda: enlarged(g, thumbnail["bounds"]), bool, 10)
-    g.check(f"{name}, a click on the picture opens it", opened != [], detail=opened)
-    if not opened:
+    opened = g.wait_for(text=say(g, "result-picture-enlarged-label"), app=APP, timeout=10)
+    g.check(f"{name}, a click on the picture opens it", opened["met"], detail=opened)
+    if not opened["met"]:
         return None
-    window = opened[0]["bounds"]
+    window = opened["matches"][0]["bounds"]
     # Out of the window, so that the pointer is in no screenshot of the picture.
     g.pointer("move", max(0, window["x"] - 40), max(0, window["y"] - 40))
     _, _, rows = screen_pixels(g, name)
@@ -82,8 +73,8 @@ def open_picture(g, thumbnail, name):
 
 def check_closed(g, thumbnail, how):
     """Checks the open picture is gone and the focus is back on its thumbnail."""
-    left = poll(lambda: enlarged(g, thumbnail["bounds"]), lambda seen: not seen, 10)
-    g.check(f"{how} closes the open picture", not left, detail=left)
+    left = g.wait_for(text=say(g, "result-picture-enlarged-label"), app=APP, gone=True, timeout=10)
+    g.check(f"{how} closes the open picture", left["met"], detail=left)
     # The tree may lag behind the focus by a moment.
     focused = poll(lambda: [m for m in g.find(text=thumbnail["name"], role="button", app=APP)["matches"]
                             if m.get("focused")], bool, 5)
