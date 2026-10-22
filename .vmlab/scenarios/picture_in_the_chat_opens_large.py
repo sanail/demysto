@@ -1,7 +1,7 @@
 import collections
 
 from _demysto import (APP, configured_launch, copy_picture, mock, nonce, nothing_selected, palette_hotkey, pictures,
-                      poll, say, screen_pixels, shows_answer)
+                      say, screen_pixels, shows_answer)
 
 LAUNCH = False
 
@@ -63,10 +63,8 @@ def check_closed(g, thumbnail, how):
     """Checks the open picture is gone and the focus is back on its thumbnail."""
     left = g.wait_for(text=say(g, "result-picture-enlarged-label"), app=APP, gone=True, timeout=10)
     g.check(f"{how} closes the open picture", left["met"], detail=left)
-    # The tree may lag behind the focus by a moment.
-    focused = poll(lambda: [m for m in g.find(text=thumbnail["name"], role="button", app=APP)["matches"]
-                            if m.get("focused")], bool, 5)
-    g.check(f"closed by {how}, the focus goes back to the picture", focused != [], detail=focused)
+    back = g.wait_for(text=thumbnail["name"], role="button", app=APP, focused=True, timeout=5)
+    g.check(f"closed by {how}, the focus goes back to the picture", back["met"], detail=back)
 
 
 def differing(before, after):
@@ -137,10 +135,9 @@ def scenario(g):
     g.press("enter")
     left = g.wait_for(text=say(g, "result-picture-enlarged-label"), app=APP, gone=True, timeout=15)
     g.check("a new Run closes the open picture", left["met"], detail=left)
-    # A textarea is a text field to some accessibility trees.
-    focused = poll(lambda: [m for role in ("textarea", "textfield")
-                            for m in g.find(role=role, app=APP)["matches"] if m.get("focused")], bool, 5)
-    g.check("after a new Run, the focus is in the box", focused != [], detail=focused)
+    # Windows and Linux see the box's textarea as a text field.
+    box = g.wait_for(role="textarea" if g.os == "macos" else "textfield", app=APP, focused=True, timeout=5)
+    g.check("after a new Run, the focus is in the box", box["met"], detail=box)
 
     g.press("escape")
     gone = g.wait_for(text=answer, app=APP, gone=True, timeout=10)

@@ -215,7 +215,7 @@ def screen_pixels(g, name):
 
 def poll(read, done, timeout):
     """read() until done(what it read) or timeout seconds pass; answers the
-    last read. For what wait_for cannot wait on: the focus, pixels."""
+    last read. For what wait_for cannot wait on, such as pixels."""
     deadline = time.monotonic() + timeout
     while True:
         seen = read()
