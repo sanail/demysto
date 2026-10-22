@@ -1,6 +1,6 @@
 //! The Palette: the window the Hotkey opens, over whatever the user is reading.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
@@ -28,6 +28,14 @@ const SCREEN_MARGIN: f64 = 8.0;
 /// How long a Palette that has been handed a Capture is given to say it has
 /// drawn it and fitted itself, before it is shown anyway.
 const READY_WITHIN: Duration = Duration::from_millis(500);
+
+/// How long a page that has never answered is given instead: one still loading
+/// after launch answers up to about 600 ms after the Hotkey.
+const LOADED_WITHIN: Duration = Duration::from_secs(2);
+
+/// Whether the Palette has ever said it is ready, which is when its page has
+/// loaded.
+static ANSWERED: AtomicBool = AtomicBool::new(false);
 
 /// Told when the Palette says it is ready, while a Capture waits to show it.
 static WAITING: Mutex<Option<mpsc::Sender<()>>> = Mutex::new(None);
@@ -140,15 +148,18 @@ fn open<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
 /// Hands the Palette a Capture and shows it once it has drawn it and fitted
 /// itself, so that it does not resize in front of the user.
 ///
-/// A window that has never loaded hears nothing and never answers: it asks for
-/// the Capture itself when it mounts, and is shown after [`READY_WITHIN`] all
-/// the same.
+/// A window still loading hears nothing, but asks for the Capture itself when
+/// it mounts and answers then; one that never answers is shown after
+/// [`LOADED_WITHIN`] all the same.
 fn show_with<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>, outcome: &CaptureOutcome) {
     let (tell, told) = mpsc::channel();
     *WAITING.lock().unwrap() = Some(tell);
 
     let _ = window.emit(CAPTURED_EVENT, outcome);
-    let _ = told.recv_timeout(READY_WITHIN);
+    let _ = told.recv_timeout(match ANSWERED.load(Ordering::Relaxed) {
+        true => READY_WITHIN,
+        false => LOADED_WITHIN,
+    });
 
     WAITING.lock().unwrap().take();
     show(app, window);
@@ -156,6 +167,8 @@ fn show_with<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>, outcome:
 
 /// Lets a Capture waiting in [`show_with`] show the Palette.
 pub fn ready() {
+    ANSWERED.store(true, Ordering::Relaxed);
+
     if let Some(tell) = WAITING.lock().unwrap().take() {
         let _ = tell.send(());
     }
