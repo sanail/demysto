@@ -31,16 +31,29 @@ def scenario(g):
     verified = g.wait_for(text=say(g, "settings-provider-answered", model="mock-small"), app=APP, timeout=15)
     g.check("the welcome flow verifies the key against the Provider", verified["met"], detail=verified)
     g.screenshot("provider verified")
+    g.click(role="button", text=say(g, "welcome-continue"), app=APP)
 
-    # Accessibility (macOS only) and Startup lie between; each goes on by Continue.
+    pictures = g.wait_for(text=say(g, "welcome-pictures-title"), app=APP, timeout=10)
+    g.check("the welcome flow asks which Model sees pictures", pictures["met"], detail=pictures)
+    g.click(text=say(g, "welcome-pictures-same", model="mock-small"), role="radiobutton", app=APP, timeout=10)
+    g.click(role="button", text=say(g, "welcome-continue"), app=APP)
+
+    # Accessibility (macOS only), Autostart and the Hotkeys (not on Wayland) lie
+    # between; each goes on by Continue.
     done = say(g, "welcome-done-title")
+    hotkeys = False
     for _ in range(4):
         if g.find(text=done, app=APP)["matches"]:
             break
+        hotkeys = hotkeys or bool(g.find(text=say(g, "welcome-hotkeys-title"), app=APP)["matches"])
         g.click(role="button", text=say(g, "welcome-continue"), app=APP, timeout=10)
         g.wait_for(text=say(g, "welcome-step").split("{")[0].strip(), app=APP, timeout=5)
+    g.check("the welcome flow offers the Hotkeys where Demysto hands them out",
+            hotkeys == (g.session != "wayland"), detail=g.session)
     last = g.wait_for(text=done, app=APP, timeout=10)
     g.check("the welcome flow reaches its last step", last["met"], detail=last)
+    area = g.find(text=say(g, "welcome-done-no-pictures"), app=APP)["matches"]
+    g.check("with a Model for pictures, the last step does not send them to Settings", not area, detail=area)
     g.click(role="button", text=say(g, "welcome-finish"), app=APP, timeout=10)
     ended = g.wait_for(text=say(g, "welcome-title"), app=APP, gone=True, timeout=10)
     g.check("the welcome flow ends", ended["met"], detail=ended)
@@ -51,6 +64,9 @@ def scenario(g):
     g.check("the Settings File holds the Provider and its Model",
             base_url(g) in settings and "mock-small" in settings and "welcomed = true" in settings,
             detail=settings)
+    g.check("the Model chosen for pictures is the Default Vision Model, marked as seeing",
+            re.search(r'(?m)^default_vision_model\s*=\s*"mock/mock-small"', settings)
+            and re.search(r'id\s*=\s*"mock-small",\s*vision\s*=\s*true', settings), detail=settings)
     g.check("confirming the language the OS gave writes no language",
             not re.search(r"(?m)^language\s*=", settings), detail=settings)
 

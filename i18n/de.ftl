@@ -294,6 +294,16 @@ welcome-done-detail = Markieren Sie irgendwo Text und drücken Sie { $hotkey }. 
 welcome-done-clipboard = Kopieren Sie Text mit Ctrl+C und drücken Sie { $hotkey }. In der Bildschirmmitte öffnet sich eine Liste der Aktionen; Enter startet die hervorgehobene.
 welcome-done-area = Drücken Sie { $hotkey }, um einen Bildschirmbereich aufzuziehen und die Liste der Aktionen dafür zu öffnen.
 welcome-done-tray = Demysto wartet von nun an im Infobereich, und sein Menü erreicht alles, was das Tastenkürzel erreicht.
+welcome-pictures-title = Fragen zu Bildern
+welcome-pictures-detail = Ein Bildschirmfoto oder ein kopiertes Bild geht an ein Modell, das sehen kann. Nicht jedes kann das.
+welcome-pictures-same = Dasselbe Modell, { $model }
+welcome-pictures-other = Ein anderes Modell
+welcome-pictures-later = Nicht jetzt
+welcome-pictures-in-settings = Sie können später in den Einstellungen eines wählen, im Tab Modelle.
+welcome-hotkeys-title = Tastenkürzel
+welcome-hotkeys-detail = Behalten Sie diese oder nehmen Sie eigene auf. In den Einstellungen lassen sie sich später ändern.
+welcome-hotkeys-pause = Pause tippt nichts und eignet sich daher als Tastenkürzel: Pause für die Liste der Aktionen, Alt+Pause für einen Bildschirmbereich.
+welcome-done-no-pictures = Um nach einem Bildschirmbereich zu fragen, wählen Sie in den Einstellungen ein Modell für Bilder.
 
 ## What an update could not do
 

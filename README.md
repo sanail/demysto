@@ -67,7 +67,7 @@ asked about.
 
 Download the installer for your system from the
 [latest release](https://github.com/sanail/demysto/releases/latest) and run it. A
-short first-run guide connects your Provider and shows you the Hotkey.
+welcome window connects your Provider and sets up the Hotkeys.
 
 [Getting started](docs/getting-started.md) covers installation on each system,
 choosing a Provider, working with pictures, and writing your own Actions.

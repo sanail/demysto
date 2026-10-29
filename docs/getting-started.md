@@ -5,7 +5,7 @@ your own. Everything here is done in Demysto's own windows, and you never need
 to edit a file by hand.
 
 - [Install](#install)
-- [The first run](#the-first-run)
+- [The welcome window](#the-welcome-window)
 - [Choosing a Provider](#choosing-a-provider)
 - [Everyday use](#everyday-use)
 - [Pictures](#pictures)
@@ -48,10 +48,10 @@ Pick whichever package suits your distribution:
 | `.deb` (Debian, Ubuntu, Mint) | `sudo apt install ./Demysto_<version>_amd64.deb` |
 | `.rpm` (Fedora, openSUSE) | `sudo dnf install ./Demysto-<version>-1.x86_64.rpm` |
 
-## The first run
+## The welcome window
 
-When Demysto starts for the first time, a short guide walks you through the
-setup:
+When Demysto starts for the first time, a welcome window walks you through
+what it needs:
 
 1. **Language.** Demysto uses your system's language when it has a translation
    for it, and English otherwise. You can change it here or later in Settings.
@@ -59,13 +59,20 @@ setup:
    fetch the Models it offers. Choose a Default Model and verify the key. Demysto
    sends a real request, so a wrong key shows up now and not at your first
    question.
-3. **Accessibility** (macOS only). macOS only lets Demysto read your selection
+3. **Pictures.** Choose the Model that answers questions about screenshots and
+   copied pictures: the Default Model, another Model of the same Provider, or
+   none for now. Not every Model can see, and Demysto takes your word for it.
+4. **Accessibility** (macOS only). macOS only lets Demysto read your selection
    once it has the Accessibility permission. Open **Privacy & Security →
    Accessibility** and turn Demysto on. You can skip this step, and Demysto will
    ask again when it needs the permission.
-4. **Start at login.** Demysto only answers while it is running, so it is best
+5. **Start at login.** Demysto only answers while it is running, so it is best
    started with your computer.
-5. **Done.** The guide shows the Hotkey. Try it right away.
+6. **Hotkeys** (not on Wayland, where the desktop assigns them). Keep the
+   defaults or record your own. A PC keyboard's <kbd>Pause</kbd> key types
+   nothing, so <kbd>Pause</kbd> and <kbd>Alt</kbd>+<kbd>Pause</kbd> make handy
+   Hotkeys.
+7. **Done.** The window shows the Hotkeys. Try them right away.
 
 ## Choosing a Provider
 

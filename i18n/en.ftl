@@ -295,6 +295,16 @@ welcome-done-detail = Select some text anywhere and press { $hotkey }. A list of
 welcome-done-clipboard = Copy some text with Ctrl+C and press { $hotkey }. A list of Actions opens in the middle of the screen; Enter runs the highlighted one.
 welcome-done-area = Press { $hotkey } to drag out an area of the screen and open the list of Actions on it.
 welcome-done-tray = Demysto now waits in the tray, and its menu reaches everything the Hotkey does.
+welcome-pictures-title = Questions about pictures
+welcome-pictures-detail = A screenshot or a copied picture goes to a Model that can see. Not every Model can.
+welcome-pictures-same = The same Model, { $model }
+welcome-pictures-other = Another Model
+welcome-pictures-later = Not now
+welcome-pictures-in-settings = You can choose one later in Settings, on the Models tab.
+welcome-hotkeys-title = Hotkeys
+welcome-hotkeys-detail = Keep these or record your own. Settings can change them later.
+welcome-hotkeys-pause = Pause types nothing, which makes it a good Hotkey: Pause for the list of Actions, Alt+Pause for an area of the screen.
+welcome-done-no-pictures = To ask about an area of the screen, choose a Model for pictures in Settings.
 
 ## What an update could not do
 

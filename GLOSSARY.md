@@ -50,6 +50,10 @@ _Avoid_: preferences, options, configuration, config window
 The one file in which Demysto writes down what it was told, as text a person may read and edit. Actions are not in it.
 _Avoid_: config file, config, preferences file, settings
 
+**Welcome**:
+The window a fresh installation is met by, once: it asks for a Provider and the Models that answer text and pictures, Autostart and the Hotkeys, and is over when it closes, however it closes. Everything it asks is in Settings afterwards.
+_Avoid_: wizard, onboarding, setup, first run
+
 ### What answers
 
 **Provider**:

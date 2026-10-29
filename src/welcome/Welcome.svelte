@@ -3,6 +3,7 @@
   import {
     accessibilityAskedFor,
     autostart,
+    catalogue as catalogued,
     dismiss,
     hotkeys as allowed,
     screenAreaUnavailable,
@@ -22,23 +23,35 @@
     type ProviderEdit,
     type Settings,
   } from "../lib/ipc";
-  import { reading } from "../lib/hotkey";
+  import { combination, reading } from "../lib/hotkey";
   import { LANGUAGES } from "../lib/languages";
   import { spokenTag, t } from "../lib/i18n.svelte";
   import { saidBy, sending } from "../lib/sending";
+  import HotkeyField from "../settings/HotkeyField.svelte";
 
   /**
-   * The flow, in the order the spec fixes it: confirm the language, configure a
-   * Provider and prove its key works, walk to the Accessibility permission,
-   * answer the autostart question, and finish on the Hotkey.
+   * The flow: confirm the language, configure a Provider and prove its key
+   * works, choose what sees pictures, walk to the Accessibility permission,
+   * answer the autostart question, set the Hotkeys, and finish on them.
    */
-  type Step = "language" | "provider" | "accessibility" | "autostart" | "done";
+  type Pictures = "same" | "other" | "later";
+
+  type Step =
+    | "language"
+    | "provider"
+    | "pictures"
+    | "accessibility"
+    | "autostart"
+    | "hotkeys"
+    | "done";
 
   const ORDER: Step[] = [
     "language",
     "provider",
+    "pictures",
     "accessibility",
     "autostart",
+    "hotkeys",
     "done",
   ];
 
@@ -51,9 +64,14 @@
    */
   let asksForAccessibility = $state(false);
 
-  /** The steps this desktop has, in the order the spec fixes them. */
+  /** The steps this desktop has. Wayland's desktop hands out the Hotkeys
+      itself, so there is nothing to set on that step there. */
   const steps = $derived(
-    ORDER.filter((step) => step !== "accessibility" || asksForAccessibility),
+    ORDER.filter(
+      (step) =>
+        (step !== "accessibility" || asksForAccessibility) &&
+        (step !== "hotkeys" || clipboardOnly === null),
+    ),
   );
   let at = $state(0);
   const step = $derived(steps[at]);
@@ -73,6 +91,16 @@
   let screenAreaDefault = $state("");
   /** Wayland with no portal offering Screenshot, where there is no area. */
   let screenAreaOff = $state(false);
+  /** The Hotkeys as the step has them: `null` for the default, empty for none. */
+  let paletteHotkey = $state<string | null>(null);
+  let screenAreaHotkey = $state<string | null>(null);
+  let recording = $state<"palette" | "screen_area" | null>(null);
+  /** The keys a Hotkey may be on its own, as the backend has them. */
+  let bareKeys = $state<ReadonlySet<string>>(new Set());
+  /** What the backend said about Hotkeys it could not claim. */
+  let unclaimed = $state<string[]>([]);
+  /** Pause is a free key on a PC keyboard, and a Mac keyboard has none. */
+  const offersPause = !navigator.userAgent.includes("Mac");
 
   /**
    * The language the flow is being read in, which is the one it offers for
@@ -139,6 +167,17 @@
   /** What this Provider was called in the file, once the flow has written it. */
   let was = $state<string | null>(null);
 
+  /**
+   * Which Model sees pictures: the Default Model, another one of this
+   * Provider's, or none yet. Nothing proves a Model can see; the choice is the
+   * user's word for it, as the vision box in Settings is.
+   */
+  let pictures = $state<Pictures>("later");
+  /** The other Model, when that is the choice. */
+  let seeing = $state("");
+  /** What the file named before the flow, which "Not now" leaves alone. */
+  let visionBefore: string | null = null;
+
   /** Whether a Provider is being asked something now. */
   let asking = $state(false);
   /** What it last said, and whether that was good news. */
@@ -147,8 +186,7 @@
    * Whether this key has been put to its Provider and accepted.
    *
    * The flow does not go past the Provider until it has: a key that turns out
-   * to be wrong at the first Run is exactly the first impression this ticket
-   * exists to prevent.
+   * to be wrong at the first Run is the worst first impression there is.
    */
   let verified = $state(false);
 
@@ -183,6 +221,7 @@
     presets = await offeredPresets();
     const may = await allowed();
     paletteDefault = may.palette_default;
+    bareKeys = new Set(may.no_modifier_needed);
     screenAreaDefault = may.screen_area_default;
     void screenAreaUnavailable().then((off) => (screenAreaOff = off));
     // A system that will not say is drawn as the offer to turn autostart on:
@@ -197,6 +236,7 @@
 
     try {
       show(await configured());
+      visionBefore = saved?.default_vision_model ?? null;
     } catch (error) {
       // A file nobody can read is not one the flow can write into, and the
       // backend does not offer the flow over one — so this is a file that
@@ -210,6 +250,8 @@
     saved = settings;
     language = settings.language ?? spokenTag();
     detected = language;
+    paletteHotkey = settings.palette_hotkey;
+    screenAreaHotkey = settings.screen_area_hotkey;
   }
 
   /** The Hotkey the last step invites a press of, as the user reads it, and
@@ -235,8 +277,26 @@
       // (ADR-0006). A key found in the environment is resolved by the backend
       // and needs no field here; Verify is what proves either way.
       api_key: key.trim() === "" ? { action: "keep" } : { action: "set", key },
-      models: model.trim() === "" ? [] : [{ id: model, vision: false }],
+      models: model.trim() === "" ? [] : offering(),
     };
+  }
+
+  /** The Models written for this Provider, the one that sees pictures marked. */
+  function offering() {
+    const sees = pictures === "same" ? model : pictures === "other" ? seeing : "";
+    const models = [{ id: model, vision: sees === model }];
+
+    if (sees !== "" && sees !== model) models.push({ id: sees, vision: true });
+
+    return models;
+  }
+
+  /** The Model that sees pictures, as the settings name it. */
+  function visionModel(): string | null {
+    if (pictures === "same") return `${name}/${model}`;
+    if (pictures === "other" && seeing.trim() !== "") return `${name}/${seeing}`;
+
+    return visionBefore;
   }
 
   /**
@@ -259,9 +319,11 @@
         configuring && model.trim() !== ""
           ? `${name}/${model}`
           : (saved?.default_model ?? null),
-      default_vision_model: saved?.default_vision_model ?? null,
-      palette_hotkey: saved?.palette_hotkey ?? null,
-      screen_area_hotkey: saved?.screen_area_hotkey ?? null,
+      default_vision_model: configuring
+        ? visionModel()
+        : (saved?.default_vision_model ?? null),
+      palette_hotkey: paletteHotkey,
+      screen_area_hotkey: screenAreaHotkey,
       large_selection: saved?.large_selection ?? null,
       // Only a language the user actually chose. Leaving the one they were
       // shown alone leaves the file saying nothing about it, which is Demysto
@@ -287,6 +349,9 @@
   function picked() {
     changed();
     offered = null;
+    // Another Provider's Models are another list.
+    if (pictures === "other") pictures = "later";
+    seeing = "";
 
     const chosen = presets.find((it) => it.name === preset);
     if (chosen && name.trim() === "") name = chosen.name;
@@ -314,6 +379,7 @@
       } else if (model.trim() === "") {
         model = offered[0];
       }
+      if (seeing.trim() === "") seeing = another();
     } catch (error) {
       said = { well: false, message: saidBy(error) };
     } finally {
@@ -378,6 +444,16 @@
     if (autostartProblem !== null) autostartWanted = (await autostart()) ?? was;
   }
 
+  /** A Model other than the Default one to offer first, where there is one. */
+  function another(): string {
+    return offered?.find((id) => id !== model) ?? offered?.[0] ?? "";
+  }
+
+  function choosePictures(choice: Pictures) {
+    pictures = choice;
+    if (choice === "other" && seeing.trim() === "") seeing = another();
+  }
+
   // The step is asked once and never re-read, so nothing here can answer out of
   // turn: what Settings needs a count of clicks and a queue for is a window
   // that asks the list again every time it is focused, and this one does not.
@@ -398,17 +474,26 @@
    * configured nothing.
    */
   const settled = $derived(
-    step !== "provider" ||
-      (verified && name.trim() !== "" && model.trim() !== ""),
+    step === "provider"
+      ? verified && name.trim() !== "" && model.trim() !== ""
+      : step !== "pictures" || pictures !== "other" || seeing.trim() !== "",
   );
 
   async function forward() {
-    // The language and the Provider are written as the step that collected them
-    // is left. The language is written twice over — once here and again with
-    // the Provider — because a flow abandoned half-way should still leave
-    // Demysto speaking what was confirmed in it.
-    if (step === "language" || step === "provider") {
+    recording = null;
+    // Every step that collects a setting writes it as it is left, so that a
+    // flow abandoned half-way keeps what was confirmed in it.
+    if (step !== "accessibility" && step !== "autostart" && step !== "done") {
       if (!(await save())) return;
+    }
+
+    // Claimed by reading the catalogue, as Settings does. A refusal keeps the
+    // step on screen once, to be read; Continue again goes on regardless.
+    if (step === "hotkeys") {
+      const said = (await catalogued()).unclaimed;
+      const news = said.some((it) => !unclaimed.includes(it));
+      unclaimed = said;
+      if (news) return;
     }
 
     if (at + 1 < steps.length) {
@@ -423,14 +508,38 @@
 
   function back() {
     problem = null;
+    recording = null;
     if (at > 0) at -= 1;
   }
 
   function onKeydown(event: KeyboardEvent) {
+    if (recording !== null) {
+      event.preventDefault();
+      record(event);
+      return;
+    }
+
     if (event.key !== "Escape") return;
 
     event.preventDefault();
     dismiss();
+  }
+
+  /** Takes one keypress as the Hotkey being recorded, as Settings does. */
+  function record(event: KeyboardEvent) {
+    const pressed = combination(event, bareKeys);
+
+    if (event.code === "Escape" && !pressed) {
+      recording = null;
+      return;
+    }
+
+    if (!pressed) return;
+
+    if (recording === "palette") paletteHotkey = pressed;
+    else screenAreaHotkey = pressed;
+
+    recording = null;
   }
 </script>
 
@@ -597,6 +706,82 @@
           <p class="text-xs opacity-50">{t("welcome-provider-verify-first")}</p>
         {/if}
       </section>
+    {:else if step === "pictures"}
+      <section class="flex flex-col gap-3">
+        <h2 class="text-sm font-medium">{t("welcome-pictures-title")}</h2>
+        <p class="text-sm opacity-60">{t("welcome-pictures-detail")}</p>
+
+        <div class="flex flex-col gap-2">
+          <label class="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="pictures"
+              checked={pictures === "same"}
+              onchange={() => choosePictures("same")}
+            />
+            {t("welcome-pictures-same", { model })}
+          </label>
+
+          <label class="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="pictures"
+              checked={pictures === "other"}
+              onchange={() => choosePictures("other")}
+            />
+            {t("welcome-pictures-other")}
+          </label>
+
+          {#if pictures === "other"}
+            <div class="ml-6 flex items-end gap-2">
+              {#if offered && offered.length > 0}
+                <select
+                  bind:value={seeing}
+                  class={FIELD}
+                  aria-label={t("welcome-pictures-other")}
+                >
+                  {#each offered as id (id)}
+                    <option value={id}>{id}</option>
+                  {/each}
+                </select>
+              {:else}
+                <input
+                  bind:value={seeing}
+                  class={FIELD}
+                  autocorrect="off"
+                  aria-label={t("welcome-pictures-other")}
+                />
+                <button
+                  type="button"
+                  class={BUTTON}
+                  disabled={asking}
+                  onclick={askForModels}
+                >
+                  {t("settings-fetch-models")}
+                </button>
+              {/if}
+            </div>
+          {/if}
+
+          <label class="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="pictures"
+              checked={pictures === "later"}
+              onchange={() => choosePictures("later")}
+            />
+            {t("welcome-pictures-later")}
+          </label>
+        </div>
+
+        {#if asking}
+          <p class="text-xs opacity-50">{t("settings-asking-provider")}</p>
+        {:else if said && !said.well}
+          <p class="text-xs text-red-600 dark:text-red-400">{said.message}</p>
+        {:else if pictures === "later"}
+          <p class="text-xs opacity-50">{t("welcome-pictures-in-settings")}</p>
+        {/if}
+      </section>
     {:else if step === "accessibility"}
       <section class="flex flex-col gap-3">
         <h2 class="text-sm font-medium">{t("welcome-accessibility-title")}</h2>
@@ -640,6 +825,43 @@
           </p>
         {/if}
       </section>
+    {:else if step === "hotkeys"}
+      <section class="flex flex-col gap-3">
+        <h2 class="text-sm font-medium">{t("welcome-hotkeys-title")}</h2>
+        <p class="text-sm opacity-60">{t("welcome-hotkeys-detail")}</p>
+
+        <HotkeyField
+          which="palette"
+          caption={t("settings-palette-hotkey")}
+          bind:bound={paletteHotkey}
+          fallback={paletteDefault}
+          bind:recording
+        />
+        <HotkeyField
+          which="screen_area"
+          caption={t("settings-screen-area-hotkey")}
+          bind:bound={screenAreaHotkey}
+          fallback={screenAreaDefault}
+          bind:recording
+          off={screenAreaOff}
+        />
+        {#if screenAreaOff}
+          <p id="screen_area-unavailable" class="text-xs opacity-50">
+            {t("settings-screen-area-unavailable")}
+          </p>
+        {/if}
+        <p id="hotkey-rule" class="text-xs opacity-50">
+          {t("settings-palette-hotkey-rule")}
+        </p>
+
+        {#if offersPause}
+          <p class="text-sm opacity-60">{t("welcome-hotkeys-pause")}</p>
+        {/if}
+
+        {#each unclaimed as refusal (refusal)}
+          <p class="text-xs text-red-600 dark:text-red-400">{refusal}</p>
+        {/each}
+      </section>
     {:else}
       <section class="flex flex-col gap-3">
         <h2 class="text-sm font-medium">{t("welcome-done-title")}</h2>
@@ -656,7 +878,11 @@
         {#if clipboardOnly}
           <p class="text-sm opacity-60">{clipboardOnly}</p>
         {/if}
-        {#if areaHotkey}
+        <!-- An area is a picture, and a picture with no Model to see it is a
+             gesture that ends in an error. -->
+        {#if areaHotkey && !saved?.default_vision_model}
+          <p class="text-sm opacity-60">{t("welcome-done-no-pictures")}</p>
+        {:else if areaHotkey}
           <p class="text-sm opacity-60">
             {t("welcome-done-area", { hotkey: areaHotkey })}
           </p>

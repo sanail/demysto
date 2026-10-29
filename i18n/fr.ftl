@@ -294,6 +294,16 @@ welcome-done-detail = Sélectionnez du texte n'importe où et appuyez sur { $hot
 welcome-done-clipboard = Copiez du texte avec Ctrl+C et appuyez sur { $hotkey }. Une liste d'actions s'ouvre au milieu de l'écran ; Entrée lance celle qui est en surbrillance.
 welcome-done-area = Appuyez sur { $hotkey } pour tracer une zone de l'écran et ouvrir la liste des actions sur elle.
 welcome-done-tray = Demysto attend désormais dans la zone de notification, et son menu atteint tout ce qu'atteint le raccourci.
+welcome-pictures-title = Questions sur les images
+welcome-pictures-detail = Une capture d'écran ou une image copiée va à un modèle qui sait voir. Tous ne le savent pas.
+welcome-pictures-same = Le même modèle, { $model }
+welcome-pictures-other = Un autre modèle
+welcome-pictures-later = Pas maintenant
+welcome-pictures-in-settings = Vous pourrez en choisir un plus tard dans les réglages, onglet Modèles.
+welcome-hotkeys-title = Raccourcis
+welcome-hotkeys-detail = Gardez ceux-ci ou enregistrez les vôtres. Les réglages permettent de les changer plus tard.
+welcome-hotkeys-pause = Pause ne tape rien, ce qui en fait un bon raccourci : Pause pour la liste des actions, Alt+Pause pour une zone de l'écran.
+welcome-done-no-pictures = Pour poser une question sur une zone de l'écran, choisissez un modèle pour les images dans les réglages.
 
 ## What an update could not do
 

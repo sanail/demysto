@@ -290,6 +290,16 @@ welcome-done-detail = Выделите где угодно текст и наж�
 welcome-done-clipboard = Скопируйте текст через Ctrl+C и нажмите { $hotkey }. Посреди экрана откроется список действий; Enter запустит выбранное.
 welcome-done-area = Нажмите { $hotkey }, чтобы выделить область экрана и открыть для неё список действий.
 welcome-done-tray = Дальше Demysto ждёт в трее, и через его меню доступно всё то же, что и по горячей клавише.
+welcome-pictures-title = Вопросы об изображениях
+welcome-pictures-detail = Снимок экрана или скопированное изображение уходит модели, которая умеет видеть. Умеет не каждая.
+welcome-pictures-same = Та же модель, { $model }
+welcome-pictures-other = Другая модель
+welcome-pictures-later = Не сейчас
+welcome-pictures-in-settings = Выбрать её можно потом в настройках, на вкладке «Модели».
+welcome-hotkeys-title = Горячие клавиши
+welcome-hotkeys-detail = Оставьте эти или запишите свои. Потом их можно поменять в настройках.
+welcome-hotkeys-pause = Pause ничего не печатает, поэтому удобна как горячая клавиша: Pause — для списка действий, Alt+Pause — для области экрана.
+welcome-done-no-pictures = Чтобы спрашивать об области экрана, выберите модель для изображений в настройках.
 
 ## What an update could not do
 

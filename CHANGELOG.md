@@ -9,6 +9,12 @@ What each release brought, newest first.
 - The × next to "Chats" clears this session's chats, the open one included,
   after asking first.
 
+### Welcome window
+
+- The welcome window asks which Model answers questions about pictures.
+- The welcome window lets you change both Hotkeys, and suggests Pause and
+  Alt+Pause on keyboards that have it.
+
 ## 1.2.0 — 2026-10-22
 
 ### Palette
