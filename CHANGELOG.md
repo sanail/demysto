@@ -2,7 +2,7 @@
 
 What each release brought, newest first.
 
-## Unreleased
+## 1.3.0 — 2026-10-30
 
 ### Chat
 
