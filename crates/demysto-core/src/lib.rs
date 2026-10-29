@@ -457,6 +457,14 @@ impl Demysto {
         self.store.lock().unwrap().show(id).cloned()
     }
 
+    /// Forgets everything this session was asked about and stops the Turn under
+    /// way, whose answer then has nowhere to go.
+    pub fn clear_conversations(&self) {
+        self.store.lock().unwrap().clear();
+        *self.last_capture.lock().unwrap() = None;
+        self.stop();
+    }
+
     /// Stops the Turn under way, keeping what has already arrived. Does nothing
     /// when there is no Turn to stop.
     pub fn stop(&self) {
@@ -3130,6 +3138,50 @@ mod tests {
         assert_eq!(ids.len(), conversation::CAP);
         assert_eq!(ids.first(), Some(&(conversation::CAP as u64 + 1)));
         assert_eq!(ids.last(), Some(&2));
+    }
+
+    #[test]
+    fn clearing_forgets_every_conversation_and_the_next_run_opens_a_new_one() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(answering("an answer"))
+            .create();
+
+        let demysto = ready_to_run(&server, "a paragraph");
+        run(&demysto);
+        run(&demysto);
+
+        demysto.clear_conversations();
+
+        assert!(demysto.conversations().is_empty());
+        assert_eq!(demysto.conversation(), None);
+        assert_eq!(demysto.last_capture(), None);
+
+        demysto.capture();
+        run(&demysto);
+
+        assert_eq!(demysto.conversations().len(), 1);
+        assert_eq!(turns(&demysto), [(None, answered("an answer"))]);
+    }
+
+    #[test]
+    fn a_run_cleared_part_way_stops_and_leaves_nothing_behind() {
+        let mut server = Server::new();
+        let _endpoint = server
+            .mock("POST", "/v1/chat/completions")
+            .with_body(streaming(&["A painting ", "of a pipe ", "is not a pipe."]))
+            .create();
+
+        let demysto = ready_to_run(&server, "Ceci n'est pas une pipe");
+
+        let outcome = demysto.run("explain", &BTreeMap::new(), |_| {
+            demysto.clear_conversations()
+        });
+
+        assert_eq!(outcome, RunOutcome::Stopped("A painting ".to_owned()));
+        assert!(demysto.conversations().is_empty());
+        assert_eq!(demysto.conversation(), None);
     }
 
     #[test]

@@ -67,7 +67,11 @@ palette-keys-closing = Échap pour fermer
 
 result-conversations = Discussions
 result-conversation-unnamed = Discussion
-result-nothing-asked-yet = Rien de demandé pour l'instant.
+result-clear = Effacer les discussions
+result-clear-asked = Effacer toutes les discussions ?
+result-clear-confirm = Effacer
+result-clear-cancel = Annuler
+result-list-empty = Aucune discussion.
 result-no-chats = Aucune discussion dans cette session. Les discussions ne sont gardées que jusqu'à ce que Demysto se ferme.
 result-quotation-label = Le texte de cette discussion
 result-picture-label = L'image de cette discussion

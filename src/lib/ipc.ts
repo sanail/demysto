@@ -512,6 +512,11 @@ export function conversations(): Promise<Summary[]> {
   return invoke<Summary[]>("conversations");
 }
 
+/** Forgets this session's Conversations and puts the window away. */
+export function clearConversations(): Promise<void> {
+  return invoke<void>("clear_conversations");
+}
+
 /** Puts an earlier Conversation on screen. */
 export function showConversation(id: number): Promise<Conversation | null> {
   return invoke<Conversation | null>("show_conversation", { id });

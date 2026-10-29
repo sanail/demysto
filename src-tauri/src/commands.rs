@@ -281,6 +281,14 @@ pub fn show_conversation(demysto: State<'_, Demysto>, id: u64) -> Option<Convers
     demysto.show_conversation(id)
 }
 
+/// Forgets this session's Conversations and puts away the window that showed
+/// them, which has nothing left to show.
+#[tauri::command]
+pub fn clear_conversations<R: Runtime>(demysto: State<'_, Demysto>, window: WebviewWindow<R>) {
+    demysto.clear_conversations();
+    dismiss(window);
+}
+
 /// Says where a Conversation window wants an answer sent as it arrives.
 #[tauri::command]
 pub fn show_answers_on(channel: Channel<crate::result::Handover>) {

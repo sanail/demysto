@@ -67,8 +67,12 @@ palette-keys-closing = Esc zum Schließen
 
 result-conversations = Chats
 result-conversation-unnamed = Chat
-result-nothing-asked-yet = Noch nichts gefragt.
-result-no-chats = In dieser Sitzung gibt es noch keine Chats. Chats bleiben nur erhalten, bis Demysto beendet wird.
+result-clear = Chats löschen
+result-clear-asked = Alle Chats löschen?
+result-clear-confirm = Löschen
+result-clear-cancel = Abbrechen
+result-list-empty = Keine Chats.
+result-no-chats = In dieser Sitzung gibt es keine Chats. Chats bleiben nur erhalten, bis Demysto beendet wird.
 result-quotation-label = Der Text dieses Chats
 result-picture-label = Das Bild dieses Chats
 result-picture-enlarged-label = Bild, vergrößert

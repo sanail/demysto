@@ -2,6 +2,13 @@
 
 What each release brought, newest first.
 
+## Unreleased
+
+### Chat
+
+- The × next to "Chats" clears this session's chats, the open one included,
+  after asking first.
+
 ## 1.2.0 — 2026-10-22
 
 ### Palette

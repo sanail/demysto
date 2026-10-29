@@ -114,7 +114,7 @@ which language to translate into. **Custom…** asks what you want done, which
 makes it handy for one-off requests that no Action covers.
 
 **Chats** in the chat window lists your recent conversations. They are kept only
-until you quit Demysto.
+until you quit Demysto, and the **×** next to **Chats** clears them sooner.
 
 You can change the Hotkey in **Settings → General**.
 

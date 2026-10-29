@@ -208,6 +208,7 @@ pub fn run() {
             commands::captured_picture,
             commands::conversations,
             commands::show_conversation,
+            commands::clear_conversations,
             commands::show_answers_on,
             commands::catalogue,
             commands::hotkeys,

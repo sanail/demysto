@@ -63,8 +63,12 @@ palette-keys-closing = Esc — закрыть
 
 result-conversations = Чаты
 result-conversation-unnamed = Чат
-result-nothing-asked-yet = Здесь пока пусто.
-result-no-chats = В этом сеансе чатов пока не было. Чаты хранятся только до завершения Demysto.
+result-clear = Очистить чаты
+result-clear-asked = Очистить все чаты?
+result-clear-confirm = Очистить
+result-clear-cancel = Отмена
+result-list-empty = Чатов нет.
+result-no-chats = В этом сеансе чатов нет. Чаты хранятся только до завершения Demysto.
 result-quotation-label = Текст этого чата
 result-picture-label = Изображение этого чата
 result-picture-enlarged-label = Изображение крупно

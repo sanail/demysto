@@ -522,6 +522,13 @@ impl Store {
         self.held(id)
     }
 
+    /// Forgets every Conversation, the one on screen included. Identifiers keep
+    /// counting, so that a Run still finishing finds nothing to put its answer in.
+    pub(crate) fn clear(&mut self) {
+        self.held.clear();
+        self.showing = None;
+    }
+
     /// This session's Conversations, newest first.
     pub(crate) fn summaries(&self) -> Vec<Summary> {
         self.held.iter().map(Conversation::summary).collect()

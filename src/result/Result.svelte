@@ -3,6 +3,7 @@
   import { copy } from "../lib/clipboard";
   import {
     askAtOriginalResolution,
+    clearConversations,
     continueAnswer,
     conversation,
     conversations,
@@ -84,6 +85,9 @@
         reasoning = false;
         carryingOn = false;
         close(false);
+        // A Turn starting is the user changing their mind: clearing now would
+        // take what they have just asked and not yet seen.
+        if (clearing) keepConversations();
         refresh();
       }),
       onAnswered(() => {
@@ -101,6 +105,7 @@
       // window was closed.
       onReopened(async () => {
         enlarged = false;
+        clearing = false;
         await refresh();
         composer?.focus();
       }),
@@ -483,6 +488,44 @@
     if (returning) opener?.focus();
   }
 
+  /** Whether the window is asking before it clears every Conversation. */
+  let clearing = $state(false);
+  let clearOpener = $state<HTMLButtonElement>();
+  let canceller = $state<HTMLButtonElement>();
+  let confirmation = $state<HTMLElement>();
+
+  async function askToClear() {
+    close(false);
+    clearing = true;
+
+    await tick();
+    canceller?.focus();
+  }
+
+  /**
+   * Takes the question back; the focus returns to × only from the question
+   * itself. Cancel passes true: WebKit on macOS does not focus a clicked button.
+   */
+  async function keepConversations(
+    returning = confirmation?.contains(document.activeElement) ?? false,
+  ) {
+    clearing = false;
+
+    await tick();
+    if (returning) clearOpener?.focus();
+  }
+
+  async function clearAll() {
+    clearing = false;
+    question = "";
+    progress = null;
+    await clearConversations();
+
+    // Emptied while hidden, so that reopening from the tray cannot flash a
+    // Conversation the user has just cleared.
+    await refresh();
+  }
+
   /** Steps between the Conversations, wrapping round as the Palette's list does. */
   function onMenuKeydown(event: KeyboardEvent) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -630,6 +673,8 @@
       shrink();
     } else if (listing) {
       close();
+    } else if (clearing) {
+      keepConversations();
     } else {
       dismiss();
     }
@@ -657,60 +702,106 @@
       {showing?.action?.name ?? t("app-name")}
     </h1>
 
-    <!-- Both halves under one element, because leaving the menu is a matter of
-         where the focus went and only this knows what counts as still inside. -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="relative" onfocusout={leaving}>
-      <button
-        bind:this={opener}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={listing}
-        class="rounded border border-neutral-300 px-2 py-0.5 text-xs
-               hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-        onclick={toggle}
+    {#if clearing}
+      <div
+        bind:this={confirmation}
+        role="group"
+        aria-labelledby="clear-asked"
+        class="flex items-baseline gap-1.5 text-xs"
       >
-        {t("result-conversations")}
-      </button>
-
-      {#if listing}
-        <!-- A menu and not a list of choices: every item takes the window
-             somewhere rather than setting a value. -->
-        <ul
-          bind:this={menu}
-          role="menu"
-          tabindex="-1"
-          aria-label={t("result-conversations")}
-          onkeydown={onMenuKeydown}
-          class="absolute right-0 top-full z-10 mt-1 max-h-64 w-80 overflow-y-auto
-                 rounded border border-neutral-300 bg-white py-1 text-xs shadow-lg
-                 outline-none dark:border-neutral-700 dark:bg-neutral-800"
+        <span id="clear-asked">{t("result-clear-asked")}</span>
+        <button
+          type="button"
+          class="rounded border border-red-600 px-2 py-0.5 text-red-600
+                 hover:bg-neutral-100 dark:border-red-400 dark:text-red-400
+                 dark:hover:bg-neutral-800"
+          onclick={clearAll}
         >
-          {#each list as held (held.id)}
-            <li role="none">
-              <button
-                type="button"
-                role="menuitem"
-                class="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left
-                       hover:bg-neutral-100 focus:bg-neutral-100 focus:outline-none
-                       dark:hover:bg-neutral-700 dark:focus:bg-neutral-700"
-                class:font-semibold={held.id === showing?.id}
-                onclick={() => goBackTo(held.id)}
-              >
-                <span>{held.name ?? t("result-conversation-unnamed")}</span>
-                {#if held.about !== ""}
-                  <span class="w-full truncate opacity-50">{held.about}</span>
-                {/if}
-              </button>
-            </li>
-          {:else}
-            <li role="none" class="px-3 py-1.5 opacity-50">
-              {t("result-nothing-asked-yet")}
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </div>
+          {t("result-clear-confirm")}
+        </button>
+        <button
+          bind:this={canceller}
+          type="button"
+          class="rounded border border-neutral-300 px-2 py-0.5
+                 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+          onclick={() => keepConversations(true)}
+        >
+          {t("result-clear-cancel")}
+        </button>
+      </div>
+    {:else}
+      <div class="flex items-baseline gap-1.5">
+        <!-- Both halves under one element, because leaving the menu is a matter of
+             where the focus went and only this knows what counts as still inside. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="relative" onfocusout={leaving}>
+          <button
+            bind:this={opener}
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={listing}
+            class="rounded border border-neutral-300 px-2 py-0.5 text-xs
+                   hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            onclick={toggle}
+          >
+            {t("result-conversations")}
+          </button>
+
+          {#if listing}
+            <!-- A menu and not a list of choices: every item takes the window
+                 somewhere rather than setting a value. -->
+            <ul
+              bind:this={menu}
+              role="menu"
+              tabindex="-1"
+              aria-label={t("result-conversations")}
+              onkeydown={onMenuKeydown}
+              class="absolute right-0 top-full z-10 mt-1 max-h-64 w-80 overflow-y-auto
+                     rounded border border-neutral-300 bg-white py-1 text-xs shadow-lg
+                     outline-none dark:border-neutral-700 dark:bg-neutral-800"
+            >
+              {#each list as held (held.id)}
+                <li role="none">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left
+                           hover:bg-neutral-100 focus:bg-neutral-100 focus:outline-none
+                           dark:hover:bg-neutral-700 dark:focus:bg-neutral-700"
+                    class:font-semibold={held.id === showing?.id}
+                    onclick={() => goBackTo(held.id)}
+                  >
+                    <span>{held.name ?? t("result-conversation-unnamed")}</span>
+                    {#if held.about !== ""}
+                      <span class="w-full truncate opacity-50">{held.about}</span>
+                    {/if}
+                  </button>
+                </li>
+              {:else}
+                <li role="none" class="px-3 py-1.5 opacity-50">
+                  {t("result-list-empty")}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+
+        <!-- A Conversation on screen is the only sign the session holds any. -->
+        {#if showing}
+          <button
+            bind:this={clearOpener}
+            type="button"
+            aria-label={t("result-clear")}
+            title={t("result-clear")}
+            class="rounded border border-neutral-300 px-2 py-0.5 text-xs
+                   hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            onclick={askToClear}
+          >
+            ×
+          </button>
+        {/if}
+      </div>
+    {/if}
   </header>
 
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -977,8 +1068,8 @@
 
   <footer class="flex flex-col gap-1.5">
     {#if showing === null}
-      <!-- Nothing to follow up: a chat is always a Run of an Action on a
-           Selection, and none has been run yet. -->
+      <!-- Nothing to follow up: a Conversation is always a Run of an Action
+           on a Selection, and the session holds none. -->
     {:else if sealed}
       <!-- Where the input box was, and not beside it: a box that cannot be
            used is worse than none, because it reads as a window that has
