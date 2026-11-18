@@ -1,60 +1,32 @@
-//! Model resolution: from an Action and a Selection to exactly one Model, or to
-//! an error saying which setting is missing.
-//!
-//! The chain the spec's *Model resolution* fixes is the Action's own binding,
-//! then the Default Vision Model where the Selection is an image, then the
-//! Default Model. An image whose Default Vision Model is not nominated is where
-//! the chain ends rather than falling through — see [`no_vision_model`].
-//! Nothing here reaches the disk or the network: it works on the settings as
-//! `config` read them, which is what lets the whole chain be tested without
-//! either.
-//!
-//! Every failure here is a [`RunError::Configuration`], because every one of
-//! them is fixed in the settings file rather than by trying again.
+//! Resolve Models against a settings snapshot so this decision needs neither disk nor network access.
 
 use std::fmt;
 
-use crate::config::{self, Config, Key, Model, Provider, MODEL_SETTING, VISION_SETTING};
+use crate::config::{
+    self, Config, Key, Model, Provider, SkipReasoning, MODEL_SETTING, VISION_SETTING,
+};
 use crate::i18n::{say, Words};
 use crate::run::RunError;
 use crate::selection::Kind;
 
-/// A Provider as a request reaches it: where it answers, and what to
-/// authenticate with.
-///
-/// Owned rather than borrowed out of the settings, because the settings are no
-/// longer read once and left alone: the window writes them while Demysto runs,
-/// and nothing may hold them locked for the two minutes a Provider is allowed
-/// to take over an answer.
+/// Own the Endpoint so a pending request does not hold Settings locked.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Endpoint {
-    /// What the user calls this Provider in their settings file.
-    ///
-    /// Carried so that a refused key can name the Provider whose settings fix
-    /// it: the base URL is what a message about reaching an address should say,
-    /// and the name is what the window opens a section by.
+    /// The name lets an authentication error point to the correct entry in Settings.
     pub(crate) provider: String,
     pub(crate) base_url: String,
-    /// `None` for a service that has no key to send — see [`key_for`].
     pub(crate) api_key: Option<String>,
-    /// Whether the request may tell this service not to reason before it
-    /// answers. See [`config::Reasoning`].
-    pub(crate) skip_reasoning: bool,
+    pub(crate) skip_reasoning: SkipReasoning,
 }
 
-/// An Endpoint and the Model on it: everything a Run needs in order to ask
-/// something.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Resolved {
     pub(crate) endpoint: Endpoint,
-    /// What the Provider calls the Model, which is what the request carries.
     pub(crate) model: String,
 }
 
 impl fmt::Debug for Endpoint {
-    /// Written out rather than derived, for the reason [`Provider`]'s own is:
-    /// this is the one place the key sits unwrapped, and a key that can be
-    /// printed is a key that reaches a panic message or a log (ADR-0010).
+    /// Keep the unwrapped key out of debug output, including logs and panic messages.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Endpoint")
             .field("provider", &self.provider)
@@ -74,10 +46,6 @@ impl fmt::Debug for Resolved {
     }
 }
 
-/// The one Model a Run of this Action against a Selection of this kind uses.
-///
-/// `binding` is the Model the Action names. No built-in names one, and ticket
-/// 09 is where an Override gives an Action its own.
 pub(crate) fn resolve(
     config: &Config,
     binding: Option<&str>,
@@ -97,17 +65,12 @@ pub(crate) fn resolve(
     })
 }
 
-/// Where a Provider answers and what to authenticate with, taken out of the
-/// settings so that the request can be made without them.
-///
-/// Takes the two fields it reaches a Provider by rather than the Provider, so
-/// that the settings window can ask this of a Provider that is still being
-/// typed — one that has no Models yet, and is in no file.
+/// Accept the individual fields so Settings can verify a draft before it has been saved.
 pub(crate) fn endpoint_for(
     provider: &str,
     base_url: &str,
     key: &Key,
-    skip_reasoning: bool,
+    skip_reasoning: SkipReasoning,
 ) -> Result<Endpoint, RunError> {
     Ok(Endpoint {
         provider: provider.to_owned(),
@@ -117,14 +80,7 @@ pub(crate) fn endpoint_for(
     })
 }
 
-/// The key to reach a Provider with: `None` where the service has none to send,
-/// and an error where it wants one and the user has not supplied it.
-///
-/// The one place a key is taken out of the settings, which is what ADR-0002
-/// asks for in exchange for keeping it on disk: "all key access goes through a
-/// single interface in the Rust layer". Asked at the moment a Provider is
-/// reached for rather than at load, so that one Provider missing its key costs
-/// the user only the Models that Provider offers.
+/// Defer key errors so one Provider with a missing key does not prevent using the others.
 pub(crate) fn key_for(key: &Key) -> Result<Option<&str>, RunError> {
     match key {
         Key::Found { key, .. } => Ok(Some(key)),
@@ -135,15 +91,13 @@ pub(crate) fn key_for(key: &Key) -> Result<Option<&str>, RunError> {
     }
 }
 
-/// Which Model the chain arrives at, before anything is asked about reaching it.
 fn chosen<'a>(
     config: &'a Config,
     binding: Option<&str>,
     kind: Kind,
     words: &Words,
 ) -> Result<(&'a Provider, &'a Model), RunError> {
-    // What the Action names wins outright, images included: a binding is the
-    // user saying which Model, and Demysto is in no position to know better.
+    // An Action's explicit binding takes precedence for both text and images.
     if let Some(name) = binding {
         return config
             .model(name)
@@ -151,9 +105,7 @@ fn chosen<'a>(
     }
 
     if kind == Kind::Image {
-        // Whether the Model is ticked vision-capable is not asked. The tick is
-        // stated by a person rather than discovered, and a field somebody fills
-        // in by hand is not grounds for refusing them (user story 82).
+        // A manually chosen binding can use a Model whose vision capability was left undeclared.
         let Some(name) = config.default_vision_model.as_deref() else {
             return Err(no_vision_model(config, words));
         };
@@ -166,7 +118,6 @@ fn chosen<'a>(
     default(config, words)
 }
 
-/// The Model an Action that binds none resolves to.
 fn default<'a>(config: &'a Config, words: &Words) -> Result<(&'a Provider, &'a Model), RunError> {
     let Some(name) = config.default_model.as_deref() else {
         return Err(nothing_nominated(config, words));
@@ -177,8 +128,7 @@ fn default<'a>(config: &'a Config, words: &Words) -> Result<(&'a Provider, &'a M
         .ok_or_else(|| nominates_nothing(config, MODEL_SETTING, name, words))
 }
 
-/// The Models there are to choose from, so that the user can fix a name without
-/// going to look one up.
+/// List available Models so the user can fix a name without looking one up.
 fn offered(config: &Config, words: &Words) -> String {
     let names: Vec<String> = config
         .models()
@@ -216,12 +166,7 @@ fn nominates_nothing(config: &Config, setting: &str, name: &str, words: &Words) 
     }
 }
 
-/// What the user is told when there is a picture to ask about and no Model
-/// nominated to ask about it.
-///
-/// A failure of its own rather than the fall-through v1 had: a Model that
-/// cannot see, handed a picture, answers confidently about nothing, and an
-/// answer like that is indistinguishable from a right one (user story 80).
+/// A text-only fallback could confidently answer without seeing the picture.
 fn no_vision_model(config: &Config, words: &Words) -> RunError {
     RunError::Configuration {
         message: say!(
@@ -248,17 +193,7 @@ fn nothing_nominated(config: &Config, words: &Words) -> RunError {
 
 #[cfg(test)]
 mod tests {
-    //! The chain the spec's *Testing Decisions* asks to see tested "down the
-    //! full chain, including the unresolvable case", tested here rather than at
-    //! the facade — because one of its three legs cannot be reached from there:
-    //! no built-in Action binds a Model, so a seam-level test could not
-    //! exercise a binding. What a Run does reach is asserted at the facade
-    //! alongside everything else; this is the rest of the chain, and it follows
-    //! `config`'s own precedent of testing key resolution beside the code that
-    //! resolves.
-    //!
-    //! Settings are built here rather than parsed, so that these are about
-    //! which Model the chain arrives at and not about what TOML says.
+    //! Build Settings directly to exercise bindings independently of TOML parsing.
 
     use std::path::PathBuf;
 
@@ -266,8 +201,6 @@ mod tests {
 
     const FILE: &str = "/somewhere/settings.toml";
 
-    /// A Provider with a key, offering the Models named — each with whether it
-    /// accepts images.
     fn provider(name: &str, models: &[(&str, bool)]) -> Provider {
         Provider {
             name: name.to_owned(),
@@ -283,13 +216,10 @@ mod tests {
                     vision: *vision,
                 })
                 .collect(),
-            // Not what these tests are about: they are about which Model the
-            // chain arrives at. `provider.rs` is where the field is asserted.
-            skip_reasoning: false,
+            skip_reasoning: SkipReasoning::Unmentioned,
         }
     }
 
-    /// A Provider whose service has no keys at all — a server on this machine.
     fn local(name: &str, models: &[(&str, bool)]) -> Provider {
         Provider {
             key: Key::NotNeeded,
@@ -297,7 +227,6 @@ mod tests {
         }
     }
 
-    /// A Provider whose service wants a key and where none was found.
     fn wanting_a_key(name: &str, models: &[(&str, bool)]) -> Provider {
         Provider {
             key: Key::Missing(format!(
@@ -318,8 +247,6 @@ mod tests {
         }
     }
 
-    /// One Provider offering one blind Model, nominated as the Default Model —
-    /// the whole of what most users configure.
     fn one_model() -> Config {
         settings(
             vec![provider("cheap", &[("everyday", false)])],
@@ -328,7 +255,6 @@ mod tests {
         )
     }
 
-    /// A cheap blind Model and an expensive seeing one, at two Providers.
     fn both() -> Config {
         settings(
             vec![
@@ -340,13 +266,11 @@ mod tests {
         )
     }
 
-    /// The Model the chain arrives at, by the name it is nominated by.
     fn resolved(config: &Config, binding: Option<&str>, kind: Kind) -> String {
         let resolved = resolve(config, binding, kind, &crate::i18n::english())
             .expect("the chain should resolve");
 
-        // The Provider is named from the endpoint it answers at, which is what
-        // resolving to a Model at one Provider rather than another comes to.
+        // Include the Provider identity because the same Model ID may be offered at different addresses.
         let provider = config
             .providers
             .iter()
@@ -356,7 +280,6 @@ mod tests {
         format!("{}/{}", provider.name, resolved.model)
     }
 
-    /// What the user is told when it arrives at nothing.
     fn failure(config: &Config, binding: Option<&str>, kind: Kind) -> String {
         let error = resolve(config, binding, kind, &crate::i18n::english())
             .expect_err("the chain should not resolve");
@@ -379,8 +302,6 @@ mod tests {
 
     #[test]
     fn a_binding_wins_over_both_defaults() {
-        // Including for an image, where the Default Vision Model would
-        // otherwise have it: a binding is the user saying which Model.
         assert_eq!(
             resolved(&both(), Some("cheap/everyday"), Kind::Image),
             "cheap/everyday"
@@ -413,9 +334,7 @@ mod tests {
 
     #[test]
     fn an_image_with_no_vision_model_nominated_names_the_setting_that_fixes_it() {
-        // Not the Default Model, which was v1's placeholder and is gone: a
-        // Model that cannot see would answer about nothing at all, and say so
-        // as confidently as it says everything else.
+        // A text-only fallback could answer confidently without seeing the picture.
         let message = failure(&one_model(), None, Kind::Image);
 
         assert!(message.contains("default_vision_model"), "{message}");
@@ -425,8 +344,7 @@ mod tests {
 
     #[test]
     fn a_vision_model_nobody_ticked_as_one_is_used_anyway() {
-        // The tick is stated by a person rather than discovered, and a field
-        // somebody fills in by hand is not grounds for refusing them.
+        // A binding expresses the user's choice even when vision capability was left undeclared.
         let config = settings(
             vec![provider("cheap", &[("everyday", false)])],
             Some("cheap/everyday"),
@@ -516,8 +434,6 @@ mod tests {
 
     #[test]
     fn the_resolved_model_carries_the_provider_that_offers_it() {
-        // Two Providers, two keys, two addresses: resolving to the Model is
-        // only useful if it says which of them to ask.
         let config = both();
         let resolved = resolve(&config, None, Kind::Image, &crate::i18n::english())
             .expect("the chain should resolve");

@@ -1,64 +1,42 @@
-//! The Provider adapter: one implementation of the OpenAI Chat Completions
-//! contract, parameterised by base URL and credentials.
-//!
-//! Every service Demysto supports is that contract at a different address, so
-//! there is one adapter and no vendor branching (the spec's *Core modules*).
-//! This is the only module in the crate that performs network I/O, and the only
-//! one the test suite stands a server in front of rather than a fake: what is
-//! asserted is the request that actually went out.
+//! All Provider network I/O lives here so callers can work in terms of Conversations.
 
+use std::collections::HashMap;
 use std::io::Read;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
+use crate::config::SkipReasoning;
 use crate::conversation::Said;
 use crate::i18n::{say, Words};
 use crate::model::{Endpoint, Resolved};
 use crate::run::{Arriving, RunError, Stopping};
 use crate::sse;
 
-/// The contract's endpoints, joined onto whatever base URL the user gave.
 const ANSWERING: &str = "chat/completions";
 const MODELS: &str = "models";
 
-/// How long a Provider has to answer at all before Demysto stops waiting. Long,
-/// because a slow answer is still an answer, and the user has Stop for the
-/// answer that is going nowhere.
-///
-/// Carried into each request rather than built into the client, so that the
-/// suite can take the waiting out of it the way it takes it out of the
-/// throttle: a timeout nobody can reach is a timeout nobody has tested.
+/// Pass the timeout per request so callers can choose how long to wait.
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// How long the endpoint has to accept a connection. Short, because a base URL
-/// that is wrong is wrong immediately, and the user should hear so.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// What a Provider sends when it has no more of the answer to send.
+// Capability lookup has its own short deadline so a slow catalog cannot hold up a Turn.
+const MODEL_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
+const MODEL_CAPABILITY_TTL: Duration = Duration::from_secs(3600);
+const MODEL_LOOKUP_RETRY: Duration = Duration::from_secs(30);
+
 const DONE: &str = "[DONE]";
 
-/// How large a read off the socket may be. A fragment of an answer is a few
-/// bytes; this is sized so that a fast Model's whole burst arrives in one read
-/// rather than a dozen.
+/// Size the buffer to fit a fast Model's typical burst in one read.
 const READ_SIZE: usize = 8 * 1024;
 
-/// How much of a body that turns out not to be the contract's is held on to, so
-/// that the user can be shown what arrived instead. Generous in bytes because
-/// [`snippet`] counts in characters.
+/// Reserve enough bytes to keep the diagnostic snippet even when characters use multiple bytes.
 const BODY_KEPT: usize = 4 * 300;
 
-/// Puts a Conversation to a Provider and delivers the reply as it arrives.
-///
-/// `said` is the whole Conversation as the contract wants it — who said each
-/// part, and what they said — ending on the Turn being asked now. The fragments
-/// of the reply are handed over one at a time and not accumulated here: the
-/// caller is assembling them anyway, and two copies of the same answer would be
-/// two places for it to differ.
-///
-/// Answers as soon as `stopping` says the user has stopped waiting, which
-/// leaves the caller holding what had arrived by then.
+/// The caller owns partial replies so it can keep the answer if the stream is interrupted.
 pub(crate) fn answer(
     resolved: &Resolved,
     said: &[(&str, Said)],
@@ -69,16 +47,21 @@ pub(crate) fn answer(
 ) -> Result<(), RunError> {
     let provider = &resolved.endpoint;
 
-    // Timed from the start of the request, because the elapsed time is what
-    // says a read was cut short by Demysto's own timeout rather than by the
-    // Provider. See `broke_off`.
+    if stopping.stopped() {
+        return Ok(());
+    }
+    let request = asking(provider, &resolved.model, said, timeout, words)?;
+    if stopping.stopped() {
+        return Ok(());
+    }
+
+    // A capability lookup should not count toward the answer's timeout.
     let started = Instant::now();
 
-    let mut response = asking(provider, &resolved.model, said, timeout, words)?
+    let mut response = request
         .send()
         .map_err(|error| sending(provider, timeout, &error, words))?;
 
-    // A refusal is not a stream: it is one body, and one worth showing whole.
     let status = response.status();
     if !status.is_success() {
         let body = response
@@ -93,24 +76,15 @@ pub(crate) fn answer(
     let mut body_start = Vec::new();
     let mut delivered = false;
     let mut finished = false;
-    // Handed over once and not per event: a Model reasons in hundreds of
-    // fragments, and "the Model is reasoning" is one piece of news however many
-    // of them carry it.
     let mut said_reasoning = false;
 
     'reading: loop {
-        // Stop is looked for here as well as after each fragment, so that it is
-        // seen between two reads rather than only between two fragments of one.
-        // A stream that has gone silent is a different matter: this thread is
-        // inside the read until the Provider says something or the request
-        // times out, and Stop waits with it.
+        // A blocking socket read can delay Stop until the Provider sends data or the request times out.
         if stopping.stopped() {
             return Ok(());
         }
 
-        // A stream that breaks part-way through is reported as what it is, and
-        // the caller keeps the fragments already handed over: they are the
-        // user's answer as far as it got (user story 46).
+        // Propagate a broken read so the caller can preserve the partial reply and report the failure.
         let read = response
             .read(&mut buffer)
             .map_err(|error| broke_off(provider, started.elapsed(), timeout, &error, words))?;
@@ -118,16 +92,13 @@ pub(crate) fn answer(
         let chunk = &buffer[..read];
         keep(&mut body_start, chunk);
 
-        // Nothing read is the socket closed, which leaves whatever is still
-        // held as a last event the sender did not terminate.
+        // The server can close the socket without terminating its final event.
         let payloads = match read {
             0 => events.finish(),
             _ => events.feed(chunk),
         };
 
         for payload in payloads {
-            // The contract's full stop. What follows it, if anything does, is
-            // not part of the answer.
             if payload.trim() == DONE {
                 finished = true;
                 break 'reading;
@@ -135,17 +106,10 @@ pub(crate) fn answer(
 
             let carried = carried(&payload, words)?;
 
-            // The Model saying it has finished is the other way a stream ends
-            // on purpose. Not every service sends the sentinel above — several
-            // local servers and gateways close the connection instead — and
-            // without this every one of their answers would be reported as
-            // having broken off, with an offer to carry on from a reply that
-            // was already complete.
+            // Some Providers close the stream without a sentinel after sending a finish reason.
             finished |= carried.finished;
 
-            // Before the answer and never instead of it: an event may carry
-            // both, and a Model that reasons first is a Model whose window has
-            // been showing "asking" for as long as the reasoning has taken.
+            // A single event can carry both reasoning and the beginning of the answer.
             if carried.reasoning && !said_reasoning {
                 said_reasoning = true;
                 arriving(Arriving::Reasoning);
@@ -155,9 +119,7 @@ pub(crate) fn answer(
                 delivered = true;
                 arriving(Arriving::Answer(&fragment));
 
-                // Checked per fragment and not per read: a whole answer often
-                // arrives in one read, and a Stop pressed over the second
-                // sentence should not have to wait for the last.
+                // One read can contain the entire reply, so check for Stop between fragments.
                 if stopping.stopped() {
                     return Ok(());
                 }
@@ -169,7 +131,6 @@ pub(crate) fn answer(
         }
     }
 
-    // A stream that said nothing is not an answer, however tidily it ended.
     if !delivered {
         return Err(malformed(
             &say!(words, "provider-no-answer-in-it"),
@@ -178,24 +139,13 @@ pub(crate) fn answer(
         ));
     }
 
-    // The socket closed and the contract's full stop never came. A Provider
-    // that had finished says so; one that stopped mid-sentence is a stream that
-    // broke, whatever the network thought of it — and the difference to the
-    // user is a paragraph that ends where the Model meant it to and one that
-    // ends anywhere.
     match finished {
         true => Ok(()),
         false => Err(cut_short(provider, words)),
     }
 }
 
-/// Every Model identifier this Provider says it offers, in the order it lists
-/// them.
-///
-/// What comes back is names and nothing else: whether a Model accepts images is
-/// not something the contract reports, and guessing it here is exactly what the
-/// `vision` flag exists to stop. The user picks from this list and says what
-/// each one can do.
+/// The generic Models endpoint does not specify whether a Model accepts images.
 pub(crate) fn models(
     provider: &Endpoint,
     timeout: Duration,
@@ -225,18 +175,8 @@ pub(crate) fn models(
     Ok(offered.data.into_iter().map(|model| model.id).collect())
 }
 
-/// Whether this Provider accepts this key, asked of the Provider itself.
-///
-/// The request a Run makes, to the Model the user chose, with one word in it —
-/// and the answer is thrown away unread. Nothing cheaper is worth making: the
-/// Model list is public at some Providers, so fetching it would pass a key the
-/// service would have refused, and user story 42 exists so that a wrong key is
-/// learned about now rather than at the first Run. Asking the way a Run asks is
-/// also what tells the user their Model identifier is one this key may use.
-/// ADR-0008 records the decision and what it costs.
-///
-/// The stream is dropped at the headers rather than read to its end, so the
-/// Model is cut off after the few tokens it takes a connection to close.
+/// Use a real completion because a public model list cannot verify access to the chosen Model.
+/// Drop the stream after its headers to limit token use.
 pub(crate) fn verify(
     provider: &Endpoint,
     model: &str,
@@ -261,8 +201,6 @@ pub(crate) fn verify(
     Err(refusal(provider, status.as_u16(), &body, words))
 }
 
-/// The request both a Run and a verification make: the Conversation so far, put
-/// to one Model at one Provider, as a stream.
 fn asking(
     provider: &Endpoint,
     model: &str,
@@ -270,8 +208,12 @@ fn asking(
     timeout: Duration,
     words: &Words,
 ) -> Result<reqwest::blocking::RequestBuilder, RunError> {
+    let client = client(words)?;
+    let skip_openrouter_reasoning = provider.skip_reasoning == SkipReasoning::OpenRouter
+        && openrouter_reasoning_is_optional(client, provider, model, timeout).unwrap_or(false);
+
     let request = authenticated(
-        client(words)?
+        client
             .post(joined(&provider.base_url, ANSWERING))
             .timeout(timeout),
         provider.api_key.as_deref(),
@@ -287,23 +229,111 @@ fn asking(
             })
             .collect(),
         stream: true,
-        thinking: provider
-            .skip_reasoning
-            .then_some(SkipReasoning { kind: "disabled" }),
+        thinking: (provider.skip_reasoning == SkipReasoning::DeepSeek)
+            .then_some(DeepSeekThinking { kind: "disabled" }),
+        reasoning: skip_openrouter_reasoning.then_some(OpenRouterReasoning { enabled: false }),
     }))
 }
 
-/// What one event of a stream carries.
+fn openrouter_reasoning_is_optional(
+    client: &reqwest::blocking::Client,
+    provider: &Endpoint,
+    model: &str,
+    timeout: Duration,
+) -> Option<bool> {
+    static CACHE: LazyLock<Mutex<HashMap<reqwest::Url, ModelCapability>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    let (author, slug) = model.split_once('/')?;
+    let mut url = reqwest::Url::parse(&joined(&provider.base_url, "model")).ok()?;
+    url.path_segments_mut().ok()?.extend([author, slug]);
+
+    if let Some(cached) = CACHE
+        .lock()
+        .unwrap()
+        .get(&url)
+        .filter(|cached| cached.expires > Instant::now())
+    {
+        return Some(cached.optional_reasoning);
+    }
+
+    let response = authenticated(client.get(url.clone()), provider.api_key.as_deref())
+        .timeout(timeout.min(MODEL_LOOKUP_TIMEOUT))
+        .send();
+    // Denial applies to this key and must not affect a request with corrected credentials.
+    if response.as_ref().is_ok_and(|response| {
+        matches!(
+            response.status(),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+        )
+    }) {
+        return None;
+    }
+
+    let optional_reasoning = response
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .and_then(|response| response.json::<ModelDetails>())
+        .ok()
+        .map(|model| {
+            model
+                .data
+                .reasoning
+                .and_then(|reasoning| reasoning.mandatory)
+                == Some(false)
+        });
+
+    let now = Instant::now();
+    let mut cache = CACHE.lock().unwrap();
+    cache.retain(|_, capability| capability.expires > now);
+    let capability = match optional_reasoning {
+        Some(optional_reasoning) => {
+            cache.insert(
+                url,
+                ModelCapability {
+                    expires: now + MODEL_CAPABILITY_TTL,
+                    optional_reasoning,
+                },
+            );
+            optional_reasoning
+        }
+        None => {
+            // Back off during a catalog outage and keep any result another request just fetched.
+            cache
+                .entry(url)
+                .or_insert(ModelCapability {
+                    expires: now + MODEL_LOOKUP_RETRY,
+                    optional_reasoning: false,
+                })
+                .optional_reasoning
+        }
+    };
+    Some(capability)
+}
+
+struct ModelCapability {
+    expires: Instant,
+    optional_reasoning: bool,
+}
+
+#[derive(Deserialize)]
+struct ModelDetails {
+    data: ModelMetadata,
+}
+
+#[derive(Deserialize)]
+struct ModelMetadata {
+    reasoning: Option<ReasoningMetadata>,
+}
+
+#[derive(Deserialize)]
+struct ReasoningMetadata {
+    mandatory: Option<bool>,
+}
+
 struct Carried {
-    /// Its text, which is none when the Model sent a fragment with nothing in
-    /// it — the first of a stream, carrying only the role, is one.
     text: Option<String>,
-    /// Whether the Model was reasoning rather than answering here. The
-    /// reasoning itself is not kept: what the window needs is that the Model is
-    /// working, and holding a chain of thought nobody asked to read would be
-    /// keeping the one part of the exchange the user never sees.
+    /// The window needs only a status, so reasoning text is discarded.
     reasoning: bool,
-    /// Whether the Model said this is where the answer ends.
     finished: bool,
 }
 
@@ -329,18 +359,13 @@ fn carried(payload: &str, words: &Words) -> Result<Carried, RunError> {
     })
 }
 
-/// Holds on to the start of the body, and only the start, so that a stream that
-/// turns out not to be one can be quoted back to the user.
+/// Keep a bounded prefix for diagnostics in case the response is not a stream.
 fn keep(body_start: &mut Vec<u8>, chunk: &[u8]) {
     let room = BODY_KEPT.saturating_sub(body_start.len());
     body_start.extend_from_slice(&chunk[..room.min(chunk.len())]);
 }
 
-/// The request, carrying the key where the Provider has one to carry.
-///
-/// A Provider with none is a local server that asks for nothing, and sending it
-/// an invented key would be sending something nobody chose (ADR-0006). The
-/// header is left off rather than filled with a placeholder.
+/// A keyless Provider may reject an invented placeholder.
 fn authenticated(
     request: reqwest::blocking::RequestBuilder,
     api_key: Option<&str>,
@@ -351,16 +376,12 @@ fn authenticated(
     }
 }
 
-/// The base URL and an endpoint, with exactly one slash between them: a base
-/// URL is copied out of documentation as often with a trailing slash as without.
+/// Users can paste a base URL with or without a trailing slash.
 fn joined(base_url: &str, endpoint: &str) -> String {
     format!("{}/{endpoint}", base_url.trim_end_matches('/'))
 }
 
-/// The one client the process uses.
-///
-/// Built once and kept: it carries the connection pool and the TLS setup, and
-/// building one per Run would put a handshake in front of every answer.
+/// Reuse the connection pool and TLS setup across Turns.
 fn client(words: &Words) -> Result<&'static reqwest::blocking::Client, RunError> {
     static CLIENT: OnceLock<Result<reqwest::blocking::Client, String>> = OnceLock::new();
 
@@ -378,12 +399,7 @@ fn client(words: &Words) -> Result<&'static reqwest::blocking::Client, RunError>
         })
 }
 
-/// What went wrong on the way out, or on the way back before there was a body:
-/// an endpoint that never answered, or one that took longer than Demysto waits.
-///
-/// The two are held apart because only one of them is worth trying again
-/// unchanged: an address nobody answers at is a setting to fix, and a Model
-/// that thought for too long is a Model to ask a second time.
+/// An unreachable address points to Settings, while a timeout can be retried.
 fn sending(
     provider: &Endpoint,
     waited: Duration,
@@ -410,8 +426,6 @@ fn sending(
     }
 }
 
-/// A stream that started and then stopped being read: a different thing from an
-/// endpoint that never answered, because there is an answer so far to keep.
 fn broke_off(
     provider: &Endpoint,
     waited: Duration,
@@ -419,17 +433,7 @@ fn broke_off(
     error: &std::io::Error,
     words: &Words,
 ) -> RunError {
-    // The clock is the most reliable of the three answers, so it is asked
-    // first.
-    //
-    // Which shape a timeout arrives in depends on where in the read it caught:
-    // sometimes `ErrorKind::TimedOut`, sometimes a `reqwest::Error` down the
-    // chain of causes, and sometimes an internal marker of reqwest's that has
-    // no public type and can be recognised from outside only by its text. Three
-    // answers to one question, and which of them turned up depended on how busy
-    // the machine was: under load the same timeout arrived in the third shape
-    // and was reported as a connection that broke. A clock knows no such
-    // ambiguity.
+    // Reqwest can report a body timeout through an internal error type, so also check the elapsed time.
     let timed_out = waited >= timeout
         || matches!(
             error.kind(),
@@ -456,18 +460,7 @@ fn broke_off(
     }
 }
 
-/// Whether an `io` error is a timeout wearing another error's clothes.
-///
-/// A request that runs out of time while its body is still arriving does not
-/// reach this as `ErrorKind::TimedOut`: the HTTP client wraps its own error and
-/// leaves the kind generic, so the only place the fact survives is further down
-/// the chain. Asked rather than assumed, because a Provider that stopped
-/// speaking and one that was never there want different things said about them.
-///
-/// Not the whole answer, and no longer the first thing asked: the client also
-/// has a timeout marker of its own with no public type, which nothing outside
-/// that crate can recognise. `broke_off` looks at the clock before it looks
-/// here.
+/// Reqwest can wrap its timeout inside an io::Error with a generic kind.
 fn timed_out_beneath(error: &std::io::Error) -> bool {
     use std::error::Error;
 
@@ -487,9 +480,6 @@ fn timed_out_beneath(error: &std::io::Error) -> bool {
     false
 }
 
-/// A stream the Provider closed without the contract's full stop, having said
-/// something first. Nothing went wrong at the socket, which is why this is not
-/// [`broke_off`]: the connection ended cleanly in the middle of a sentence.
 fn cut_short(provider: &Endpoint, words: &Words) -> RunError {
     RunError::Unreachable {
         message: say!(
@@ -500,14 +490,7 @@ fn cut_short(provider: &Endpoint, words: &Words) -> RunError {
     }
 }
 
-/// What a Provider refusing the request comes back as: its own words, and which
-/// of the two kinds of refusal it was.
-///
-/// A refused key is held apart from every other refusal because it is the one
-/// the user cannot fix from the Conversation: the fix is in that Provider's
-/// settings, and the window is expected to offer the way there (user story 45).
-/// 401 and 403 are the contract's two ways of saying it — one for a key that is
-/// wrong, one for a key that is right and not allowed here.
+/// Distinguish authentication errors so the window can point to the Provider's settings.
 fn refusal(provider: &Endpoint, status: u16, body: &str, words: &Words) -> RunError {
     let message = refused(status, body, words);
 
@@ -520,11 +503,7 @@ fn refusal(provider: &Endpoint, status: u16, body: &str, words: &Words) -> RunEr
     }
 }
 
-/// What the Provider said when it refused, in its own words where it gave any.
-///
-/// Its message is the one worth showing: it is the only party that knows
-/// whether the key is wrong, the Model does not exist, or the account is out of
-/// credit, and paraphrasing it would lose exactly that.
+/// Only the Provider can explain whether the Model is unavailable, the key is invalid, or credit has run out.
 fn refused(status: u16, body: &str, words: &Words) -> String {
     let message = serde_json::from_str::<Refusal>(body)
         .map(|refusal| refusal.error.message)
@@ -543,12 +522,7 @@ fn refused(status: u16, body: &str, words: &Words) -> String {
     }
 }
 
-/// What the user is shown, and what a log is given, for an answer that is not
-/// the contract's shape.
-///
-/// Two halves rather than one because they go to different places: the user
-/// gets the reason and what arrived, so they can see for themselves; the log
-/// gets the reason alone, what arrived being the Model's own words (ADR-0010).
+/// Show the response snippet to the user and keep the Model's output out of logs.
 fn malformed(reason: &str, body: &str, words: &Words) -> RunError {
     RunError::Malformed {
         message: say!(
@@ -561,8 +535,7 @@ fn malformed(reason: &str, body: &str, words: &Words) -> RunError {
     }
 }
 
-/// Enough of a body to recognise it by, and no more: the whole of one is a page
-/// of HTML as often as it is anything worth reading.
+/// The upstream body can be an entire HTML error page.
 fn snippet(body: &str) -> String {
     const LIMIT: usize = 300;
 
@@ -577,25 +550,23 @@ fn snippet(body: &str) -> String {
 struct Request<'a> {
     model: &'a str,
     messages: Vec<Message<'a>>,
-    /// Stated rather than left out, so that a Provider defaulting the other way
-    /// cannot hand back one body where this is waiting for a stream.
+    /// Some Providers default to a single response body.
     stream: bool,
-    /// Left out entirely at a service not known to take it, which is what the
-    /// `Option` is for: the field is DeepSeek's and not the contract's, and an
-    /// endpoint that has never heard of it answers 400.
     #[serde(skip_serializing_if = "Option::is_none")]
-    thinking: Option<SkipReasoning>,
+    thinking: Option<DeepSeekThinking>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning: Option<OpenRouterReasoning>,
 }
 
-/// The one value the request's `thinking` field takes: the instruction not to
-/// reason. See [`config::Reasoning`] for why Demysto sends it.
-///
-/// Named for the concept and not for the field, which is DeepSeek's word and
-/// appears only where [`Request`] spells it.
 #[derive(Serialize)]
-struct SkipReasoning {
+struct DeepSeekThinking {
     #[serde(rename = "type")]
     kind: &'static str,
+}
+
+#[derive(Serialize)]
+struct OpenRouterReasoning {
+    enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -604,12 +575,7 @@ struct Message<'a> {
     content: Content<'a>,
 }
 
-/// What a message carries.
-///
-/// A bare string for everything v1 sent, because that is what the contract has
-/// always taken and a text Run's request is not the place to change: the parts
-/// array is the shape every supported service implements for a picture, and it
-/// is used where there is a picture and nowhere else.
+/// Keep the bare string for text-only messages because some Providers only accept parts for multimodal input.
 #[derive(Serialize)]
 #[serde(untagged)]
 enum Content<'a> {
@@ -617,11 +583,7 @@ enum Content<'a> {
     Parts(Vec<Part<'a>>),
 }
 
-/// One part of a message: the words, or the picture they are about.
-///
-/// The picture travels as a `data:` URL rather than as a link to somewhere,
-/// which is the one form of `image_url` that needs nothing outside the request
-/// — and the only one Demysto could offer, holding the picture in memory.
+/// A data URL lets the Provider read the in-memory picture without another request.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Part<'a> {
@@ -634,8 +596,6 @@ struct Url {
     url: String,
 }
 
-/// A message as the contract carries it: words alone, or the words followed by
-/// the picture they are about.
 fn content(said: &Said) -> Content<'_> {
     match said {
         Said::Words(text) => Content::Words(text),
@@ -648,58 +608,38 @@ fn content(said: &Said) -> Content<'_> {
     }
 }
 
-/// One event of a stream.
 #[derive(Deserialize)]
 struct Chunk {
-    /// Required rather than defaulted: an event that carries no `choices` at
-    /// all is not this contract, and a Provider reporting an error mid-stream
-    /// sends exactly that. Better shown to the user than passed over.
+    /// Require choices so a mid-stream Provider error cannot be mistaken for an empty event.
     choices: Vec<Choice>,
 }
 
 #[derive(Deserialize)]
 struct Choice {
     delta: Delta,
-    /// Why the Model stopped, on the event where it did. Absent on every event
-    /// before that one, and on the whole stream at a Provider that does not
-    /// report it.
     #[serde(default)]
     finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct Delta {
-    /// Absent on the event that opens a stream, which carries only the role.
+    /// The first event may carry only the role.
     content: Option<String>,
-    /// The Model's reasoning, which is not the answer and never joins it.
-    ///
-    /// Three spellings because the contract has none: `reasoning_content` is
-    /// DeepSeek's and llama.cpp's, `reasoning` is OpenRouter's, and `thinking`
-    /// is what several local servers send. Only the first is one Demysto has
-    /// seen on the wire; the others are accepted so that a Model which reasons
-    /// somewhere else is not silently taken for a Model that has gone quiet.
+    /// Providers disagree on the name for reasoning: DeepSeek uses reasoning_content,
+    /// OpenRouter uses reasoning, and some local servers use thinking.
     #[serde(default, alias = "reasoning", alias = "thinking")]
     reasoning_content: Option<Reasoned>,
 }
 
-/// Reasoning as it arrives: a string at every service known to stream it, and
-/// anything at all at one that structures it instead.
-///
-/// The second variant is why this is not a `String`: reasoning is not the
-/// answer, so a service carrying something unexpected under one of these names
-/// must not cost the user the answer that came with it. Refusing the event
-/// would do exactly that.
+/// Unknown reasoning formats must not discard answer text carried in the same event.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Reasoned {
     Said(String),
-    /// Anything else, accepted and dropped. `IgnoredAny` rather than a `Value`
-    /// because nothing reads it: the variant exists so that deserialising the
-    /// event succeeds, not so that the shape can be inspected later.
+    /// IgnoredAny skips unfamiliar reasoning without allocating a value nobody reads.
     Shaped(serde::de::IgnoredAny),
 }
 
-/// What the Model list endpoint answers with.
 #[derive(Deserialize)]
 struct Offered {
     data: Vec<OfferedModel>,
@@ -718,4 +658,159 @@ struct Refusal {
 #[derive(Deserialize)]
 struct RefusalBody {
     message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use mockito::{Matcher, Server};
+    use serde_json::json;
+
+    use super::*;
+    use crate::config::{self, Environment};
+    use crate::selection::Kind;
+
+    #[test]
+    fn openrouter_reasoning_is_checked_again_after_correcting_the_key() {
+        let mut server = Server::new();
+        let words = crate::i18n::english();
+        let model = "vendor/optional-reasoning";
+
+        for status in [401, 403] {
+            let prefix = format!("/{status}/v1");
+            let model_path = format!("{prefix}/model/{model}");
+            let completion_path = format!("{prefix}/chat/completions");
+            let denied_key = format!("Bearer rejected-{status}");
+            let allowed_key = format!("Bearer accepted-{status}");
+            let denied_catalog = server
+                .mock("GET", model_path.as_str())
+                .match_header("authorization", denied_key.as_str())
+                .with_status(status)
+                .create();
+            let denied_completion = server
+                .mock("POST", completion_path.as_str())
+                .match_header("authorization", denied_key.as_str())
+                .with_status(status)
+                .create();
+            let catalog = server
+                .mock("GET", model_path.as_str())
+                .match_header("authorization", allowed_key.as_str())
+                .with_body(json!({ "data": { "reasoning": { "mandatory": false } } }).to_string())
+                .create();
+            let completion = server
+                .mock("POST", completion_path.as_str())
+                .match_header("authorization", allowed_key.as_str())
+                .match_body(Matcher::PartialJson(
+                    json!({ "reasoning": { "enabled": false } }),
+                ))
+                .create();
+
+            let mut endpoint = Endpoint {
+                provider: "router".to_owned(),
+                base_url: format!("{}{prefix}", server.url()),
+                api_key: Some(format!("rejected-{status}")),
+                skip_reasoning: SkipReasoning::OpenRouter,
+            };
+            assert!(matches!(
+                verify(&endpoint, model, REQUEST_TIMEOUT, &words),
+                Err(RunError::Authentication { .. })
+            ));
+
+            endpoint.api_key = Some(format!("accepted-{status}"));
+            verify(&endpoint, model, REQUEST_TIMEOUT, &words).unwrap();
+
+            denied_catalog.assert();
+            denied_completion.assert();
+            catalog.assert();
+            completion.assert();
+        }
+    }
+
+    #[test]
+    fn openrouter_disables_only_optional_reasoning_and_caches_the_lookup() {
+        let mut server = Server::new();
+        let words = crate::i18n::english();
+
+        for (model, status, metadata, disables_reasoning) in [
+            (
+                "deepseek/deepseek-v3.2:nitro",
+                200,
+                json!({ "data": { "reasoning": { "mandatory": false } } }),
+                true,
+            ),
+            (
+                "vendor/required",
+                200,
+                json!({ "data": { "reasoning": { "mandatory": true } } }),
+                false,
+            ),
+            ("openrouter/auto", 200, json!({ "data": {} }), false),
+            ("vendor/unknown", 503, json!({}), false),
+        ] {
+            let catalog = server
+                .mock("GET", format!("/v1/model/{model}").as_str())
+                .match_header("authorization", "Bearer test-key")
+                .with_status(status)
+                .with_body(metadata.to_string())
+                .expect(1)
+                .create();
+
+            let mut body = json!({
+                "model": model,
+                "messages": [{ "role": "user", "content": "Hi" }],
+                "stream": true,
+            });
+            if disables_reasoning {
+                body["reasoning"] = json!({ "enabled": false });
+            }
+            let completion = server
+                .mock("POST", "/v1/chat/completions")
+                .match_body(Matcher::Json(body))
+                .with_body(concat!(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n",
+                    "data: [DONE]\n\n",
+                ))
+                .expect(2)
+                .create();
+
+            let path = Path::new("settings.toml");
+            let settings = format!(
+                r#"
+default_model = "router/{model}"
+
+[[providers]]
+name = "router"
+preset = "openrouter"
+base_url = "{}/v1"
+api_key = "test-key"
+models = [{{ id = "{model}" }}]
+"#,
+                server.url()
+            );
+            let file = config::parse(path, &settings, &words).unwrap();
+            let config = config::resolve(path, file, &Environment::holding(&[]), &words).unwrap();
+            let resolved = crate::model::resolve(&config, None, Kind::Text, &words).unwrap();
+
+            verify(&resolved.endpoint, &resolved.model, REQUEST_TIMEOUT, &words).unwrap();
+            let mut reply = String::new();
+            answer(
+                &resolved,
+                &[("user", Said::Words("Hi".to_owned()))],
+                REQUEST_TIMEOUT,
+                &Stopping::default(),
+                &words,
+                |event| {
+                    if let Arriving::Answer(text) = event {
+                        reply.push_str(text);
+                    }
+                },
+            )
+            .unwrap();
+
+            assert_eq!(reply, "Hello");
+            catalog.assert();
+            completion.assert();
+        }
+    }
 }

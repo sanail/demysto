@@ -1,11 +1,4 @@
-//! The settings file: what Demysto is configured with, and where the key for a
-//! Provider comes from.
-//!
-//! Read at startup, and again whenever the settings window writes it. Nothing
-//! else in the crate reads the environment, which is snapshotted here — per the
-//! spec's *Core modules*. Which of the Models configured here a given Run uses
-//! is `model`'s; how the window edits this file without flattening it is
-//! `settings`'.
+//! Settings own the environment snapshot so reloading the file cannot change key precedence mid-session.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -18,53 +11,26 @@ use serde::Deserialize;
 use crate::files;
 use crate::i18n::{say, Words};
 
-/// The file Demysto reads, inside the configuration directory.
 pub(crate) const FILE_NAME: &str = "settings.toml";
 
-/// The shape of the file this build understands. A file claiming a higher one
-/// was written by a newer Demysto, and guessing at what it means would be a
-/// good way to send somebody's key to the wrong place.
+/// Reject newer formats because guessing at their meaning can send a key to the wrong endpoint.
 pub(crate) const VERSION: u32 = 1;
 
-/// What separates the Provider from the Model in the name a Model is nominated
-/// or bound by.
-///
-/// A Provider's own name may not hold one, so the first is always the divide —
-/// which matters because a Model's identifier routinely holds several
-/// (`anthropic/claude-sonnet-4.5` is one Model at one Provider).
+/// A Provider name cannot contain the separator. A Model identifier may contain several.
 const SEPARATOR: char = '/';
 
-/// What the settings call the Model an Action resolves to when it binds none.
 pub(crate) const MODEL_SETTING: &str = "default_model";
-/// And the one an image Selection resolves to first.
 pub(crate) const VISION_SETTING: &str = "default_vision_model";
-/// What the settings call the Hotkey that opens the Palette.
 pub(crate) const PALETTE_SETTING: &str = "palette_hotkey";
-/// And the one that chooses an area of the screen.
 pub(crate) const SCREEN_AREA_SETTING: &str = "screen_area_hotkey";
-/// And the length past which a Selection is worth a word before it is paid for.
 pub(crate) const LARGE_SELECTION_SETTING: &str = "large_selection";
-/// And the language the interface is asked to speak.
 pub(crate) const LANGUAGE_SETTING: &str = "language";
-/// And the one line the first-run flow leaves behind it, which is the only
-/// thing in the file Demysto writes for its own sake rather than the user's.
 pub(crate) const WELCOMED_SETTING: &str = "welcomed";
 
-/// How long a Selection has to be, in characters, before Demysto says so —
-/// where the settings state nothing.
-///
-/// Counted in characters rather than tokens because a token count is a
-/// Provider's arithmetic and this warning has to be composed before anything is
-/// sent. Set high enough that an ordinary paragraph, page or article passes
-/// without a word, and low enough to catch the select-all this exists for (user
-/// story 48).
+/// Count characters so the warning can be shown before involving a Provider.
 pub const DEFAULT_LARGE_SELECTION: u64 = 20_000;
 
-/// What the user is asked to uncomment.
-///
-/// Held apart from the prose rather than written into it so that the suite can
-/// load the very text the instruction points at: a template whose example does
-/// not parse would make a liar of the one instruction a new user is given.
+/// Keep the example separate from the preamble so tests can parse the exact TOML users uncomment.
 const EXAMPLE: &str = r#"default_model = "deepseek/deepseek-chat"
 default_vision_model = "openai/gpt-4o"
 
@@ -85,12 +51,7 @@ preset = "lmstudio"
 models = [{ id = "qwen/qwen3-8b" }]
 "#;
 
-/// What a fresh installation gets: a file that parses, says what goes in it,
-/// and configures nothing until the user uncomments the example.
-///
-/// The prose is `settings-file-preamble` in the catalogues, so that the first
-/// thing a new installation says is said in the language the rest of the
-/// interface speaks.
+/// Localize the preamble so a fresh installation introduces itself in the interface language.
 fn template(words: &Words) -> String {
     let example: String = EXAMPLE
         .lines()
@@ -100,9 +61,7 @@ fn template(words: &Words) -> String {
         })
         .collect();
 
-    // Listed from the presets themselves rather than named in the prose, so
-    // that a preset added later cannot leave the file describing the old set.
-    // One to a line, so that neither can it push a line past the margin.
+    // Generate the list from the presets so the template always advertises the current choices.
     let named = Preset::ALL.map(|preset| match preset.spec() {
         Spec {
             name,
@@ -123,96 +82,57 @@ fn template(words: &Words) -> String {
     format!("{preamble}\n\nversion = {VERSION}\n\n{example}")
 }
 
-/// The configuration Demysto is running on, with the keys already resolved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Config {
-    /// The file this was read from. Held because the errors composed later —
-    /// when a Run resolves to a Model that is not there, or to a Provider with
-    /// no key — still have to name the one place the fix can be made.
+    /// Keep the path so errors while resolving a Run can point to the file the user can fix.
     pub(crate) path: PathBuf,
     pub(crate) providers: Vec<Provider>,
-    /// The Model an Action that binds none of its own resolves to.
     pub(crate) default_model: Option<String>,
-    /// The Model an Action that binds none of its own resolves to when the
-    /// Selection is an image. Separate because the cheap everyday Model
-    /// usually cannot see.
+    /// Keep a separate default for images because the everyday Model may be text-only.
     pub(crate) default_vision_model: Option<String>,
-    /// How many characters a Selection may hold before Demysto says so, as the
-    /// file states it. `None` where it states nothing, which is the default.
     pub(crate) large_selection: Option<u64>,
-    /// The language the file asks the interface to speak, `None` where it asks
-    /// for none and the operating system decides.
+    /// An omitted language lets the operating system decide.
     pub(crate) language: Option<String>,
 }
 
-/// A configured LLM endpoint, and the Models it offers.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Provider {
-    /// What the user calls this Provider, and the first half of every name one
-    /// of its Models is known by.
     pub(crate) name: String,
     pub(crate) base_url: String,
-    /// What this Provider is authenticated with.
-    ///
-    /// Settled at load, while the file's path and the Provider's own fields are
-    /// still at hand, and acted on only when a Run resolves to this Provider:
-    /// one Provider missing its key is no reason for another Provider's Models
-    /// to stop working.
+    /// Defer a missing-key error until a Run needs this Provider so other Providers can still work.
     pub(crate) key: Key,
     pub(crate) models: Vec<Model>,
-    /// Whether a request to this Provider may say not to reason first. Settled
-    /// here, where the preset is still at hand, because a Run resolving a Model
-    /// has only the Provider.
-    pub(crate) skip_reasoning: bool,
+    pub(crate) skip_reasoning: SkipReasoning,
 }
 
-/// What Demysto will authenticate a Provider with, once the settings have been
-/// read.
-///
-/// Deliberately without a derived `Debug`, for the reason [`Provider`] has a
-/// hand-written one: a key that can be printed is a key that ends up in a panic
-/// message or a log — see ADR-0010, which is why no key is printable.
+/// Omit Debug because a key can otherwise reach a panic message or a log.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Key {
-    /// The key to send, and which of the three sources it came out of.
-    Found { key: String, from: Origin },
-    /// The service has none to send — a server answering on this machine. The
-    /// request goes out unauthenticated (ADR-0006).
+    Found {
+        key: String,
+        from: Origin,
+    },
     NotNeeded,
-    /// The service wants one and none was found. The sentence says where to
-    /// put one.
+    /// The message tells the user where to supply the missing key.
     Missing(String),
 }
 
-/// Which of ADR-0002's three sources a key was found in.
-///
-/// Carried so that the settings window can tell the user where their key is
-/// without being handed the key: a field it must not overwrite with a blank,
-/// and a variable it should name rather than invite them to paste over.
+/// The settings window can explain where the key came from without receiving the key itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Origin {
-    /// The `api_key` field of the settings file.
     File,
-    /// An environment variable, which is named.
     Variable(String),
 }
 
-/// A specific Model offered by a Provider, with the capability Demysto needs to
-/// know about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Model {
-    /// What the Provider calls it, and what the request carries.
     pub(crate) id: String,
-    /// Whether it accepts images. Stated by the user rather than inferred from
-    /// the identifier: names are marketing, and a wrong guess here is either a
-    /// refused request or a Model that could have seen and was never asked to.
+    /// The user supplies vision capability because an identifier cannot reliably tell us what a Model accepts.
     pub(crate) vision: bool,
 }
 
 impl fmt::Debug for ProviderEntry {
-    /// Written out rather than derived, for the reason [`Provider`]'s own is.
-    /// This one holds the key as the file states it — and, once the settings
-    /// window builds one out of what somebody typed, as they typed it.
+    /// A draft can hold a key as the user typed it. Keep it out of debug output.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ProviderEntry")
             .field("name", &self.name)
@@ -226,9 +146,7 @@ impl fmt::Debug for ProviderEntry {
 }
 
 impl fmt::Debug for Provider {
-    /// Written out rather than derived, so that the key cannot arrive somewhere
-    /// nobody meant to send it through a panic message or a log. ADR-0002 leaves it readable on disk by its owner; that is
-    /// the whole of what it leaves readable.
+    /// A configured key must stay out of panic messages and logs.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Provider")
             .field("name", &self.name)
@@ -248,8 +166,6 @@ impl fmt::Debug for Provider {
 }
 
 impl Config {
-    /// The Model named `name`, and the Provider that offers it. `None` when
-    /// nothing configured here answers to that name.
     pub(crate) fn model(&self, name: &str) -> Option<(&Provider, &Model)> {
         let (provider, id) = name.split_once(SEPARATOR)?;
         let provider = self.providers.iter().find(|it| it.name == provider)?;
@@ -261,10 +177,7 @@ impl Config {
             .map(|model| (provider, model))
     }
 
-    /// The length a Selection is warned about past, in characters. `None` where
-    /// the user turned the warning off by stating zero — which is the one way
-    /// to be told nothing, because a warning that blocks nothing is not worth a
-    /// second setting to enable it.
+    /// Zero lets the user disable a warning that otherwise adds an interruption before a Run.
     pub(crate) fn large_selection(&self) -> Option<u64> {
         match self.large_selection.unwrap_or(DEFAULT_LARGE_SELECTION) {
             0 => None,
@@ -272,8 +185,7 @@ impl Config {
         }
     }
 
-    /// Every Model configured, across every Provider, in the order the file
-    /// states them.
+    /// Preserve the order in which the user configured the Providers and Models.
     pub(crate) fn models(&self) -> impl Iterator<Item = (&Provider, &Model)> {
         self.providers
             .iter()
@@ -281,38 +193,24 @@ impl Config {
     }
 }
 
-/// What a Model is nominated or bound by: the Provider that offers it and its
-/// own identifier, so that two Providers offering the same Model are still two
-/// Models with two keys and two bills.
+/// A Provider's name distinguishes identical Model identifiers with different keys and bills.
 pub(crate) fn qualified(provider: &Provider, model: &Model) -> String {
     format!("{}{SEPARATOR}{}", provider.name, model.id)
 }
 
-/// What went wrong between the settings file and a Provider Demysto can use.
-///
-/// Every variant carries the whole sentence the user is shown: the file is the
-/// only place the fix can be made, so an error that does not name it is an
-/// error the user cannot act on.
+/// Include the settings file in actionable errors so the user can find where to fix them.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", content = "message", rename_all = "snake_case")]
 pub enum ConfigError {
-    /// The file could not be read, or could not be created.
     Unreadable(String),
-    /// A Provider refused a key entered in the settings window, so nothing was
-    /// saved. Not a fault of the file — a fault the file was about to acquire.
     Refused(String),
-    /// The file could not be written. Held apart from [`Self::Unreadable`]
-    /// because they are opposite news: one is settings Demysto never had, the
-    /// other is settings the user has just lost.
+    /// A failed write is reported separately so users know their changes were never saved.
     Unwritable(String),
-    /// The file was read but is not something Demysto can act on.
     Malformed(String),
-    /// The file is valid and configures no Provider.
     NoProvider(String),
 }
 
 impl ConfigError {
-    /// The sentence the user is shown.
     pub fn message(&self) -> &str {
         match self {
             Self::Unreadable(message)
@@ -332,20 +230,11 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// The environment as it was when Demysto started.
-///
-/// A copy rather than a look at the live one, because the settings are no
-/// longer read once: the window writes them and Demysto reads them again, and a
-/// key that changed under it between those two reads is a key nobody can reason
-/// about (the spec's *Core modules*). Taking it as a value also lets key
-/// resolution be tested without mutating the environment of the whole test
-/// binary — the same reason [`crate::paths::config_dir`] takes its inputs
-/// rather than reading them.
+/// A snapshot keeps key lookup stable across settings reloads and lets tests avoid changing the process environment.
 #[derive(Clone, Default)]
 pub(crate) struct Environment(BTreeMap<String, String>);
 
 impl Environment {
-    /// Everything exported to this process, as it stands now.
     pub(crate) fn snapshot() -> Self {
         Self(std::env::vars().collect())
     }
@@ -354,7 +243,6 @@ impl Environment {
         self.0.get(name).cloned()
     }
 
-    /// An environment holding exactly what a caller put in it.
     #[cfg(test)]
     pub(crate) fn holding(variables: &[(&str, &str)]) -> Self {
         Self(
@@ -367,16 +255,12 @@ impl Environment {
 }
 
 impl fmt::Debug for Environment {
-    /// Written out rather than derived, for the reason [`Provider`]'s own is:
-    /// this holds every variable the shell exported, which on the machine of
-    /// anybody who uses more than one such tool is several other people's keys.
+    /// The shell can export keys for other applications. Keep its values out of debug output.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Environment").field(&"<not shown>").finish()
     }
 }
 
-/// Reads the settings file, creating it when it is not there yet, and resolves
-/// the Providers it configures.
 pub(crate) fn load(
     config_dir: &Path,
     env: &Environment,
@@ -385,10 +269,7 @@ pub(crate) fn load(
     let (path, text) = read(config_dir, words)?;
     let config = resolve(&path, parse(&path, &text, words)?, env, words)?;
 
-    // Asked here rather than in [`resolve`], which the settings window also
-    // goes through: a file configuring nothing is Demysto having nothing to run
-    // against, and it is also what starting over passes through. Refusing to
-    // save it would leave somebody unable to remove their last Provider.
+    // Saving must allow an empty file so the user can remove their last Provider.
     if config.providers.is_empty() {
         return Err(ConfigError::NoProvider(say!(
             words,
@@ -400,13 +281,7 @@ pub(crate) fn load(
     Ok(config)
 }
 
-/// Where the settings file is and what is written in it, the file being created
-/// from the template when it is not there yet.
-///
-/// Held apart from [`load`] because the settings window edits the text rather
-/// than the [`Config`] it loads to: the preamble, the user's own comments, and
-/// anything a later Demysto wrote there all survive a round trip through the
-/// text and none of them survives one through [`File`].
+/// Keep the text available for editing so comments and fields from another version survive a save.
 pub(crate) fn read(config_dir: &Path, words: &Words) -> Result<(PathBuf, String), ConfigError> {
     let path = config_dir.join(FILE_NAME);
     let text = read_or_create(&path, words)?;
@@ -414,14 +289,7 @@ pub(crate) fn read(config_dir: &Path, words: &Words) -> Result<(PathBuf, String)
     Ok((path, text))
 }
 
-/// The language the settings file asks for, before anything has been said in
-/// any language.
-///
-/// The one thing read out of the file ahead of reading the file. Everything
-/// else about it — including every sentence explaining what is wrong with it —
-/// is said in a language, and the language is settled here. Nothing is created
-/// and nothing is reported: a file that is not there yet states no language, and
-/// so does one nobody can parse, which leaves the operating system deciding.
+/// Resolve the language before producing any settings errors. Missing or malformed files leave that choice to the system.
 pub(crate) fn stated_language(config_dir: &Path) -> Option<String> {
     #[derive(Deserialize)]
     struct Stating {
@@ -433,7 +301,6 @@ pub(crate) fn stated_language(config_dir: &Path) -> Option<String> {
     toml::from_str::<Stating>(&text).ok()?.language
 }
 
-/// The file as it is written, checked only for being a shape this build knows.
 pub(crate) fn parse(path: &Path, text: &str, words: &Words) -> Result<File, ConfigError> {
     let file: File =
         toml::from_str(text).map_err(|error| unparseable(path, text, &error, words))?;
@@ -452,8 +319,6 @@ pub(crate) fn parse(path: &Path, text: &str, words: &Words) -> Result<File, Conf
     Ok(file)
 }
 
-/// The Providers a parsed file configures, with their keys resolved. Every
-/// error here is the file saying something nobody can act on.
 pub(crate) fn resolve(
     path: &Path,
     file: File,
@@ -491,37 +356,24 @@ pub(crate) fn resolve(
     })
 }
 
-/// The settings file as it is written, before anything is resolved.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct File {
-    /// Absent in a file written by hand, which is the same as the first version.
+    /// Files written before versioning use the first format.
     #[serde(default = "first_version")]
     version: u32,
     #[serde(default)]
     pub(crate) providers: Vec<ProviderEntry>,
     pub(crate) default_model: Option<String>,
     pub(crate) default_vision_model: Option<String>,
-    /// The Hotkey that opens the Palette, `None` for the one Demysto comes
-    /// with and `""` for none. Declared here and resolved nowhere: nothing in
-    /// this crate runs on it, and whether a combination can be claimed is the
-    /// desktop's answer to give. It is a field only because the file denies
-    /// unknown ones, and a file stating a Hotkey has to stay a file Demysto
-    /// can read.
+    /// Keep Hotkeys in the file schema so their presence does not make the file unreadable.
+    /// An absent value uses the desktop default and an empty string disables the Hotkey.
     pub(crate) palette_hotkey: Option<String>,
-    /// The Hotkey that chooses an area of the screen, read like the Palette's.
     pub(crate) screen_area_hotkey: Option<String>,
-    /// How many characters a Selection may hold before Demysto says so, `None`
-    /// where the file states nothing and [`DEFAULT_LARGE_SELECTION`] decides.
     pub(crate) large_selection: Option<u64>,
-    /// The language the interface is asked to speak, as a tag: `None` where the
-    /// file asks for none, and whatever the user typed where it names one no
-    /// catalogue answers to — `i18n::chosen` passes over anything it does not
-    /// recognise rather than refusing to start over a two-letter typo.
+    /// An unrecognized language tag leaves the choice to the system instead of preventing startup.
     pub(crate) language: Option<String>,
-    /// Whether the first-run flow has been through to its end. Absent in every
-    /// file written before it had, which is what makes a fresh installation
-    /// recognisable at all — see `settings::welcomed`.
+    /// A default keeps settings files written before Welcome readable.
     #[serde(default)]
     pub(crate) welcomed: bool,
 }
@@ -533,16 +385,13 @@ fn first_version() -> u32 {
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ProviderEntry {
-    /// What the user calls this Provider, and what the first half of a Model's
-    /// name refers to.
     pub(crate) name: String,
-    /// Absent when the preset supplies it.
+    /// The preset can supply an omitted URL.
     pub(crate) base_url: Option<String>,
     pub(crate) preset: Option<Preset>,
     pub(crate) api_key: Option<String>,
     pub(crate) api_key_env: Option<String>,
-    /// The Models of this Provider the user wants to use — not everything it
-    /// offers, which is what the Model list is fetched for.
+    /// A user can configure a subset of the Provider's catalog.
     #[serde(default)]
     pub(crate) models: Vec<ModelEntry>,
 }
@@ -555,12 +404,6 @@ pub(crate) struct ModelEntry {
     pub(crate) vision: bool,
 }
 
-/// A service Demysto knows the conventions of.
-///
-/// The three ADR-0002 fixes the key order for, and the two local servers
-/// ADR-0006 adds. A preset is a decision about where somebody's key goes — or
-/// that there is none — so one that no ADR records would be a decision nothing
-/// recorded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Preset {
@@ -571,51 +414,29 @@ pub(crate) enum Preset {
     Openrouter,
 }
 
-/// What Demysto knows about a service: the word the file names it by, where it
-/// answers, and the environment variable its own documentation tells people to
-/// export.
 pub(crate) struct Spec {
     pub(crate) name: &'static str,
     pub(crate) base_url: &'static str,
     pub(crate) auth: Auth,
-    pub(crate) reasoning: Reasoning,
+    pub(crate) reasoning: SkipReasoning,
 }
 
-/// Whether a service can be told to answer without reasoning first.
-///
-/// A Model that reasons spends the seconds before its first word on a chain of
-/// thought nobody asked for. None of the Actions Demysto ships gains anything
-/// from one — a translation least of all — and the Palette exists to put an
-/// answer on screen in as few keystrokes as possible, so where a service takes
-/// the instruction, Demysto sends it.
-pub(crate) enum Reasoning {
-    /// The service documents a field that turns reasoning off, and its everyday
-    /// Model reasons unless it is sent.
-    Skippable,
-    /// Not known to take the field, which is therefore left out: an endpoint
-    /// that does not know a field refuses the request as readily as it ignores
-    /// the field. A local server and a proxy in front of many services are both
-    /// this until somebody checks.
+/// Skipping optional reasoning reduces the wait before an answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SkipReasoning {
+    DeepSeek,
+    OpenRouter,
     Unmentioned,
 }
 
-/// What a service wants by way of authentication.
-///
-/// Stated rather than inferred from the absence of a variable name: "nobody
-/// documented a variable for this" and "this has no keys at all" are different
-/// facts, and only the second may turn authentication off. A service that
-/// wanted a key and named no variable for it would need a variant of its own.
+/// Only an explicitly keyless preset may dispense with authentication.
 pub(crate) enum Auth {
-    /// A key, which the service's own documentation tells people to export as
-    /// this.
     Variable(&'static str),
-    /// Nothing. A server answering on this machine has no keys to want.
     Nothing,
 }
 
 impl Preset {
-    /// Every preset there is, so that the template can name them: a preset
-    /// nobody has heard of is a base URL somebody looks up anyway.
+    /// Expose all presets to the template so users can discover their choices.
     pub(crate) const ALL: [Self; 5] = [
         Self::Deepseek,
         Self::Lmstudio,
@@ -624,66 +445,67 @@ impl Preset {
         Self::Openrouter,
     ];
 
-    /// The preset the settings file — or the settings window, which writes the
-    /// same word into it — calls `name`. `None` when nothing here is called that.
     pub(crate) fn named(name: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|preset| preset.spec().name == name)
     }
 
-    /// Everything known about one service, in one place: a preset added here is
-    /// a preset added once, and the match keeps the compiler asking.
     pub(crate) fn spec(self) -> Spec {
         match self {
             Self::Deepseek => Spec {
                 name: "deepseek",
                 base_url: "https://api.deepseek.com/v1",
                 auth: Auth::Variable("DEEPSEEK_API_KEY"),
-                reasoning: Reasoning::Skippable,
+                reasoning: SkipReasoning::DeepSeek,
             },
             Self::Lmstudio => Spec {
                 name: "lmstudio",
                 base_url: "http://localhost:1234/v1",
                 auth: Auth::Nothing,
-                reasoning: Reasoning::Unmentioned,
+                reasoning: SkipReasoning::Unmentioned,
             },
             Self::Ollama => Spec {
                 name: "ollama",
                 base_url: "http://localhost:11434/v1",
                 auth: Auth::Nothing,
-                reasoning: Reasoning::Unmentioned,
+                reasoning: SkipReasoning::Unmentioned,
             },
             Self::Openai => Spec {
                 name: "openai",
                 base_url: "https://api.openai.com/v1",
                 auth: Auth::Variable("OPENAI_API_KEY"),
-                reasoning: Reasoning::Unmentioned,
+                reasoning: SkipReasoning::Unmentioned,
             },
             Self::Openrouter => Spec {
                 name: "openrouter",
                 base_url: "https://openrouter.ai/api/v1",
                 auth: Auth::Variable("OPENROUTER_API_KEY"),
-                reasoning: Reasoning::Unmentioned,
+                reasoning: SkipReasoning::OpenRouter,
             },
         }
     }
 }
 
-/// Whether this Provider is one Demysto may tell not to reason before it
-/// answers. Known only through a preset: a bare `base_url` is an endpoint
-/// Demysto knows nothing about, and guessing a field onto it would risk the
-/// refusal [`Reasoning::Unmentioned`] describes.
-pub(crate) fn skip_reasoning(entry: &ProviderEntry) -> bool {
-    entry
-        .preset
-        .is_some_and(|preset| matches!(preset.spec().reasoning, Reasoning::Skippable))
+/// A custom URL must identify the official gateway before we send its extensions.
+pub(crate) fn skip_reasoning(entry: &ProviderEntry) -> SkipReasoning {
+    if let Some(preset) = entry.preset {
+        return preset.spec().reasoning;
+    }
+
+    let openrouter = Preset::Openrouter.spec();
+    if entry
+        .base_url
+        .as_deref()
+        .is_some_and(|url| url.trim().trim_end_matches('/') == openrouter.base_url)
+    {
+        openrouter.reasoning
+    } else {
+        SkipReasoning::Unmentioned
+    }
 }
 
-/// What a Provider is reached at: what it states, else what its preset knows.
-///
-/// A stated base URL wins over the preset's, so that a proxy or a regional
-/// endpoint does not cost the user the preset's other half.
+/// A URL override lets a proxy or regional endpoint keep the rest of the preset.
 pub(crate) fn base_url(
     entry: &ProviderEntry,
     path: &Path,
@@ -701,12 +523,7 @@ pub(crate) fn base_url(
         })
 }
 
-/// What has to hold before a Provider can be named in a Model's name at all.
-///
-/// A name that is empty, taken, or holds the separator would make some Model
-/// unreachable or ambiguous, and a Model nobody can name is a Model nobody can
-/// nominate — a failure that would otherwise surface as "no such Model" over a
-/// file that plainly holds it.
+/// Reject names that would make a Model unreachable or ambiguous before reporting errors about its nomination.
 fn nameable(
     entry: &ProviderEntry,
     taken: &[Provider],
@@ -743,9 +560,7 @@ fn nameable(
         ));
     }
 
-    // A Model with no identifier is a Model nobody can name and a request with
-    // no model in it. It arrives from a window where "Add a Model" adds an
-    // empty row, so it is what saving without typing produces.
+    // Adding a row in Settings can leave an empty identifier if the user saves before filling it in.
     if entry.models.iter().any(|model| model.id.trim().is_empty()) {
         return malformed(say!(
             words,
@@ -776,17 +591,8 @@ fn duplicate_model(entry: &ProviderEntry) -> Option<&str> {
         .map(|model| model.id.as_str())
 }
 
-/// The key for a Provider, in the order ADR-0002 fixes: the variable the
-/// Provider names, then the preset's conventional one, then the file itself.
-///
-/// A source that holds nothing but whitespace is not a source: an exported but
-/// empty variable is a common state of a shell, and reading it as "the key is
-/// the empty string" would turn a working configuration into a 401.
-///
-/// Only what happens when all three come up empty depends on the preset. A key
-/// stated for a keyless service is still used, because the three sources are
-/// asked first: somebody may have put a local server behind something that
-/// wants one.
+/// Treat an empty environment variable as missing so it does not override a usable key.
+/// A key for a normally keyless preset is still useful when a proxy requires it.
 pub(crate) fn resolve_key(
     entry: &ProviderEntry,
     env: &Environment,
@@ -805,18 +611,12 @@ pub(crate) fn resolve_key(
 
     match found {
         Some((key, from)) => Key::Found { key, from },
-        // Naming a variable in `api_key_env` is the user saying this Provider
-        // is authenticated, so a variable that turns out to hold nothing is a
-        // fault to report rather than a service to stop authenticating. It
-        // holds nothing routinely: an application launched from the Finder or a
-        // desktop entry never sees what a shell profile exported.
+        // An explicit variable requires authentication even for a keyless preset. GUI launches may lack shell-profile exports.
         None if has_no_keys(entry) && entry.api_key_env.is_none() => Key::NotNeeded,
         None => Key::Missing(no_key(entry, path, words)),
     }
 }
 
-/// The variable this Provider's preset says the service documents, where it
-/// documents one.
 fn conventional(entry: &ProviderEntry) -> Option<&'static str> {
     match entry.preset?.spec().auth {
         Auth::Variable(name) => Some(name),
@@ -824,28 +624,19 @@ fn conventional(entry: &ProviderEntry) -> Option<&'static str> {
     }
 }
 
-/// Whether this Provider's preset says the service has no keys at all.
-///
-/// Only a preset can say so — ADR-0006. A Provider written out by hand cannot
-/// declare itself keyless, so no typo in this file quietly turns authentication
-/// off for a service that wanted it.
+/// An omitted preset must never silently turn authentication off for a hand-written Provider.
 fn has_no_keys(entry: &ProviderEntry) -> bool {
     entry
         .preset
         .is_some_and(|preset| matches!(preset.spec().auth, Auth::Nothing))
 }
 
-/// A Hotkey as the settings state it: `None` where they state none, so that the
-/// default answers, and `""` where they state that there is none.
+/// An absent Hotkey uses the default while an empty string disables it.
 pub(crate) fn stated_hotkey(value: Option<String>) -> Option<String> {
     value.map(|value| value.trim().to_owned())
 }
 
-/// A value somebody actually stated: trimmed, and `None` when there was nothing
-/// there but whitespace.
-///
-/// A key pasted out of a web page or read from a file arrives with a newline on
-/// it often enough that trimming is the kinder default.
+/// Keys pasted from web pages or read from files can carry a trailing newline.
 pub(crate) fn stated(value: Option<String>) -> Option<String> {
     let value = value?;
     let trimmed = value.trim();
@@ -853,11 +644,8 @@ pub(crate) fn stated(value: Option<String>) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
-/// Everywhere the key was looked for, so that the user is told where to put one
-/// rather than only that there isn't one.
 fn no_key(entry: &ProviderEntry, path: &Path, words: &Words) -> String {
-    // Sorted and deduplicated: a Provider that names its preset's own variable
-    // in `api_key_env` would otherwise be told about it twice.
+    // A Provider can name its preset's own variable in api_key_env.
     let variables: BTreeSet<&str> = entry
         .api_key_env
         .as_deref()
@@ -887,16 +675,13 @@ fn read_or_create(path: &Path, words: &Words) -> Result<String, ConfigError> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             create(path, words)?;
 
-            // Read back rather than returning the template: the file on disk is
-            // the source of truth, and it is the one the user will edit.
+            // Read the file the user will edit, including a file created by a concurrent caller.
             fs::read_to_string(path).map_err(|error| unreadable(path, &error, words))
         }
         read => read.map_err(|error| unreadable(path, &error, words)),
     }
 }
 
-/// Writes the template, owner-only, without touching a file that is already
-/// there.
 fn create(path: &Path, words: &Words) -> Result<(), ConfigError> {
     use std::io::Write;
 
@@ -906,8 +691,7 @@ fn create(path: &Path, words: &Words) -> Result<(), ConfigError> {
 
     let mut file = match files::options().create_new(true).write(true).open(path) {
         Ok(file) => file,
-        // Somebody else got there between the read and this line. Their file is
-        // as good as ours, and better than an error the user cannot act on.
+        // A concurrent caller may already have created a usable settings file.
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Ok(()),
         Err(error) => return Err(unreadable(path, &error, words)),
     };
@@ -916,9 +700,7 @@ fn create(path: &Path, words: &Words) -> Result<(), ConfigError> {
         .map_err(|error| unreadable(path, &error, words))
 }
 
-/// Replaces the settings file with `text`, owner-only, without ever leaving a
-/// half-written one behind — see [`crate::files::replace`], which `catalogue`
-/// writes an Action through in the same way.
+/// An atomic replacement keeps the previous settings usable if saving fails.
 pub(crate) fn write(path: &Path, text: &str, words: &Words) -> Result<(), ConfigError> {
     files::replace(path, text).map_err(|error| unwritable(path, &error, words))
 }
@@ -941,14 +723,7 @@ fn unwritable(path: &Path, error: &io::Error, words: &Words) -> ConfigError {
     ))
 }
 
-/// What a parse failure says, and where — but never the line it happened on.
-///
-/// `toml`'s own `Display` quotes the offending source line back, and in a file
-/// whose purpose is to hold a key, that line is the key. This message ends up
-/// in a window that also renders untrusted model output, and ADR-0002 asks for
-/// exactly one thing in exchange for keeping the key out of the keychain: "The
-/// key never enters the webview." So the reason and the line number cross, and
-/// the file's own text does not.
+/// TOML errors can quote the offending line, so pass only the reason and location to the webview.
 fn unparseable(path: &Path, text: &str, error: &toml::de::Error, words: &Words) -> ConfigError {
     let line = error
         .span()
@@ -974,16 +749,11 @@ fn unparseable(path: &Path, text: &str, error: &toml::de::Error, words: &Words) 
 
 #[cfg(test)]
 mod tests {
-    //! The temporary directory standing in for the config location, and a fake
-    //! environment beside it — the two substitutions the spec's *Testing
-    //! Decisions* names for this module.
 
     use tempfile::TempDir;
 
     use super::*;
 
-    /// A settings file holding `body` under the version line, and the config it
-    /// loads to.
     fn load_with(body: &str, env: &Environment) -> (TempDir, Result<Config, ConfigError>) {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(FILE_NAME), format!("version = 1\n\n{body}")).unwrap();
@@ -1002,13 +772,10 @@ mod tests {
         loaded.expect_err("the settings should not have loaded")
     }
 
-    /// What the first Provider resolved to, for the tests about where a key
-    /// comes from.
     fn key(body: &str, env: &Environment) -> Key {
         config(body, env).providers.remove(0).key
     }
 
-    /// The key the first Provider found, and nothing else.
     fn found(body: &str, env: &Environment) -> String {
         match key(body, env) {
             Key::Found { key, .. } => key,
@@ -1016,7 +783,6 @@ mod tests {
         }
     }
 
-    /// The sentence a Provider that wanted a key and found none carries.
     fn no_key_message(body: &str, env: &Environment) -> String {
         match key(body, env) {
             Key::Missing(message) => message,
@@ -1024,8 +790,7 @@ mod tests {
         }
     }
 
-    /// A [`Key`] as a failing assertion can name it. `Key` has no `Debug` of
-    /// its own on purpose, and a test is not a reason to give it one.
+    /// Keep the production Key type out of debug output even when assertions need a description.
     struct Named<'a>(&'a Key);
 
     impl std::fmt::Debug for Named<'_> {
@@ -1038,8 +803,7 @@ mod tests {
         }
     }
 
-    /// A Provider naming its own variable, carrying a preset, and holding a key
-    /// in the file — all three sources at once, so that a test can take one away.
+    /// Supply all three key sources so tests can isolate their precedence.
     const EVERY_SOURCE: &str = "\
 [[providers]]
 name = \"deepseek\"
@@ -1050,12 +814,10 @@ api_key_env = \"MY_OWN_KEY\"
 models = [{ id = \"deepseek-chat\" }]
 ";
 
-    /// The same Provider with `api_key_env` taken off it.
     fn without_its_own_variable() -> String {
         EVERY_SOURCE.replace("api_key_env = \"MY_OWN_KEY\"\n", "")
     }
 
-    /// And with the preset taken off as well.
     fn file_only() -> String {
         without_its_own_variable().replace("preset = \"deepseek\"\n", "")
     }
@@ -1136,7 +898,6 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_provider_with_no_key_says_which_provider_it_is() {
-        // Several Providers may be configured, and only one of them is broken.
         let missing = file_only().replace("api_key = \"from-the-file\"\n", "");
         let message = no_key_message(&missing, &Environment::default());
 
@@ -1170,7 +931,7 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_key_stated_for_a_service_with_none_is_still_used() {
-        // A local server put behind something that does want one.
+        // A keyless server may sit behind an authenticated proxy.
         let local = "[[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
                      api_key = \"from-the-file\"\nmodels = [{ id = \"a-model\" }]\n";
 
@@ -1189,11 +950,7 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_variable_named_for_a_keyless_service_is_still_a_key_that_must_be_found() {
-        // The dangerous case: naming api_key_env is the user saying this
-        // Provider is authenticated, and an application launched from the
-        // Finder never sees what a shell profile exported. Falling through to
-        // "this service needs no key" would send the request unauthenticated —
-        // and with base_url overridden, send it to a remote host.
+        // A missing shell variable must not turn off authentication for a Provider with an overridden base URL.
         let named = "[[providers]]\nname = \"local\"\npreset = \"lmstudio\"\n\
                      api_key_env = \"MY_LOCAL_KEY\"\nmodels = [{ id = \"a-model\" }]\n";
 
@@ -1215,9 +972,7 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn only_a_preset_can_say_a_service_has_no_key() {
-        // ADR-0006: a Provider written out by hand still wants one, so no typo
-        // in this file can quietly turn authentication off for a service that
-        // wanted it.
+        // A typo in a manually configured Provider must not disable authentication.
         let by_hand = "[[providers]]\nname = \"local\"\n\
                        base_url = \"http://localhost:1234/v1\"\nmodels = [{ id = \"a-model\" }]\n";
 
@@ -1287,6 +1042,24 @@ models = [{ id = \"deepseek-chat\" }]
     }
 
     #[test]
+    fn openrouter_reasoning_is_recognized_from_the_official_url_without_a_preset() {
+        for (url, expected) in [
+            ("https://openrouter.ai/api/v1", SkipReasoning::OpenRouter),
+            (" https://openrouter.ai/api/v1/ ", SkipReasoning::OpenRouter),
+            (
+                "https://openrouter.ai.example.org/api/v1",
+                SkipReasoning::Unmentioned,
+            ),
+            ("https://openrouter.ai/api/v2", SkipReasoning::Unmentioned),
+        ] {
+            let body = format!("[[providers]]\nname = \"custom\"\nbase_url = \"{url}\"\n");
+            let loaded = config(&body, &Environment::default());
+
+            assert_eq!(loaded.providers[0].skip_reasoning, expected, "{url}");
+        }
+    }
+
+    #[test]
     fn a_provider_with_no_address_at_all_is_reported() {
         let nowhere = "[[providers]]\nname = \"mine\"\napi_key = \"a-key\"\n";
         let ConfigError::Malformed(message) = error(nowhere, &Environment::default()) else {
@@ -1299,7 +1072,6 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_model_does_not_accept_images_unless_it_says_so() {
-        // The whole point of the flag: a name is not a capability.
         let named_like_one = EVERY_SOURCE.replace("deepseek-chat", "gpt-4o-vision-preview");
 
         assert!(!config(&named_like_one, &Environment::default()).providers[0].models[0].vision);
@@ -1329,7 +1101,6 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_model_whose_own_name_holds_a_slash_is_still_found() {
-        // Half of what an aggregating Provider offers is named this way.
         let routed = "[[providers]]\nname = \"openrouter\"\npreset = \"openrouter\"\n\
                       api_key = \"a-key\"\nmodels = [{ id = \"anthropic/claude-sonnet-4.5\" }]\n";
         let config = config(routed, &Environment::default());
@@ -1343,8 +1114,7 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_provider_whose_name_holds_a_slash_is_reported() {
-        // It would make some Model's name ambiguous, and the user would be told
-        // there is no such Model over a file that plainly holds it.
+        // A separator in a Provider name would make the Model reference ambiguous.
         let slashed = EVERY_SOURCE.replace("name = \"deepseek\"", "name = \"deep/seek\"");
 
         assert!(matches!(
@@ -1442,7 +1212,6 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn the_example_the_template_offers_is_one_that_would_load() {
-        // Uncommenting it is the whole of what a new user is asked to do.
         let config = config(EXAMPLE, &Environment::default());
 
         assert_eq!(
@@ -1453,8 +1222,6 @@ models = [{ id = \"deepseek-chat\" }]
             .model("openai/gpt-4o")
             .is_some_and(|(_, model)| model.vision));
 
-        // The local Provider the example offers is the one that asks for
-        // nothing: uncommenting it is the whole of what it takes.
         let (local, _) = config
             .model("local/qwen/qwen3-8b")
             .expect("the example should offer a local Model");
@@ -1464,17 +1231,13 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn every_preset_the_template_names_is_one_the_file_accepts_and_has_an_address_for() {
-        // The names are written out for the template, and read back by serde
-        // from the same word; a typo in either would be a preset the file names
-        // and rejects.
+        // Check that names advertised in the template are accepted by the settings parser.
         let written = template(&crate::i18n::english());
 
         for preset in Preset::ALL {
             let spec = preset.spec();
             assert!(written.contains(spec.name), "{written}");
 
-            // Stating nothing, so that a preset which names no variable is
-            // asked for no key and one that names a variable still is.
             let by_preset = format!(
                 "[[providers]]\nname = \"mine\"\npreset = \"{}\"\n",
                 spec.name
@@ -1533,9 +1296,7 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_broken_file_is_never_quoted_back() {
-        // The message reaches a window that also renders untrusted model
-        // output, and the line it would quote is the one the key is on:
-        // ADR-0002's "The key never enters the webview".
+        // A quoted source line could expose the key to the webview.
         let unquoted = file_only().replace("\"from-the-file\"", "from-the-file");
         let ConfigError::Malformed(message) = error(&unquoted, &Environment::default()) else {
             panic!("an unquoted value should be reported as malformed");
@@ -1547,8 +1308,7 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_misspelled_field_is_reported_rather_than_ignored() {
-        // Silently ignoring `api_kye` would leave the user staring at a file
-        // that plainly holds their key and a Demysto that cannot find it.
+        // A typo in api_key must be reported because it would leave the Provider without credentials.
         let misspelled = file_only().replace("api_key =", "api_kye =");
 
         assert!(matches!(
@@ -1559,8 +1319,7 @@ models = [{ id = \"deepseek-chat\" }]
 
     #[test]
     fn a_settings_file_that_states_a_palette_hotkey_still_loads() {
-        // The file denies unknown fields, so a Hotkey stated here is either a
-        // field this build declares or a file nobody can read.
+        // A Hotkey must be declared because the file schema rejects unknown fields.
         let stating = format!("palette_hotkey = \"F13\"\n{}", file_only());
 
         config(&stating, &Environment::default());
