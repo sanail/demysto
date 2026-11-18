@@ -209,7 +209,8 @@ fn asking(
     words: &Words,
 ) -> Result<reqwest::blocking::RequestBuilder, RunError> {
     let client = client(words)?;
-    let skip_openrouter_reasoning = provider.skip_reasoning == SkipReasoning::OpenRouter
+    let is_openrouter = provider.skip_reasoning == SkipReasoning::OpenRouter;
+    let skip_openrouter_reasoning = is_openrouter
         && openrouter_reasoning_is_optional(client, provider, model, timeout).unwrap_or(false);
 
     let request = authenticated(
@@ -218,6 +219,14 @@ fn asking(
             .timeout(timeout),
         provider.api_key.as_deref(),
     );
+
+    let request = if is_openrouter {
+        request
+            .header("HTTP-Referer", "https://github.com/sanail/demysto")
+            .header("X-OpenRouter-Title", "Demysto")
+    } else {
+        request
+    };
 
     Ok(request.json(&Request {
         model,
@@ -766,6 +775,8 @@ mod tests {
             }
             let completion = server
                 .mock("POST", "/v1/chat/completions")
+                .match_header("http-referer", "https://github.com/sanail/demysto")
+                .match_header("x-openrouter-title", "Demysto")
                 .match_body(Matcher::Json(body))
                 .with_body(concat!(
                     "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n",
